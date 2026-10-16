@@ -587,6 +587,7 @@ func storeWasmPolicy(
 /// Fixed context offsets of the block fields a policy can read.
 let wasmPolicyContextHeightOffset = 11
 let wasmPolicyContextTimestampOffset = 19
+let wasmPolicyContextParentTimestampOffset = 27
 
 /// A transaction policy accepting iff the big-endian 64-bit context field at
 /// `offset` is at least `minimum` (signed compare).

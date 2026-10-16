@@ -71,7 +71,7 @@ public extension ChainLevel {
                 return result(.unavailable, tipCID: tip.cid)
             }
             // Policies see the block that would carry this transaction next: the
-            // one above the tip, stamped no earlier than now.
+            // one above the tip (its parent), stamped no earlier than now.
             let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
             guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
             let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
@@ -83,6 +83,7 @@ public extension ChainLevel {
                     chainPath: context.path,
                     height: snapshot.tipHeight + 1,
                     timestamp: nextTimestamp,
+                    parentTimestamp: snapshot.timestamp,
                     fetcher: fetcher
                   ) else {
                 return result(.invalid, tipCID: tip.cid)

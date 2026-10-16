@@ -753,14 +753,17 @@ The policy context byte layout is:
 | Scope | `uint8`; `0` = transaction, `1` = action |
 | Block height | `uint64`, big-endian (byte offset 11); compare unsigned |
 | Block timestamp | `int64` milliseconds, big-endian two's complement (byte offset 19) |
+| Parent timestamp | `int64` milliseconds, big-endian two's complement (byte offset 27); `0` for genesis |
 | Chain spec | `uint32` byte length, then DAG-CBOR `ChainSpec` bytes |
 | Chain path | `uint32` item count, then each path component as `uint32` byte length + UTF-8 bytes |
 | Transaction | `uint8` presence tag; if `1`, `uint32` byte length + DAG-CBOR `TransactionBody` bytes |
 | Action | `uint8` presence tag; if `1`, `uint32` byte length + DAG-CBOR `Action` bytes |
 | Action index | `uint8` presence tag; if `1`, `uint64` index, big-endian |
 
-The context encoding version is `2`. Height and timestamp are those of the
-block that carries the transaction. The timestamp is chosen by the miner:
+The context encoding version is `3`. Height and timestamp are those of the
+block that carries the transaction; the parent timestamp is its parent's, which
+the block's timestamp always exceeds, so a policy can tell the interval a
+transaction landed in. The timestamp is chosen by the miner:
 consensus requires only that it exceed the parent's (and nodes defer blocks
 from their own future), so a miner can place it anywhere between the parent's
 timestamp and the present. Rules that a miner must not be able to shift, such
@@ -769,7 +772,8 @@ as expiry, SHOULD key on height.
 A policy verdict therefore depends on the carrying block, not only on the
 transaction. Transaction preflight, which has no carrying block, evaluates
 policies against the block that would extend the current tip: height
-`tip + 1`, timestamp `max(tip.timestamp + 1, now)`. That verdict is advisory:
+`tip + 1`, timestamp `max(tip.timestamp + 1, now)`, parent timestamp
+`tip.timestamp`. That verdict is advisory:
 a block builder MUST re-evaluate policies at the exact height and timestamp of
 the block it assembles and omit transactions that fail, or it builds an invalid
 block. Preflight rejects a transaction that fails its policies (it is not held

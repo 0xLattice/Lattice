@@ -459,7 +459,7 @@ final class ChainPolicyBlockTests: XCTestCase {
         XCTAssertFalse(valid, "Block rejected by action-scoped chain policy should fail validation")
     }
 
-    func testPolicySeesValidatedBlockHeightAndTimestamp() async throws {
+    func testPolicySeesValidatedBlockHeightTimestampAndParentTimestamp() async throws {
         let base = now() - 20_000
         let blockTimestamp = base + 1000
         // (offset, minimum, expected validity of a height-1 block at blockTimestamp)
@@ -468,6 +468,8 @@ final class ChainPolicyBlockTests: XCTestCase {
             (wasmPolicyContextHeightOffset, 2, false),
             (wasmPolicyContextTimestampOffset, blockTimestamp, true),
             (wasmPolicyContextTimestampOffset, blockTimestamp + 1, false),
+            (wasmPolicyContextParentTimestampOffset, base, true),
+            (wasmPolicyContextParentTimestampOffset, base + 1, false),
         ]
         for (offset, minimum, expected) in cases {
             let fetcher = f()
