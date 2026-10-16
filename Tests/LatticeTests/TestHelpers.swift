@@ -587,7 +587,8 @@ func storeWasmPolicy(
 /// Fixed context offsets of the block fields a policy can read.
 let wasmPolicyContextHeightOffset = 11
 let wasmPolicyContextTimestampOffset = 19
-let wasmPolicyContextParentTimestampOffset = 27
+/// Negative: from the end. The parent timestamp is the context's last 8 bytes.
+let wasmPolicyContextParentTimestampOffset = -8
 
 /// A transaction policy accepting iff the big-endian 64-bit context field at
 /// `offset` is at least `minimum` (signed compare).
@@ -607,9 +608,9 @@ func storeWasmPolicy(
           local.get $v
           i64.const 8
           i64.shl
-          local.get $ptr
-          i32.const \(offset)
-          i32.add
+          \(offset >= 0
+              ? "local.get $ptr i32.const \(offset) i32.add"
+              : "local.get $ptr local.get $len i32.add i32.const \(-offset) i32.sub")
           local.get $i
           i32.add
           i64.load8_u

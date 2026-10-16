@@ -6,7 +6,7 @@ import WasmParser
 import LatticePrimitives
 
 public struct WasmPolicyContext: Codable, Sendable {
-    public static let canonicalEncodingVersion: UInt16 = 3
+    public static let canonicalEncodingVersion: UInt16 = 2
 
     public let abiVersion: UInt16
     public let scope: WasmPolicyRef.Scope
@@ -16,7 +16,8 @@ public struct WasmPolicyContext: Codable, Sendable {
     /// exceed the parent's, so prefer `height` for rules a miner must not skew.
     public let timestamp: Int64
     /// Timestamp (ms) of that block's parent; 0 for genesis, which has none.
-    /// The block's own timestamp always exceeds it.
+    /// A non-genesis block's own timestamp always exceeds it. Encoded last, so
+    /// a policy written before it existed reads the same bytes as before.
     public let parentTimestamp: Int64
     public let chainSpec: ChainSpec
     public let chainPath: [String]
@@ -80,7 +81,6 @@ private struct WasmPolicyContextCanonicalEncoder {
         appendUInt8(context.scope.canonicalTag)
         appendUInt64(context.height)
         appendUInt64(UInt64(bitPattern: context.timestamp))
-        appendUInt64(UInt64(bitPattern: context.parentTimestamp))
         try appendNode(context.chainSpec)
         try appendStringArray(context.chainPath)
         try appendOptionalNode(context.transaction)
@@ -92,6 +92,7 @@ private struct WasmPolicyContextCanonicalEncoder {
         } else {
             appendUInt8(0)
         }
+        appendUInt64(UInt64(bitPattern: context.parentTimestamp))
     }
 
     private mutating func appendOptionalNode<T: Node>(_ node: T?) throws {
