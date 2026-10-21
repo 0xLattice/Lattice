@@ -390,6 +390,38 @@ final class StateDiffTests: XCTestCase {
         XCTAssertNotEqual(afterInsert.rawCID, afterDelete.rawCID)
     }
 
+    // MARK: - GeneralState actions on a key and a key it prefixes
+
+    /// One transaction may update or delete key K and insert a key extending
+    /// K. cashew 5.0.0 refused this (the proof on K leaked into K's children).
+    func testGeneralStateActionOnKeyAndKeyItPrefixes() async throws {
+        let fetcher = makeFetcher()
+        let empty = try! GeneralStateHeader(node: GeneralState())
+        try await empty.storeRecursively(storer: fetcher)
+        let (base, _) = try await empty.proveAndUpdateState(
+            allActions: [
+                Action(key: "profile/al", oldValue: nil, newValue: "v"),
+                Action(key: "profile/al/d", oldValue: nil, newValue: "d"),
+            ],
+            fetcher: fetcher
+        )
+        try await base.storeRecursively(storer: fetcher)
+
+        for keyAction in [
+            Action(key: "profile/al", oldValue: "v", newValue: "w"),
+            Action(key: "profile/al", oldValue: "v", newValue: "v"),
+            Action(key: "profile/al", oldValue: "v", newValue: nil),
+        ] {
+            let (after, _) = try await base.proveAndUpdateState(
+                allActions: [keyAction, Action(key: "profile/al/c", oldValue: nil, newValue: "x")],
+                fetcher: fetcher
+            )
+            XCTAssertEqual(try after.node?.get(key: "profile/al"), keyAction.newValue)
+            XCTAssertEqual(try after.node?.get(key: "profile/al/c"), "x")
+            XCTAssertEqual(try after.node?.get(key: "profile/al/d"), "d")
+        }
+    }
+
     // MARK: - DepositState two-phase diff
 
     func testDepositWithdrawalDiff() async throws {
