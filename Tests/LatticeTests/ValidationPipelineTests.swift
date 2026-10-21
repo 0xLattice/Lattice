@@ -299,6 +299,25 @@ final class SignatureVerificationTests: XCTestCase {
         XCTAssertTrue(tx.signaturesAreValid(), "Signature itself is valid")
         XCTAssertFalse(tx.signaturesMatchSigners(), "But signer doesn't match")
     }
+
+    func testTransactionDuplicateSignerRejected() async {
+        let keyPair = CryptoUtils.generateKeyPair()
+        let signer = try! HeaderImpl<PublicKey>(node: PublicKey(key: keyPair.publicKey)).rawCID
+
+        let body = TransactionBody(
+            accountActions: [],
+            actions: [],
+            depositActions: [],
+            receiptActions: [],
+            withdrawalActions: [],
+            signers: [signer, signer],
+            nonce: 1,
+            chainPath: ["Nexus"]
+        )
+        let tx = signedTransaction(body: body, privateKeyHex: keyPair.privateKey, publicKeyHex: keyPair.publicKey)
+        XCTAssertTrue(tx.signaturesAreValid(), "Signature itself is valid")
+        XCTAssertFalse(tx.signaturesMatchSigners(), "But a signer listed twice costs one signature, not two")
+    }
 }
 
 // MARK: - Transaction Nonce Scoping Tests

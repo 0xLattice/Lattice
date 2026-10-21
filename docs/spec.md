@@ -314,7 +314,7 @@ is admitted from its header — weighed and excluded, a proof-of-work failure,
 dropped, or held — is section 9.9's header admission.
 7. All transactions pass `validateTransactionForNexus()`:
    - Signatures are valid over the `lattice-tx-v1` envelope
-   - Signers match signature public keys
+   - Signers, each listed once, match signature public keys
    - Account debits authorized by signers
    - Receipt action withdrawers are signers
    - No deposit or withdrawal actions are present; a root chain has no parent
@@ -680,7 +680,8 @@ For each `(publicKeyHex, signatureHex)` in an ordinary transaction's
 `tx.signatures`, one accepted Ed25519 verification MUST succeed. At least one
 signature is required. The set of addresses derived from the signing public
 keys MUST equal the set in `tx.body.signers`; extra and missing signers are both
-invalid. Genesis transaction signature fields are non-authoritative as described
+invalid. `tx.body.signers` MUST list each signer once, so every entry costs a
+signature. Genesis transaction signature fields are non-authoritative as described
 in section 5.1.
 
 ### 7.2 Authorization

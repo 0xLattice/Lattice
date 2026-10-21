@@ -24,9 +24,10 @@ extension Transaction {
         return true
     }
 
-    /// THE consensus signer-coverage rule: the set of signing keys (by derived
-    /// address) must equal the body's declared `signers` exactly. Consumed by
-    /// block validation and by node-side admission — one definition so the two
+    /// THE consensus signer-coverage rule: the body declares each signer once,
+    /// and the set of signing keys (by derived address) equals those signers
+    /// exactly, so every listed signer costs a signature. Consumed by block
+    /// validation and by node-side admission — one definition so the two
     /// cannot drift. Requires a resolved body.
     public func signaturesMatchSigners() -> Bool {
         guard let bodyNode = body.node else { return false }
@@ -39,7 +40,7 @@ extension Transaction {
             CryptoUtils.createAddress(from: $0)
         })
         let signerSet = Set(bodyNode.signers)
-        return signatureHashes == signerSet
+        return signerSet.count == bodyNode.signers.count && signatureHashes == signerSet
     }
 
     private func validateSignaturesAndResolve(
