@@ -390,6 +390,69 @@ final class StateDiffTests: XCTestCase {
         XCTAssertNotEqual(afterInsert.rawCID, afterDelete.rawCID)
     }
 
+    // MARK: - GeneralState actions on a key and a key it prefixes
+
+    /// One transaction may update or delete key K and insert a key extending
+    /// K. cashew 5.0.0 refused this (the proof on K leaked into K's children).
+    func testGeneralStateActionOnKeyAndKeyItPrefixes() async throws {
+        let fetcher = makeFetcher()
+        let empty = try! GeneralStateHeader(node: GeneralState())
+        try await empty.storeRecursively(storer: fetcher)
+        let (base, _) = try await empty.proveAndUpdateState(
+            allActions: [
+                Action(key: "profile/al", oldValue: nil, newValue: "v"),
+                Action(key: "profile/al/d", oldValue: nil, newValue: "d"),
+            ],
+            fetcher: fetcher
+        )
+        try await base.storeRecursively(storer: fetcher)
+
+        for keyAction in [
+            Action(key: "profile/al", oldValue: "v", newValue: "w"),
+            Action(key: "profile/al", oldValue: "v", newValue: "v"),
+            Action(key: "profile/al", oldValue: "v", newValue: nil),
+        ] {
+            let (after, _) = try await base.proveAndUpdateState(
+                allActions: [keyAction, Action(key: "profile/al/c", oldValue: nil, newValue: "x")],
+                fetcher: fetcher
+            )
+            XCTAssertEqual(try after.node?.get(key: "profile/al"), keyAction.newValue)
+            XCTAssertEqual(try after.node?.get(key: "profile/al/c"), "x")
+            XCTAssertEqual(try after.node?.get(key: "profile/al/d"), "d")
+        }
+    }
+
+    // MARK: - Account created at a value-less branch point
+
+    /// "ab" is a branch point with no value over accounts "ab1" and "ab2".
+    /// Crediting a new account "ab" in the same block as a debit of "ab1"
+    /// must still apply the debit. cashew 5.0.0 dropped every write beneath
+    /// an insert, so the debit vanished and coins were created.
+    func testAccountCreatedAtBranchPointKeepsDebitsBeneathIt() async throws {
+        let fetcher = makeFetcher()
+        let empty = try! AccountStateHeader(node: AccountState())
+        try await empty.storeRecursively(storer: fetcher)
+        let (funded, _) = try await empty.proveAndUpdateState(
+            allAccountActions: [
+                AccountAction(owner: "ab1", delta: 100),
+                AccountAction(owner: "ab2", delta: 50),
+            ],
+            fetcher: fetcher
+        )
+        try await funded.storeRecursively(storer: fetcher)
+
+        let (after, _) = try await funded.proveAndUpdateState(
+            allAccountActions: [
+                AccountAction(owner: "ab1", delta: -60),
+                AccountAction(owner: "ab", delta: 1),
+                AccountAction(owner: "zz", delta: 59),
+            ],
+            fetcher: fetcher
+        )
+        let balances = try ["ab", "ab1", "ab2", "zz"].map { try after.node?.get(key: $0) }
+        XCTAssertEqual(balances, [1, 40, 50, 59])
+    }
+
     // MARK: - DepositState two-phase diff
 
     func testDepositWithdrawalDiff() async throws {
