@@ -54,17 +54,25 @@ independently accepted and connected.
 
 ## Parent-State Continuity
 
-For a non-genesis candidate `C` with same-chain predecessor `P`, define:
+For every candidate `C`, genesis included, define:
 
 ```text
-old = P.parentState
+old = emptyHeader     (the parent chain's genesis pre-state)
 new = C.parentState
 ```
 
-Continuity holds when `old == new`, or when the immediate parent's connected
-accepted graph contains a transitive state path from `old` to `new`. Direct
-adjacency is not required. A noncanonical parent branch may prove the fact;
-backward, sideways, unrelated, and disconnected movement cannot.
+Continuity holds when `new == old` (a non-genesis block that commits no parent
+state), or when the immediate parent's executed set contains a transitive state
+path from `old` to `new`, i.e. the parent executed `new` on some branch. Each
+block proves its own anchor; nothing is inherited from the predecessor's
+`parentState`, because a weighed predecessor proved nothing (spec §5.3 step 6).
+A noncanonical parent branch may prove the fact; an unexecuted or disconnected
+one cannot.
+
+So consecutive child blocks may anchor backward or sideways between parent
+branches. For receipts this means a withdrawal can settle against a receipt that
+exists only on a stale parent branch, and child fork choice keeps it. Consensus
+does not close that; see spec §8.1, "Receipt canonicity".
 
 This reachability fact is distinct from the directory proof. The configured
 immediate parent authenticates the exact parent path and state pair, but it

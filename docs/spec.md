@@ -388,10 +388,13 @@ this order:
    these checks, so a weighed predecessor proved nothing, and a successor
    matching its unchecked claim would be imported with no evidence at all.
    A consequence of anchoring each block independently is that `parentState`
-   is no longer required to advance monotonically across a chain. That is
-   deliberate: `parentState` is read only to prove a receipt (§8.1 Phase 3),
-   so regressing it can only SHRINK the set of provable receipts, and the
-   matching deposit is spent from the child's own `prevState`.
+   is no longer required to advance monotonically across a chain, nor to
+   stay on one parent branch: consecutive blocks may anchor backward or
+   sideways, onto any branch the parent executed. `parentState` is read only
+   to prove a receipt (§8.1 Phase 3), and the matching deposit is spent from
+   the child's own `prevState`, so no receipt settles twice. But a sideways
+   anchor can prove a receipt that exists only on a non-canonical parent
+   branch (§8.1, "Receipt canonicity").
 7. Apply the ordinary genesis or non-genesis transition rules to `B`, including
    withdrawal proofs against `B.parentState`.
 
@@ -829,6 +832,20 @@ The stored `amountDeposited` MUST exactly match `amountWithdrawn`.
 A parent receipt without a matching child deposit cannot authorize child value,
 because withdrawal requires both proofs. It is not cost-free: the signed parent
 payment and receipt-state insertion still execute.
+
+**Receipt canonicity.** Consensus binds a withdrawal to a parent state the
+parent executed, on any branch (§5.3 step 6), never to the parent's canonical
+chain, and child fork choice does not read parent canonicity (§9). A receipt
+that exists only on a stale parent branch therefore settles a withdrawal, and
+the child chain keeps it while the canonical parent never paid the demander.
+Producing such a receipt costs one valid parent block that loses: far less
+than reorganizing the parent, and independent of the honest hashrate
+majority. The demander bears the loss, since the deposit is escrowed before
+the receipt and consensus releases it at any depth. Consensus leaves the
+defense to miner policy (declining to extend a withdrawal whose `parentState`
+is off the miner's parent chain) and to the demander, who can wait for the
+withdrawal to be confirmed under that policy, or deposit only once the receipt
+is confirmed on the canonical parent.
 
 ### 8.2 Balance Conservation with Cross-Chain Transfers
 
