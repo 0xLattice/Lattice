@@ -38,7 +38,9 @@ public extension GeneralStateHeader {
                     guard let actual: String = try? dictNode.get(key: action.key) else {
                         throw StateErrors.conflictingActions
                     }
-                    guard actual == action.oldValue else {
+                    // Bytes, not String ==: canonical equivalence depends on
+                    // the runtime's Unicode tables, which differ across nodes.
+                    guard actual.utf8.elementsEqual(action.oldValue!.utf8) else {
                         throw StateErrors.conflictingActions
                     }
                 }

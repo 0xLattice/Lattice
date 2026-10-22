@@ -422,6 +422,36 @@ final class StateDiffTests: XCTestCase {
         }
     }
 
+    // MARK: - GeneralState oldValue is compared byte for byte
+
+    /// Swift's String == treats canonically equivalent spellings as equal,
+    /// using the runtime's Unicode tables, which differ across OS and
+    /// toolchain versions. A declared oldValue must equal the stored bytes.
+    func testGeneralStateOldValueMustMatchStoredBytes() async throws {
+        let fetcher = makeFetcher()
+        let empty = try! GeneralStateHeader(node: GeneralState())
+        try await empty.storeRecursively(storer: fetcher)
+        let (base, _) = try await empty.proveAndUpdateState(
+            allActions: [Action(key: "k", oldValue: nil, newValue: "\u{E9}")],
+            fetcher: fetcher
+        )
+        try await base.storeRecursively(storer: fetcher)
+
+        do {
+            _ = try await base.proveAndUpdateState(
+                allActions: [Action(key: "k", oldValue: "e\u{301}", newValue: "x")],
+                fetcher: fetcher
+            )
+            XCTFail("an equivalent but byte-different oldValue must be refused")
+        } catch StateErrors.conflictingActions {}
+
+        let (after, _) = try await base.proveAndUpdateState(
+            allActions: [Action(key: "k", oldValue: "\u{E9}", newValue: "x")],
+            fetcher: fetcher
+        )
+        XCTAssertEqual(try after.node?.get(key: "k"), "x")
+    }
+
     // MARK: - Account created at a value-less branch point
 
     /// "ab" is a branch point with no value over accounts "ab1" and "ab2".
