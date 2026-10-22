@@ -1050,16 +1050,7 @@ final class LongChainEconomicTests: XCTestCase {
 final class StateGrowthAttackTests: XCTestCase {
 
     func testStateDeltaExceedingLimitRejected() async throws {
-        let fetcher = f()
         let base = now() - 10_000
-        // Tiny state growth limit
-        let tinySpec = ChainSpec.test(maxStateGrowth: 10)
-
-        let genesis = try await buildAndStoreGenesis(
-            spec: tinySpec, timestamp: base, target: UInt256(1000), fetcher: fetcher
-        )
-
-        // Use a KV action with a large key that exceeds the 10-byte state growth limit
         let kp = CryptoUtils.generateKeyPair()
         let kpAddr = id(kp.publicKey)
         let body = TransactionBody(
@@ -1069,25 +1060,42 @@ final class StateGrowthAttackTests: XCTestCase {
             signers: [kpAddr], nonce: 0,
             chainPath: ["Nexus"]
         )
+        // The block grows the action's bytes plus the signer's new nonce entry.
+        let actionDelta = try body.getStateDelta()
+        let nonceEntry = AccountStateHeader.nonceTrackingKey(kpAddr).utf8.count + 8
+        let exactGrowth = actionDelta + nonceEntry
+
+        func validates(maxStateGrowth: Int) async throws -> Bool {
+            let fetcher = f()
+            let spec = ChainSpec.test(maxStateGrowth: maxStateGrowth)
+            let genesis = try await buildAndStoreGenesis(
+                spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
+            )
+            let block = try await buildAndStoreBlock(
+                previous: genesis, transactions: [tx(body, kp)],
+                timestamp: base + 1000, target: UInt256(1000), nonce: 1,
+                allowStateGrowthViolation: true, fetcher: fetcher
+            )
+            XCTAssertTrue(try block.validateStateGrowthFloor(spec: spec, transactionBodies: [body]),
+                          "the floor (action delta \(actionDelta)) passes; only the exact check decides")
+            return try await block.validateNexus(fetcher: fetcher).0
+        }
+        let overByOne = try await validates(maxStateGrowth: exactGrowth - 1)
+        XCTAssertFalse(overByOne, "the action's bytes count on top of the nonce entry")
+        let exactFit = try await validates(maxStateGrowth: exactGrowth)
+        XCTAssertTrue(exactFit, "control: the same block fits a limit one byte larger")
+
+        let tinySpec = ChainSpec.test(maxStateGrowth: exactGrowth - 1)
+        let fetcher = f()
+        let genesis = try await buildAndStoreGenesis(
+            spec: tinySpec, timestamp: base, target: UInt256(1000), fetcher: fetcher
+        )
         await assertThrows(StateErrors.stateGrowthExceeded, "the builder refuses what validation would") {
             try await buildAndStoreBlock(
                 previous: genesis, transactions: [tx(body, kp)],
                 timestamp: base + 1000, target: UInt256(1000), nonce: 1, fetcher: fetcher
             )
         }
-        let block = try await buildAndStoreBlock(
-            previous: genesis, transactions: [tx(body, kp)],
-            timestamp: base + 1000, target: UInt256(1000), nonce: 1,
-            allowStateGrowthViolation: true, fetcher: fetcher
-        )
-
-        let valid = try await block.validateNexus(fetcher: fetcher).0
-        XCTAssertFalse(valid, "State delta should exceed tiny 10-byte limit")
-        XCTAssertFalse(try block.validateStateDeltaSize(spec: tinySpec, transactionBodies: [body], accountGrowth: 0))
-        XCTAssertTrue(
-            try block.validateStateDeltaSize(spec: ChainSpec.test(), transactionBodies: [body], accountGrowth: 0),
-            "control: the same delta fits the default limit"
-        )
     }
 }
 

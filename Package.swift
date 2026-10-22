@@ -27,15 +27,17 @@ let package = Package(
             targets: ["LatticeSim"]),
     ],
     dependencies: [
-        // Exact: SHA-256 and signature verification decide validity.
+        // Exact: SHA-256, signature verification, and key-to-address encoding
+        // decide validity.
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1"),
-        .package(url: "https://github.com/adalinxx/Multikey.git", from: "1.0.0"),
+        .package(url: "https://github.com/adalinxx/Multikey.git", exact: "1.0.0"),
         .package(url: "https://github.com/adalinxx/cashew.git", exact: "5.0.2"),
         // Exact: UInt256's hex encoding is in the proof-of-work preimage, and
-        // swift-cid fixes the CID bytes that identity and tie-breaks compare.
+        // swift-cid and swift-multicodec fix the CID bytes that identity and
+        // tie-breaks compare.
         .package(url: "https://github.com/adalinxx/UInt256.git", exact: "1.1.0"),
         .package(url: "https://github.com/swift-libp2p/swift-cid.git", exact: "0.2.1"),
-        .package(url: "https://github.com/swift-libp2p/swift-multicodec.git", .upToNextMinor(from: "0.2.1")),
+        .package(url: "https://github.com/swift-libp2p/swift-multicodec.git", exact: "0.2.1"),
         .package(url: "https://github.com/JohnSundell/CollectionConcurrencyKit.git", from: "0.2.0"),
         // Exact: the policy engine decides verdicts, so an engine change is a consensus change.
         .package(url: "https://github.com/swiftwasm/WasmKit.git", exact: "0.2.2"),

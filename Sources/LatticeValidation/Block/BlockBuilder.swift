@@ -236,17 +236,19 @@ public struct BlockBuilder {
         }
 
         let blockTarget = target ?? previous.nextTarget
-        func resolveSpec() async throws -> ChainSpec {
-            if let node = previous.spec.node { return node }
-            let resolved = try await previous.spec.resolve(fetcher: fetcher)
-            guard let node = resolved.node else { throw BlockBuilderError.missingSpec }
-            return node
+        let specNode: ChainSpec
+        if let node = previous.spec.node {
+            specNode = node
+        } else {
+            guard let node = try await previous.spec.resolve(fetcher: fetcher).node else {
+                throw BlockBuilderError.missingSpec
+            }
+            specNode = node
         }
         let blockNextTarget: UInt256
         if let nextTarget {
             blockNextTarget = nextTarget
         } else {
-            let specNode = try await resolveSpec()
             // The schedule is measured from the height-1 ancestor. Building
             // block 1 itself, that ancestor is this block: its own target
             // becomes the anchor and the schedule starts here.
@@ -282,7 +284,7 @@ public struct BlockBuilder {
         // a recipient is credited exactly the reward plus fees (nil burns it).
         let coinbase: AccountAction?
         switch Block.coinbaseCredit(
-            spec: try await resolveSpec(),
+            spec: specNode,
             height: height,
             recipient: rewardRecipient,
             accountActions: transactionBodies.flatMap(\.accountActions),
@@ -296,7 +298,7 @@ public struct BlockBuilder {
             prevState: prevState,
             transactionBodies: transactionBodies,
             coinbase: coinbase,
-            maxStateGrowth: try await resolveSpec().maxStateGrowth,
+            maxStateGrowth: specNode.maxStateGrowth,
             fetcher: fetcher
         )
 

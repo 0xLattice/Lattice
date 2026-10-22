@@ -75,7 +75,10 @@ public extension ChainLevel {
             let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
             guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
             let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
+            // Only the floor is a permanent verdict: whether credits create
+            // accounts depends on the state the transaction lands on.
             guard spec.isValid,
+                  try TransactionBody.stateGrowthFloor(of: [body]).map({ $0 <= spec.maxStateGrowth }) ?? false,
                   try await TransactionBody.batchVerifyPolicies(
                     bodies: [body],
                     spec: spec,
@@ -123,7 +126,7 @@ public extension ChainLevel {
                 }
             }
 
-            let (_, _, accountGrowth) = try await state.proveAndUpdateStateMeasuringGrowth(
+            _ = try await state.proveAndUpdateState(
                 allAccountActions: body.accountActions,
                 allActions: body.actions,
                 allDepositActions: body.depositActions,
@@ -132,10 +135,6 @@ public extension ChainLevel {
                 transactionBodies: [body],
                 fetcher: fetcher
             )
-            guard let growth = try TransactionBody.stateGrowth(of: [body], accountGrowth: accountGrowth),
-                  growth <= spec.maxStateGrowth else {
-                return result(.invalid, tipCID: tip.cid)
-            }
             return result(.ready, tipCID: tip.cid)
         } catch {
             return result(

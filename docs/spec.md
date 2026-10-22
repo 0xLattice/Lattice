@@ -666,7 +666,17 @@ block. Every entry's value counts as 8 bytes (a uint64):
 
 A block's state growth is the sum of its transactions' action deltas plus its
 account-entry deltas, and must not exceed `spec.maxStateGrowth`. It is checked
-after the transition, because account-entry deltas need it.
+after the transition, because account-entry deltas need it. A node may reject
+earlier on a floor known before the transition: the action deltas less
+`len(owner) + 8` for every owner whose balance nets to a debit, the most
+account removals could free. A floor over the limit is over it from any
+starting state.
+
+A chain's `maxStateGrowth` must leave room for these entries. A signer's first
+transaction creates its nonce entry, and a credit to a new address creates a
+balance entry: for a canonical address each is on the order of 70 bytes. A
+limit below a few hundred bytes is valid but admits few or no new accounts per
+block.
 
 ## 7. Transaction Validation
 

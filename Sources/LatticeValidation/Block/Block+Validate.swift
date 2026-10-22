@@ -149,6 +149,7 @@ public extension Block {
         }
         if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: chainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
+        if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
             return (false, .empty, nil)
         }
@@ -423,6 +424,7 @@ public extension Block {
         // spec; nil chainPath ⇒ root.
         if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: expectedChainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
+        if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
             return (false, .empty, nil)
         }
@@ -652,6 +654,14 @@ public extension Block {
         if parent.timestamp >= timestamp { return false }
         if !validationContext.permits(timestamp: timestamp) { return false }
         return true
+    }
+
+    /// The early, transition-free reject: a block whose growth floor is over
+    /// the limit is over it whatever balances it starts from. The exact check
+    /// is `validateStateDeltaSize`, after the transition.
+    func validateStateGrowthFloor(spec: ChainSpec, transactionBodies: [TransactionBody]) throws -> Bool {
+        try TransactionBody.stateGrowthFloor(of: transactionBodies)
+            .map { $0 <= spec.maxStateGrowth } ?? false
     }
 
     func validateStateDeltaSize(spec: ChainSpec, transactionBodies: [TransactionBody], accountGrowth: Int) throws -> Bool {

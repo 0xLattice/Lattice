@@ -101,6 +101,21 @@ final class AccountNonceAndGrowthTests: XCTestCase {
         XCTAssertEqual(changed, 0)
     }
 
+    func testGrowthFloorCreditsOnlyNetDebitedOwners() throws {
+        let write = Action(key: "k", oldValue: nil, newValue: "v")  // +2
+        func floor(_ accountActions: [AccountAction]) throws -> Int? {
+            try TransactionBody.stateGrowthFloor(of: [TransactionBody(
+                accountActions: accountActions, actions: [write], depositActions: [], receiptActions: [],
+                withdrawalActions: [], signers: ["ab"], nonce: 0, chainPath: ["Nexus"]
+            )])
+        }
+        // "ab" might be emptied, freeing (2 + 8); a credit can free nothing.
+        XCTAssertEqual(try floor([AccountAction(owner: "ab", delta: -5), AccountAction(owner: "cdef", delta: 5)]), 2 - 10)
+        XCTAssertEqual(try floor([AccountAction(owner: "cdef", delta: 5)]), 2)
+        // A debit offset by a credit to the same owner nets to a credit.
+        XCTAssertEqual(try floor([AccountAction(owner: "ab", delta: -5), AccountAction(owner: "ab", delta: 7)]), 2)
+    }
+
     func testBlockCreatingAccountsPastTheLimitIsInvalid() async throws {
         let fetcher = StorableFetcher()
         let funder = CryptoUtils.generateKeyPair()
