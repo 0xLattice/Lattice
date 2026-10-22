@@ -463,7 +463,10 @@ final class BlockContentResolverTests: XCTestCase {
         XCTAssertEqual(ordinarySize, largeParentSize)
     }
 
-    func testBlockSizeClassifiesDeterministicLimitsAsInvalid() async throws {
+    /// A size error is a verdict only as the counter's own result. Thrown by a
+    /// fetcher it is a node-local condition: thrown on, and classified as no
+    /// verdict wherever it surfaces.
+    func testBlockSizeErrorThrownByAFetcherIsNotAVerdict() async throws {
         let fetcher = StorableFetcher()
         let block = try await buildAndStoreGenesis(
             spec: testSpec(directory: "Nexus"),
@@ -473,11 +476,23 @@ final class BlockContentResolverTests: XCTestCase {
         )
         let decoded = try XCTUnwrap(Block(data: XCTUnwrap(block.toData())))
 
-        let valid = try await decoded.validateBlockSize(
-            spec: sizeSpec(maxBlockSize: 16 * 1_024 * 1_024),
-            fetcher: ThrowingFetcher(error: BlockContentSizeError.overflow)
-        )
-        XCTAssertFalse(valid)
+        for thrown in [BlockContentSizeError.overflow, .exceedsLimit] {
+            do {
+                _ = try await decoded.validateBlockSize(
+                    spec: sizeSpec(maxBlockSize: 16 * 1_024 * 1_024),
+                    fetcher: ThrowingFetcher(error: thrown)
+                )
+                XCTFail("a fetcher's error must not complete the size check")
+            } catch {
+                XCTAssertEqual(error as? BlockContentSizeError, thrown)
+            }
+            XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(
+                ChainLevel.classifyValidationFailureForTesting(thrown)
+            ))
+            XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(
+                ChainLevel.classifyResolutionFailureForTesting(thrown)
+            ))
+        }
     }
 
     func testBlockSizePropagatesUnavailableContent() async throws {

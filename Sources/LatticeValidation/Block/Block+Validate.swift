@@ -130,11 +130,16 @@ public extension Block {
             if reportTemporalFailure { throw BlockValidationError.notYetValid }
             return (false, .empty, nil)
         }
-        guard let transactionBodies = try await resolveTransactionBodies(fetcher: fetcher, validator: { tx in
-            try await tx.validateTransactionForGenesis(fetcher: fetcher)
-        }) else { return (false, .empty, nil) }
+        // The spec comes before the transactions because it carries the limit
+        // they are fetched under: without it nothing bounds that fetch. So a
+        // genesis whose spec is unavailable gets no verdict even when its
+        // transactions would prove it invalid, and an invalid spec is a
+        // verdict whether or not the transactions can be had.
         guard let specNode = try await spec.resolve(fetcher: fetcher).node else { return (false, .empty, nil) }
         guard specNode.isValid else { return (false, .empty, nil) }
+        guard let transactionBodies = try await resolveTransactionBodies(fetcher: fetcher, maxBlockSize: specNode.maxBlockSize, validator: { tx in
+            try await tx.validateTransactionForGenesis(fetcher: fetcher)
+        }) else { return (false, .empty, nil) }
         guard chainPath.first == DEFAULT_ROOT_DIRECTORY else {
             return (false, .empty, nil)
         }
@@ -406,7 +411,7 @@ public extension Block {
             let validator: @Sendable (Transaction) async throws -> Bool = { tx in
                 try await tx.validateTransactionForNexus(fetcher: txResolveFetcher)
             }
-            return try await resolveTransactionBodies(fetcher: txResolveFetcher, validator: validator)
+            return try await resolveTransactionBodies(fetcher: txResolveFetcher, maxBlockSize: specNode.maxBlockSize, validator: validator)
         }()
 
         if !(try await validateTimestampAndNextTarget(
@@ -677,12 +682,12 @@ public extension Block {
         spec: ChainSpec,
         fetcher: any Fetcher
     ) async throws -> Bool {
-        do {
-            return try await logicalContentByteSize(fetcher: fetcher)
-                <= spec.maxBlockSize
-        } catch is BlockContentSizeError {
-            return false
+        // Only the counter's own result is a verdict: an error a fetcher
+        // throws, of whatever type, is thrown on and decides nothing.
+        if case .success = try await measureLogicalContent(fetcher: fetcher, limit: spec.maxBlockSize) {
+            return true
         }
+        return false
     }
 
     /// Deposits and withdrawals are cross-chain constructs: a deposit
@@ -711,8 +716,20 @@ public extension Block {
         return true
     }
 
-    func resolveTransactionBodies(fetcher: Fetcher, validator: @escaping @Sendable (Transaction) async throws -> Bool) async throws -> [TransactionBody]? {
-        guard let transactionsNode = try await transactions.resolveRecursive(fetcher: fetcher).node else { return nil }
+    /// The transactions are part of what `maxBlockSize` counts, so they are
+    /// fetched under it: once their CID-verified unique bytes exceed the limit
+    /// the block is invalid (nil) and nothing further is requested. The exact
+    /// rule, over the whole counted content, is `validateBlockSize`.
+    func resolveTransactionBodies(fetcher: Fetcher, maxBlockSize: Int = .max, validator: @escaping @Sendable (Transaction) async throws -> Bool) async throws -> [TransactionBody]? {
+        let counter = BlockContentByteCounter(limit: maxBlockSize)
+        let resolved: HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>
+        do {
+            resolved = try await transactions.resolveRecursive(fetcher: fetcher, cache: counter)
+        } catch {
+            if await counter.failure != nil { return nil }
+            throw error
+        }
+        guard let transactionsNode = resolved.node else { return nil }
         let txHeaders = try transactionsNode.allKeysAndValues().values
         if txHeaders.contains(where: { $0.node == nil }) { throw ValidationErrors.transactionNotResolved }
         let txs = txHeaders.map { $0.node! }

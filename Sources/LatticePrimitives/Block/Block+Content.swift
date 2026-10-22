@@ -4,25 +4,47 @@ import cashew
 public enum BlockContentSizeError: Error, Sendable, Equatable {
     case conflictingCID(String)
     case overflow
+    /// The unique content counted so far already exceeds the limit.
+    case exceedsLimit
 }
 
-actor BlockContentByteCounter: VolumeStorer {
+/// Sums the canonical bytes of each unique CID it is given and throws
+/// `exceedsLimit` once the sum passes `limit`. The sum only grows, so a limit
+/// passed on part of a block's content is passed on all of it.
+///
+/// `failure` is the counter's own result. Callers read the verdict from it,
+/// never from the type of a thrown error, which a fetcher could also throw.
+package actor BlockContentByteCounter: VolumeStorer, Storer {
+    private let limit: Int
     private var dataByCID: [String: Data] = [:]
     private var byteCount = 0
+    package private(set) var failure: BlockContentSizeError?
 
-    func store(volume: SerializedVolume) throws {
-        for (cid, data) in volume.entries {
+    package init(limit: Int = .max) {
+        self.limit = limit
+    }
+
+    package func store(volume: SerializedVolume) throws {
+        try store(entries: volume.entries)
+    }
+
+    package func store(entries: [String: Data]) throws {
+        if failure == nil { failure = add(entries) }
+        if let failure { throw failure }
+    }
+
+    private func add(_ entries: [String: Data]) -> BlockContentSizeError? {
+        for (cid, data) in entries {
             if let existing = dataByCID[cid] {
-                guard existing == data else {
-                    throw BlockContentSizeError.conflictingCID(cid)
-                }
+                guard existing == data else { return .conflictingCID(cid) }
                 continue
             }
             let next = byteCount.addingReportingOverflow(data.count)
-            guard !next.overflow else { throw BlockContentSizeError.overflow }
+            guard !next.overflow else { return .overflow }
             dataByCID[cid] = data
             byteCount = next.partialValue
         }
+        return byteCount <= limit ? nil : .exceedsLimit
     }
 
     func total() -> Int { byteCount }
@@ -102,21 +124,43 @@ public extension Block {
     /// index. CIDs shared across those boundaries are counted once. Independent
     /// spec, policy, state, parent-block, child-block, and evidence Volumes are
     /// deliberately excluded.
-    func logicalContentByteSize(fetcher: any Fetcher) async throws -> Int {
-        let resolved = try await VolumeImpl<Block>(node: self).resolve(
-            paths: [
-                [TRANSACTIONS_PROPERTY]: .recursive,
-                [CHILDREN_PROPERTY]: .targeted,
-            ],
-            fetcher: fetcher
-        )
-        guard let block = resolved.node else { throw DataErrors.nodeNotAvailable }
-        let counter = BlockContentByteCounter()
-        try await VolumeImpl<Block>(node: block).store(
-            paths: [[TRANSACTIONS_PROPERTY]: .recursive],
-            storer: counter
-        )
-        return await counter.total()
+    ///
+    /// Throws `BlockContentSizeError.exceedsLimit` when the size exceeds
+    /// `limit`, as soon as the content resolved so far proves it: everything
+    /// fetched here is CID-verified content this size counts, so its unique
+    /// bytes exceeding `limit` means the whole does, and nothing further is
+    /// requested.
+    func logicalContentByteSize(fetcher: any Fetcher, limit: Int = .max) async throws -> Int {
+        try await measureLogicalContent(fetcher: fetcher, limit: limit).get()
+    }
+
+    /// `logicalContentByteSize`, with the counter's own failure returned
+    /// rather than thrown: whatever this throws came from the fetcher or the
+    /// content and is not a size result.
+    package func measureLogicalContent(
+        fetcher: any Fetcher,
+        limit: Int
+    ) async throws -> Result<Int, BlockContentSizeError> {
+        let counter = BlockContentByteCounter(limit: limit)
+        do {
+            let resolved = try await VolumeImpl<Block>(node: self).resolve(
+                paths: [
+                    [TRANSACTIONS_PROPERTY]: .recursive,
+                    [CHILDREN_PROPERTY]: .targeted,
+                ],
+                fetcher: fetcher,
+                cache: counter
+            )
+            guard let block = resolved.node else { throw DataErrors.nodeNotAvailable }
+            try await VolumeImpl<Block>(node: block).store(
+                paths: [[TRANSACTIONS_PROPERTY]: .recursive],
+                storer: counter
+            )
+        } catch {
+            if let failure = await counter.failure { return .failure(failure) }
+            throw error
+        }
+        return .success(await counter.total())
     }
 }
 
@@ -155,10 +199,27 @@ public extension VolumeImpl where NodeType == Block {
     /// Store the complete block Volume and exactly the nested Volumes needed to
     /// validate it. Policy modules are independent Volumes; parent blocks and
     /// post-state remain independent roots with caller-owned retention policy.
+    ///
+    /// The transactions are fetched under the chain's own `maxBlockSize`: once
+    /// their verified unique bytes exceed it the block is invalid, so this
+    /// throws `BlockContentSizeError.exceedsLimit`, requests nothing further,
+    /// and stores nothing. That error is a reason to execute the block, not a
+    /// verdict on it: execution applies the rule itself.
     func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
-        let content = try await resolveBlockContent(fetcher: fetcher)
+        let header = try await resolve(paths: [[SPEC_PROPERTY]: .targeted], fetcher: fetcher)
+        guard let spec = header.node?.spec.node else { throw DataErrors.nodeNotAvailable }
+        let counter = BlockContentByteCounter(limit: spec.maxBlockSize)
+        let content: Self
+        do {
+            content = try await header.resolve(
+                paths: Block.contentResolutionPaths,
+                fetcher: fetcher,
+                cache: counter
+            )
+        } catch {
+            throw await counter.failure ?? error
+        }
         guard let block = content.node,
-              let spec = block.spec.node,
               let transactionNode = block.transactions.node else {
             throw DataErrors.nodeNotAvailable
         }

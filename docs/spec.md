@@ -130,6 +130,11 @@ transaction and child indexes and their reference CIDs) plus every referenced
 transaction Volume and transaction body. Each CID's canonical bytes count once.
 The contents of the chain spec, wasm modules, parent blocks, all state Volumes,
 child blocks, and import evidence are independent Volumes and do not count.
+The rule may be decided before the closure is complete: once the unique,
+CID-verified counted content resolved so far exceeds `maxBlockSize`, the block
+is invalid, and nothing further need be fetched. The sum only grows, so this is
+the verdict counting the whole closure gives; content that fails its CID, or
+that the block does not reference, is never counted.
 
 **No retarget clamp.** The absolute schedule of section 5.5 has no
 per-retarget step to clamp and no protocol default. The only arithmetic bound
