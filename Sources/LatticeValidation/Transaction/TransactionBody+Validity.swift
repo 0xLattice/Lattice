@@ -239,6 +239,16 @@ extension TransactionBody {
         return delta
     }
 
+    /// A block's state growth (spec §6.6): its transactions' action deltas
+    /// plus the account growth its transition measured; nil on overflow.
+    package static func stateGrowth(of bodies: [TransactionBody], accountGrowth: Int) throws -> Int? {
+        var growth = accountGrowth
+        for body in bodies {
+            guard addStateDelta(try body.getStateDelta(), to: &growth) else { return nil }
+        }
+        return growth
+    }
+
     public static func batchVerifyPolicies(
         bodies: [TransactionBody],
         spec: ChainSpec,

@@ -4,4 +4,5 @@ public enum StateErrors: Error {
     case balanceOverflow
     case stateDeltaOverflow
     case nonceGap
+    case stateGrowthExceeded
 }

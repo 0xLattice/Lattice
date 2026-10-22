@@ -79,10 +79,12 @@ final class TransactionPreflightTests: XCTestCase {
         return (ChainLevel(testChain: chain), chain, genesis)
     }
 
-    func testMultiSignerNonceClassificationUsesEverySignerFloor() async throws {
+    func testMultiSignerNonceClassificationUsesTheFirstSignerOnly() async throws {
         let fetcher = StorableFetcher()
         let alice = CryptoUtils.generateKeyPair()
         let bob = CryptoUtils.generateKeyPair()
+        // Genesis is signed by [alice, bob] at nonce 0: alice's next nonce is
+        // 1, and bob, a co-signer only, has never used a nonce.
         let (level, chain, genesis) = try await fundedLevel(
             fetcher: fetcher,
             alice: alice,
@@ -102,6 +104,13 @@ final class TransactionPreflightTests: XCTestCase {
         )
         XCTAssertEqual(future.disposition, .future)
 
+        // Bob first: his own floor (0) decides, whatever alice's is.
+        let bobFirst = await level.preflightTransaction(
+            transaction(signers: [bob, alice], nonce: 0),
+            fetcher: fetcher
+        )
+        XCTAssertEqual(bobFirst.disposition, .ready)
+
         let aliceAdvance = transaction(signers: [alice], nonce: 1)
         let block = try await buildAndStoreBlock(
             previous: genesis,
@@ -114,18 +123,24 @@ final class TransactionPreflightTests: XCTestCase {
         _ = await chain.submitTestBlock(blockHeader: blockHeader, block: block)
         await chain.markValidated(blockHash: blockHeader.rawCID)
 
-        let mixedStale = await level.preflightTransaction(
+        let stale = await level.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 1),
             fetcher: fetcher
         )
-        XCTAssertEqual(mixedStale.disposition, .invalid)
-        XCTAssertEqual(mixedStale.tipCID, blockHeader.rawCID)
+        XCTAssertEqual(stale.disposition, .invalid)
+        XCTAssertEqual(stale.tipCID, blockHeader.rawCID)
 
-        let mixedFuture = await level.preflightTransaction(
+        let next = await level.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 2),
             fetcher: fetcher
         )
-        XCTAssertEqual(mixedFuture.disposition, .future)
+        XCTAssertEqual(next.disposition, .ready)
+
+        let bobStillFirst = await level.preflightTransaction(
+            transaction(signers: [bob, alice], nonce: 0),
+            fetcher: fetcher
+        )
+        XCTAssertEqual(bobStillFirst.disposition, .ready)
     }
 
     func testPreflightClassifiesAgainstTheExecutedTipNotTheWeighedOne() async throws {

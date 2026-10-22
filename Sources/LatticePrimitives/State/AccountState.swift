@@ -3,6 +3,10 @@ import cashew
 public typealias AccountState = VolumeMerkleDictionaryImpl<UInt64>
 public typealias AccountStateHeader = VolumeImpl<AccountState>
 
+/// The fixed size a balance or nonce entry's value counts toward
+/// `maxStateGrowth` (a uint64), whatever its stored spelling (spec §6.6).
+package let ACCOUNT_ENTRY_VALUE_BYTES = 8
+
 public extension AccountStateHeader {
     /// THE consensus nonce floor rule: the nonce a signer's next transaction
     /// must carry, given the trie's stored nonce (`nil` — the account has never

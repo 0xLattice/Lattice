@@ -1069,16 +1069,23 @@ final class StateGrowthAttackTests: XCTestCase {
             signers: [kpAddr], nonce: 0,
             chainPath: ["Nexus"]
         )
+        await assertThrows(StateErrors.stateGrowthExceeded, "the builder refuses what validation would") {
+            try await buildAndStoreBlock(
+                previous: genesis, transactions: [tx(body, kp)],
+                timestamp: base + 1000, target: UInt256(1000), nonce: 1, fetcher: fetcher
+            )
+        }
         let block = try await buildAndStoreBlock(
             previous: genesis, transactions: [tx(body, kp)],
-            timestamp: base + 1000, target: UInt256(1000), nonce: 1, fetcher: fetcher
+            timestamp: base + 1000, target: UInt256(1000), nonce: 1,
+            allowStateGrowthViolation: true, fetcher: fetcher
         )
 
         let valid = try await block.validateNexus(fetcher: fetcher).0
         XCTAssertFalse(valid, "State delta should exceed tiny 10-byte limit")
-        XCTAssertFalse(try block.validateStateDeltaSize(spec: tinySpec, transactionBodies: [body]))
+        XCTAssertFalse(try block.validateStateDeltaSize(spec: tinySpec, transactionBodies: [body], accountGrowth: 0))
         XCTAssertTrue(
-            try block.validateStateDeltaSize(spec: ChainSpec.test(), transactionBodies: [body]),
+            try block.validateStateDeltaSize(spec: ChainSpec.test(), transactionBodies: [body], accountGrowth: 0),
             "control: the same delta fits the default limit"
         )
     }

@@ -270,7 +270,7 @@ A genesis block `B` is valid if and only if ALL of the following hold:
 8. Every transaction's `chainPath` equals the runtime's absolute path
 9. All transaction bodies pass the chain's policies
 10. `|transactions| <= spec.maxNumberOfTransactionsPerBlock`
-11. `sum(stateDelta(tx) for tx in transactions) <= spec.maxStateGrowth`
+11. The block's state growth (section 6.6) is at most `spec.maxStateGrowth`
 12. **Balance conservation (genesis)**:
     ```
     totalCredits <= premineAmount
@@ -320,7 +320,8 @@ dropped, or held — is section 9.9's header admission.
    - No deposit or withdrawal actions are present; a root chain has no parent
 8. The chain's policies pass
 9. Transaction count within limits
-10. State delta within limits
+10. State growth within limits (section 6.6), measured over the transition
+    of rule 12
 11. **Fee rule and coinbase (non-genesis)**, section 8.2:
     ```
     totalCredits + totalDeposited <= totalDebits + totalWithdrawn
@@ -594,7 +595,14 @@ For each `AccountAction(owner, delta)`:
   - If resulting balance > 0: set `accountState[owner] = newBalance`
   - If resulting balance == 0: delete `accountState[owner]`
 
-Per-signer nonces are tracked in the same trie via `_nonce_<signerPrefix>` keys.
+Nonces are tracked in the same trie via `_nonce_<signer>` keys. Only a
+transaction's first signer, `signers[0]`, has a nonce checked or advanced:
+the transactions in a block whose first signer is `S` must carry consecutive
+nonces starting at `S`'s next nonce (0 if `_nonce_<S>` is absent, else its
+value + 1), and `_nonce_<S>` becomes the last of them. Co-signers' nonces are
+neither checked nor advanced; the first signer's nonce already makes the body
+every signer signed unique, so it cannot be replayed. No signer may carry the
+reserved `_nonce_` prefix. A transaction with no signers has no nonce.
 
 ### 6.3 General State Transitions
 
@@ -637,7 +645,7 @@ Each action type reports a state delta in bytes:
 
 | Action Type | Delta |
 |---|---|
-| `AccountAction` (update) | `0` |
+| `AccountAction` | `0` (account entries are counted below) |
 | `Action` (insert) | `+len(key) + len(newValue)` |
 | `Action` (delete) | `-(len(key) + len(oldValue))` |
 | `Action` (update) | `len(newValue) - len(oldValue)` |
@@ -645,7 +653,20 @@ Each action type reports a state delta in bytes:
 | `WithdrawalAction` | `+len(withdrawer) + len(demander) + 32` |
 | `ReceiptAction` | `+len(withdrawer) + len(demander) + len(directory) + 24` |
 
-Total delta per block must not exceed `spec.maxStateGrowth`.
+Account entries are counted from the account-state transition, since whether
+an owner's entry is created or removed depends on its balance before the
+block. Every entry's value counts as 8 bytes (a uint64):
+
+| Account entry | Delta |
+|---|---|
+| Balance created (0 → positive), the coinbase recipient's included | `+len(owner) + 8` |
+| Balance removed (positive → 0) | `-(len(owner) + 8)` |
+| Nonce created (`_nonce_<signer>` absent before) | `+len("_nonce_" + signer) + 8` |
+| Balance or nonce changed | `0` |
+
+A block's state growth is the sum of its transactions' action deltas plus its
+account-entry deltas, and must not exceed `spec.maxStateGrowth`. It is checked
+after the transition, because account-entry deltas need it.
 
 ## 7. Transaction Validation
 
@@ -874,9 +895,9 @@ the transactions' account actions, so a recipient that is also a payer nets
 through one balance. There is no under-claim: the only way to burn is a `nil`
 recipient.
 
-A recipient without an account is created by the credit. That insertion is not
-counted against `maxStateGrowth` (account updates count 0, section 6), so a
-block adds at most one such uncounted account beyond its transactions'.
+A recipient without an account is created by the credit. That insertion
+counts against `maxStateGrowth` like any other account created by the block
+(section 6.6).
 
 Deposits lock value in deposit state and so reduce `F`. Withdrawals return the
 matching locked value and so add to `F`; explicit account actions determine any

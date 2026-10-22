@@ -76,7 +76,6 @@ public extension ChainLevel {
             guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
             let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
             guard spec.isValid,
-                  try body.getStateDelta() <= spec.maxStateGrowth,
                   try await TransactionBody.batchVerifyPolicies(
                     bodies: [body],
                     spec: spec,
@@ -93,8 +92,8 @@ public extension ChainLevel {
                 return result(.unavailable, tipCID: tip.cid)
             }
 
-            var hasFutureNonce = false
-            for signer in Set(body.signers).sorted() {
+            // Only the first signer's nonce is consensus (spec §6.2).
+            if let signer = body.signers.first {
                 let expected = try await state.accountState.nextExpectedNonce(
                     for: signer,
                     fetcher: fetcher
@@ -102,10 +101,9 @@ public extension ChainLevel {
                 if body.nonce < expected {
                     return result(.invalid, tipCID: tip.cid)
                 }
-                if body.nonce > expected { hasFutureNonce = true }
-            }
-            if hasFutureNonce {
-                return result(.future, tipCID: tip.cid)
+                if body.nonce > expected {
+                    return result(.future, tipCID: tip.cid)
+                }
             }
 
             if !body.withdrawalActions.isEmpty {
@@ -125,7 +123,7 @@ public extension ChainLevel {
                 }
             }
 
-            _ = try await state.proveAndUpdateState(
+            let (_, _, accountGrowth) = try await state.proveAndUpdateStateMeasuringGrowth(
                 allAccountActions: body.accountActions,
                 allActions: body.actions,
                 allDepositActions: body.depositActions,
@@ -134,6 +132,10 @@ public extension ChainLevel {
                 transactionBodies: [body],
                 fetcher: fetcher
             )
+            guard let growth = try TransactionBody.stateGrowth(of: [body], accountGrowth: accountGrowth),
+                  growth <= spec.maxStateGrowth else {
+                return result(.invalid, tipCID: tip.cid)
+            }
             return result(.ready, tipCID: tip.cid)
         } catch {
             return result(

@@ -155,6 +155,7 @@ public struct BlockBuilder {
             prevState: prevState,
             transactionBodies: transactionBodies,
             coinbase: nil,
+            maxStateGrowth: spec.maxStateGrowth,
             fetcher: fetcher
         )
 
@@ -295,6 +296,7 @@ public struct BlockBuilder {
             prevState: prevState,
             transactionBodies: transactionBodies,
             coinbase: coinbase,
+            maxStateGrowth: try await resolveSpec().maxStateGrowth,
             fetcher: fetcher
         )
 
@@ -427,10 +429,13 @@ public struct BlockBuilder {
 
     // MARK: - Post State Computation
 
+    /// With `maxStateGrowth`, a transition that would grow state past it
+    /// throws `StateErrors.stateGrowthExceeded`, as validation would refuse it.
     static func computePostState(
         prevState: LatticeStateHeader,
         transactionBodies: [TransactionBody],
         coinbase: AccountAction?,
+        maxStateGrowth: Int? = nil,
         fetcher: Fetcher
     ) async throws -> (LatticeStateHeader, StateDiff) {
         if transactionBodies.isEmpty && coinbase == nil {
@@ -446,6 +451,7 @@ public struct BlockBuilder {
                 state: resolvedNode,
                 transactionBodies: transactionBodies,
                 coinbase: coinbase,
+                maxStateGrowth: maxStateGrowth,
                 fetcher: fetcher
             )
         }
@@ -454,6 +460,7 @@ public struct BlockBuilder {
             state: prevStateNode,
             transactionBodies: transactionBodies,
             coinbase: coinbase,
+            maxStateGrowth: maxStateGrowth,
             fetcher: fetcher
         )
     }
@@ -462,6 +469,7 @@ public struct BlockBuilder {
         state: LatticeState,
         transactionBodies: [TransactionBody],
         coinbase: AccountAction?,
+        maxStateGrowth: Int? = nil,
         fetcher: Fetcher
     ) async throws -> (LatticeStateHeader, StateDiff) {
         // Collect each action family in one pass.
@@ -479,7 +487,7 @@ public struct BlockBuilder {
         }
         if let coinbase { allAccountActions.append(coinbase) }
 
-        let (updatedState, stateDiff) = try await state.proveAndUpdateState(
+        let (updatedState, stateDiff, accountGrowth) = try await state.proveAndUpdateStateMeasuringGrowth(
             allAccountActions: allAccountActions,
             allActions: allActions,
             allDepositActions: allDepositActions,
@@ -488,6 +496,12 @@ public struct BlockBuilder {
             transactionBodies: transactionBodies,
             fetcher: fetcher
         )
+        if let maxStateGrowth {
+            guard let growth = try TransactionBody.stateGrowth(of: transactionBodies, accountGrowth: accountGrowth),
+                  growth <= maxStateGrowth else {
+                throw StateErrors.stateGrowthExceeded
+            }
+        }
 
         return (try LatticeStateHeader(node: updatedState), stateDiff)
     }
