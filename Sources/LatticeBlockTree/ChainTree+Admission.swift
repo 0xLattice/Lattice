@@ -16,6 +16,29 @@ extension ChainTree {
         return frontier.chainProduced(stateCID: canonical)
     }
 
+    /// Whether this chain's executed set carried its state forward from
+    /// `fromStateCID` to `toStateCID` (§5.3 step 6): some block of the
+    /// executed set produced `toStateCID`, and is or descends from a block
+    /// that produced `fromStateCID`. From the genesis pre-state, or between
+    /// equal states, it is `executedSetProduced(toStateCID)`: equality is never
+    /// evidence on its own, so a forged state cannot be carried along by
+    /// matching an unproven one. Logarithmic in the parent's size whatever the
+    /// distance between the two states, and near-linear in how many blocks
+    /// produced each, so many blocks sharing a state cannot make it quadratic.
+    public func executedSetAdvanced(from fromStateCID: String, to toStateCID: String) -> Bool {
+        guard let from = CIDIdentity.canonicalString(fromStateCID),
+              let to = CIDIdentity.canonicalString(toStateCID) else {
+            return false
+        }
+        if from == to || from == LatticeState.emptyHeader.rawCID {
+            return frontier.chainProduced(stateCID: to)
+        }
+        return forkChoice.anyIsAncestorOrSelf(
+            frontier.anchoredProducers(of: from),
+            of: frontier.anchoredProducers(of: to)
+        )
+    }
+
     /// Whether `blockHash` is a proven-invalid subtree root. Its work still
     /// weighs; the fork-choice descent never steps into it.
     public func isExcludedRoot(_ blockHash: String) -> Bool {

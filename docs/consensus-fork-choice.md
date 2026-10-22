@@ -54,17 +54,32 @@ independently accepted and connected.
 
 ## Parent-State Continuity
 
-For a non-genesis candidate `C` with same-chain predecessor `P`, define:
+For every candidate `C`, genesis included, define:
 
 ```text
-old = P.parentState
+old = P.parentState   (P the same-chain predecessor; emptyHeader, the parent
+                       chain's genesis pre-state, for a genesis)
 new = C.parentState
 ```
 
-Continuity holds when `old == new`, or when the immediate parent's connected
-accepted graph contains a transitive state path from `old` to `new`. Direct
-adjacency is not required. A noncanonical parent branch may prove the fact;
-backward, sideways, unrelated, and disconnected movement cannot.
+Continuity holds when the immediate parent's executed set produced `new` at a
+block that is, or descends from, a block that produced `old`. From
+`emptyHeader`, or when `new == old`, that is only "the parent executed `new` on
+some branch": equality is never evidence on its own, because a weighed
+predecessor proved nothing (spec §5.3 step 6), so each block still proves its
+own anchor. A non-genesis block may commit no parent state (`new ==
+emptyHeader`) only while its predecessor commits none either. A noncanonical
+parent branch may prove the fact; an unexecuted or disconnected one cannot,
+and nor can backward or sideways movement.
+
+So child anchors only advance along the parent's history. A miner on the
+canonical parent anchors at its canonical state, which cannot advance from a
+branch the parent abandoned, so it cannot extend a child block anchored there:
+a parent reorganization reorganizes the child, and a withdrawal settled
+against a receipt only an abandoned parent branch holds stands only with a
+majority of child hashrate (spec §8.1, "Receipt canonicity"). The fact is an
+ancestry test on the parent's fork-choice tour, logarithmic in the parent's
+size whatever the distance between `old` and `new`.
 
 This reachability fact is distinct from the directory proof. The configured
 immediate parent authenticates the exact parent path and state pair, but it

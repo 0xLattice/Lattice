@@ -4,7 +4,14 @@ import LatticePrimitives
 
 extension LatticeState {
     public func proveAndUpdateState(allAccountActions: [AccountAction], allActions: [Action], allDepositActions: [DepositAction], allReceiptActions: [ReceiptAction], allWithdrawalActions: [WithdrawalAction], transactionBodies: [TransactionBody], fetcher: Fetcher) async throws -> (LatticeState, StateDiff) {
-        async let accountResult = accountState.proveAndUpdateState(
+        let (updated, diff, _) = try await proveAndUpdateStateMeasuringGrowth(allAccountActions: allAccountActions, allActions: allActions, allDepositActions: allDepositActions, allReceiptActions: allReceiptActions, allWithdrawalActions: allWithdrawalActions, transactionBodies: transactionBodies, fetcher: fetcher)
+        return (updated, diff)
+    }
+
+    /// `proveAndUpdateState`, plus the account-state growth the transition
+    /// measured (`AccountStateHeader.proveAndUpdateStateMeasuringGrowth`).
+    public func proveAndUpdateStateMeasuringGrowth(allAccountActions: [AccountAction], allActions: [Action], allDepositActions: [DepositAction], allReceiptActions: [ReceiptAction], allWithdrawalActions: [WithdrawalAction], transactionBodies: [TransactionBody], fetcher: Fetcher) async throws -> (LatticeState, StateDiff, accountGrowth: Int) {
+        async let accountResult = accountState.proveAndUpdateStateMeasuringGrowth(
             allAccountActions: allAccountActions,
             allReceiptActions: allReceiptActions,
             transactionBodies: transactionBodies,
@@ -15,7 +22,7 @@ extension LatticeState {
         let (afterWithdrawals, withdrawalDiff) = try await depositState.proveAndSpendForWithdrawals(allWithdrawalActions: allWithdrawalActions, fetcher: fetcher)
         async let depositResult = afterWithdrawals.proveAndUpdateState(allDepositActions: allDepositActions, fetcher: fetcher)
 
-        let (finalAccountState, accountDiff) = try await accountResult
+        let (finalAccountState, accountDiff, accountGrowth) = try await accountResult
         let (finalGeneralState, generalDiff) = try await generalResult
         let (finalDepositState, depositDiff) = try await depositResult
         let (finalReceiptState, receiptDiff) = try await receiptResult
@@ -38,6 +45,6 @@ extension LatticeState {
             diff.replaced[previousRoot, default: 0] += 1
             diff.created[updatedRoot, default: 0] += 1
         }
-        return (updated, diff)
+        return (updated, diff, accountGrowth)
     }
 }

@@ -156,4 +156,30 @@ final class UInt256ExtensionsTests: XCTestCase {
         XCTAssertNotEqual(hash, UInt256(0))
         XCTAssertEqual(hash, UInt256.hash(binaryData)) // Consistency check
     }
+
+    func testHexParsingMatchesTheGeneralParserOnEverySpelling() {
+        var spellings = ["", "0", "f", "F", "00ff", "+ff", "-0", "-1", "g", "0x", " 1", "1 ", "1_0",
+                         String(repeating: "f", count: 64), String(repeating: "f", count: 65),
+                         "0" + String(repeating: "f", count: 64), "1" + String(repeating: "0", count: 64),
+                         "8" + String(repeating: "0", count: 63), "0123456789abcdefABCDEF"]
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for length in 1...64 {
+            var digits = ""
+            for _ in 0..<length {
+                seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                digits.append(Array("0123456789abcdefABCDEF")[Int(seed >> 33) % 22])
+            }
+            spellings.append(digits)
+        }
+        for spelling in spellings {
+            XCTAssertEqual(UInt256.fromHexDigits(spelling), UInt256(spelling, radix: 16), spelling)
+            XCTAssertEqual(UInt256.fromHexString(spelling), UInt256(spelling, radix: 16), spelling)
+            XCTAssertEqual(UInt256.fromHexString("0x" + spelling), UInt256(spelling, radix: 16), spelling)
+        }
+    }
+
+    func testAParsedTargetEncodesBackToItself() {
+        let target = UInt256.fromHexString("0x1c055fffffffffffffffffffffffffffffffffffffffffffffffffffffffff")!
+        XCTAssertEqual(target.toPrefixedHexString(), "0x1c055fffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+    }
 }

@@ -225,8 +225,15 @@ func buildAndStoreBlock(
     nonce: UInt64 = 0,
     rewardRecipient: String? = nil,
     allowFeeRuleViolation: Bool = false,
+    allowStateGrowthViolation: Bool = false,
     fetcher: Fetcher
 ) async throws -> Block {
+    func forgeable(_ error: Error) -> Bool {
+        guard rewardRecipient == nil else { return false }
+        if case BlockBuilderError.invalidCoinbase(.feeRuleViolated) = error { return allowFeeRuleViolation }
+        if case StateErrors.stateGrowthExceeded = error { return allowStateGrowthViolation }
+        return false
+    }
     func build(_ transactions: [Transaction]) async throws -> BlockBuildResult {
         try await BlockBuilder.buildBlockWithTransition(
             previous: previous,
@@ -244,8 +251,7 @@ func buildAndStoreBlock(
     let result: BlockBuildResult
     do {
         result = try await build(transactions)
-    } catch BlockBuilderError.invalidCoinbase(.feeRuleViolated)
-        where allowFeeRuleViolation && rewardRecipient == nil {
+    } catch where forgeable(error) {
         let header = try await build([]).block
         var bodies: [TransactionBody] = []
         for transaction in transactions {
@@ -785,12 +791,15 @@ func makeChildGenesis(
 }
 
 /// Parent facts attesting exactly `states` as produced by the parent's
-/// executed set.
+/// executed set. They hold no order among those states, so they answer only
+/// the links that need none: from the genesis pre-state, or between equal
+/// states.
 struct ProducedParentStates: ParentChainFacts {
     let states: Set<String>
 
     func hasContinuity(_ link: ParentStateContinuityLink) -> Bool {
-        link.fromStateCID == LatticeState.emptyHeader.rawCID && states.contains(link.toStateCID)
+        (link.fromStateCID == LatticeState.emptyHeader.rawCID || link.fromStateCID == link.toStateCID)
+            && states.contains(link.toStateCID)
     }
 }
 

@@ -13,8 +13,11 @@ import LatticeBlockTree
 /// branch, minus excluded subtrees — never about its tip, and for the parent
 /// chain the link names.
 public protocol ParentChainFacts: Sendable {
-    /// Whether some block of the parent's executed set, on any branch,
-    /// produced `link.toStateCID` (continuity from the parent's genesis).
+    /// Whether the parent's executed set, on any branch, carried its state
+    /// forward from `link.fromStateCID` to `link.toStateCID`: some block of it
+    /// produced `toStateCID` and is or descends from one that produced
+    /// `fromStateCID` (from the parent's genesis pre-state, or between equal
+    /// states, only that `toStateCID` was produced).
     func hasContinuity(_ link: ParentStateContinuityLink) -> Bool
 }
 
@@ -33,8 +36,7 @@ public struct ParentLevelFacts: ParentChainFacts {
 
     public func hasContinuity(_ link: ParentStateContinuityLink) -> Bool {
         link.parentPath == path
-            && link.fromStateCID == LatticeState.emptyHeader.rawCID
-            && tree.executedSetProduced(stateCID: link.toStateCID)
+            && tree.executedSetAdvanced(from: link.fromStateCID, to: link.toStateCID)
     }
 }
 

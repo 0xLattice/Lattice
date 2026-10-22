@@ -29,12 +29,13 @@ final class TransactionPreflightTests: XCTestCase {
         nonce: UInt64,
         chainPath: [String] = [DEFAULT_ROOT_DIRECTORY],
         accountActions: [AccountAction] = [],
+        actions: [Action] = [],
         withdrawalActions: [WithdrawalAction] = []
     ) -> Transaction {
         let addresses = signers.map { testAddress(publicKey: $0.publicKey) }
         let body = TransactionBody(
             accountActions: accountActions,
-            actions: [],
+            actions: actions,
             depositActions: [],
             receiptActions: [],
             withdrawalActions: withdrawalActions,
@@ -78,10 +79,12 @@ final class TransactionPreflightTests: XCTestCase {
         return (ChainLevel(testChain: chain), chain, genesis)
     }
 
-    func testMultiSignerNonceClassificationUsesEverySignerFloor() async throws {
+    func testMultiSignerNonceClassificationUsesTheFirstSignerOnly() async throws {
         let fetcher = StorableFetcher()
         let alice = CryptoUtils.generateKeyPair()
         let bob = CryptoUtils.generateKeyPair()
+        // Genesis is signed by [alice, bob] at nonce 0: alice's next nonce is
+        // 1, and bob, a co-signer only, has never used a nonce.
         let (level, chain, genesis) = try await fundedLevel(
             fetcher: fetcher,
             alice: alice,
@@ -101,6 +104,13 @@ final class TransactionPreflightTests: XCTestCase {
         )
         XCTAssertEqual(future.disposition, .future)
 
+        // Bob first: his own floor (0) decides, whatever alice's is.
+        let bobFirst = await level.preflightTransaction(
+            transaction(signers: [bob, alice], nonce: 0),
+            fetcher: fetcher
+        )
+        XCTAssertEqual(bobFirst.disposition, .ready)
+
         let aliceAdvance = transaction(signers: [alice], nonce: 1)
         let block = try await buildAndStoreBlock(
             previous: genesis,
@@ -113,18 +123,24 @@ final class TransactionPreflightTests: XCTestCase {
         _ = await chain.submitTestBlock(blockHeader: blockHeader, block: block)
         await chain.markValidated(blockHash: blockHeader.rawCID)
 
-        let mixedStale = await level.preflightTransaction(
+        let stale = await level.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 1),
             fetcher: fetcher
         )
-        XCTAssertEqual(mixedStale.disposition, .invalid)
-        XCTAssertEqual(mixedStale.tipCID, blockHeader.rawCID)
+        XCTAssertEqual(stale.disposition, .invalid)
+        XCTAssertEqual(stale.tipCID, blockHeader.rawCID)
 
-        let mixedFuture = await level.preflightTransaction(
+        let next = await level.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 2),
             fetcher: fetcher
         )
-        XCTAssertEqual(mixedFuture.disposition, .future)
+        XCTAssertEqual(next.disposition, .ready)
+
+        let bobStillFirst = await level.preflightTransaction(
+            transaction(signers: [bob, alice], nonce: 0),
+            fetcher: fetcher
+        )
+        XCTAssertEqual(bobStillFirst.disposition, .ready)
     }
 
     func testPreflightClassifiesAgainstTheExecutedTipNotTheWeighedOne() async throws {
@@ -382,9 +398,9 @@ final class TransactionPreflightTests: XCTestCase {
 
     func testWasmPolicyErrorClassificationMatchesImport() {
         // Preflight evicts exactly what import would exclude, and keeps pooled
-        // exactly what import would retry (#63). Only an unencodable context is
-        // a verdict; every other policy error is no verdict: retry, never
-        // exclude.
+        // exactly what import would retry (#63). Every policy error is a
+        // function of the module and the input, so a verdict, except a module
+        // this node cannot obtain: retry, never exclude.
         let cases: [WasmPolicyError] = [
             .unsupportedABI(WasmPolicyRef.currentABIVersion + 1),
             .missingModule("m"),
@@ -402,78 +418,148 @@ final class TransactionPreflightTests: XCTestCase {
             let imported = ChainLevel.classifyValidationFailureForTesting(error)
             let preflightUnavailable = transactionPreflightEvidenceUnavailable(error)
             let isVerdict: Bool
-            if case .contextEncodingFailed = error { isVerdict = true } else { isVerdict = false }
+            if case .missingModule = error { isVerdict = false } else { isVerdict = true }
             XCTAssertEqual(
                 imported,
                 isVerdict ? .protocolInvalid : .unavailableEvidence,
                 "import: \(error)"
             )
             XCTAssertEqual(preflightUnavailable, !isVerdict, "preflight: \(error)")
-            XCTAssertEqual(
-                preflightUnavailable,
-                !ChainLevel.isDeterministicInvalidityForTesting(imported),
-                "preflight and import disagree on \(error)"
-            )
         }
     }
 
-    /// A transaction policy whose entrypoint runs `body`.
-    private func storePolicy(
-        entrypointBody body: String,
-        fetcher: StorableFetcher
-    ) async throws -> WasmPolicyRef {
-        let wat = """
-        (module
-          (memory (export "memory") 1)
-          (table 1 funcref)
-          (type $nullary (func))
-          (func $recurse (result i32) call $recurse)
-          (func (export "lattice_alloc") (param i32) (result i32) i32.const 1024)
-          (func (export "lattice_validate_transaction") (param i32 i32) (result i32)
-            \(body))
-        )
-        """
-        let module = try WasmPolicyModuleHeader(
-            node: WasmPolicyModule(bytes: Data(try wat2wasm(wat)))
-        )
-        try await module.storeRecursively(storer: fetcher)
-        return WasmPolicyRef(moduleCID: module.rawCID, scope: .transaction)
+    func testAProviderFaultOrAnUnknownErrorIsRetriedNotEvicted() {
+        // Bytes that do not hash to the id asked for are a provider's fault,
+        // and an error nothing enumerates is not known to be the
+        // transaction's: neither is a verdict on it.
+        struct Unenumerated: Error {}
+        XCTAssertTrue(transactionPreflightEvidenceUnavailable(DataErrors.cidMismatch))
+        XCTAssertTrue(transactionPreflightEvidenceUnavailable(Unenumerated()))
+    }
+
+    /// Fails the fetch of one content id with `error`; serves the rest.
+    private actor FailingFetcher: Fetcher {
+        let backing: StorableFetcher
+        let failing: String
+        let error: Error?
+
+        init(backing: StorableFetcher, failing: String, error: Error?) {
+            self.backing = backing
+            self.failing = failing
+            self.error = error
+        }
+
+        func fetch(rawCid: String) async throws -> Data {
+            if rawCid == failing, let error { throw error }
+            return try await backing.fetch(rawCid: rawCid)
+        }
+    }
+
+    private enum PolicyOutcome { case accepted, invalid, unavailable }
+
+    /// One outcome of a policy evaluation: the module, how it is referenced,
+    /// whether this node can fetch it, and the verdict both paths must reach.
+    private struct PolicyCase {
+        var name: String
+        /// The body of both entrypoints.
+        var body = "i32.const 1"
+        var alloc = "i32.const 1024"
+        var imports = ""
+        var scope = WasmPolicyRef.Scope.transaction
+        var entrypoint: String? = nil
+        var fetchError: Error? = nil
+        var expected: PolicyOutcome
     }
 
     func testPreflightAndImportClassifyEveryPolicyOutcomeAlike() async throws {
         // Every outcome of a policy evaluation, judged on the same transaction
-        // by preflight and by import of a block carrying it. A trap is a
-        // completed verdict — a function of (module, input) on the pinned
-        // engine — so both exclude; only a module this node cannot obtain or
-        // run is unavailable.
-        enum Outcome { case accepted, invalid, unavailable }
-        let cases: [(name: String, body: String, entrypoint: String?, denyModule: Bool, expected: Outcome)] = [
-            ("accept", "i32.const 1", nil, false, .accepted),
-            ("reject", "i32.const 0", nil, false, .invalid),
-            ("unreachable", "unreachable", nil, false, .invalid),
-            ("out-of-bounds load", "(i32.load (i32.const 0x7fffffff))", nil, false, .invalid),
-            ("divide by zero", "(i32.div_u (i32.const 1) (i32.const 0))", nil, false, .invalid),
-            ("divide overflow", "(i32.div_s (i32.const 0x80000000) (i32.const -1))", nil, false, .invalid),
-            ("indirect call to null", "(call_indirect (type $nullary) (i32.const 0)) i32.const 1", nil, false, .invalid),
-            ("call stack exhaustion", "call $recurse", nil, false, .invalid),
-            ("missing module", "i32.const 1", nil, true, .unavailable),
-            ("missing entrypoint", "i32.const 1", "absent_entrypoint", false, .unavailable),
+        // by preflight and by import of a block carrying it. An outcome that
+        // is a function of (module, input) on the pinned engine is a completed
+        // verdict, so both exclude; only a module this node cannot obtain, or
+        // an error nothing enumerates, is unavailable. The chains here skip
+        // genesis validation, which would refuse the defective modules.
+        let cases = [
+            PolicyCase(name: "accept", expected: .accepted),
+            PolicyCase(name: "reject", body: "i32.const 0", expected: .invalid),
+            PolicyCase(name: "unreachable", body: "unreachable", expected: .invalid),
+            PolicyCase(
+                name: "out-of-bounds load",
+                body: "(i32.load (i32.const 0x7fffffff))", expected: .invalid),
+            PolicyCase(
+                name: "divide by zero",
+                body: "(i32.div_u (i32.const 1) (i32.const 0))", expected: .invalid),
+            PolicyCase(
+                name: "divide overflow",
+                body: "(i32.div_s (i32.const 0x80000000) (i32.const -1))", expected: .invalid),
+            PolicyCase(
+                name: "indirect call to null",
+                body: "(call_indirect (type $nullary) (i32.const 1)) i32.const 1", expected: .invalid),
+            PolicyCase(
+                name: "mismatched indirect call",
+                body: "(call_indirect (type $nullary) (i32.const 0)) i32.const 1", expected: .invalid),
+            PolicyCase(
+                name: "table out of bounds",
+                body: "(call_indirect (type $nullary) (i32.const 9)) i32.const 1", expected: .invalid),
+            PolicyCase(name: "call stack exhaustion", body: "call $recurse", expected: .invalid),
+            PolicyCase(name: "trap in the allocator", alloc: "unreachable", expected: .invalid),
+            PolicyCase(
+                name: "allocator returns an out-of-range pointer",
+                alloc: "i32.const 0x7ffffff0", expected: .invalid),
+            PolicyCase(name: "type-invalid body", body: "i64.const 1", expected: .invalid),
+            PolicyCase(name: "stack-invalid body", body: "i32.add", expected: .invalid),
+            PolicyCase(
+                name: "unlinkable import",
+                imports: "(import \"env\" \"f\" (func))", expected: .invalid),
+            PolicyCase(name: "missing entrypoint", entrypoint: "absent_entrypoint", expected: .invalid),
+            PolicyCase(name: "action scope: accept", scope: .action, expected: .accepted),
+            PolicyCase(name: "action scope: reject", body: "i32.const 0", scope: .action, expected: .invalid),
+            PolicyCase(name: "action scope: trap", body: "unreachable", scope: .action, expected: .invalid),
+            PolicyCase(
+                name: "action scope: allocator returns an out-of-range pointer",
+                alloc: "i32.const 0x7ffffff0", scope: .action, expected: .invalid),
+            PolicyCase(
+                name: "missing module",
+                fetchError: cashew.FetcherError.notFound("module"), expected: .unavailable),
+            PolicyCase(
+                name: "unenumerated error",
+                fetchError: ChainLocalTestError.unexpectedFailure, expected: .unavailable),
         ]
         for testCase in cases {
             let store = StorableFetcher()
-            var policy = try await storePolicy(entrypointBody: testCase.body, fetcher: store)
-            if let entrypoint = testCase.entrypoint {
-                policy = WasmPolicyRef(
-                    moduleCID: policy.moduleCID, scope: .transaction, entrypoint: entrypoint
-                )
-            }
+            let wat = """
+            (module
+              \(testCase.imports)
+              (type $nullary (func))
+              (memory (export "memory") 1)
+              (table 2 funcref)
+              (elem (i32.const 0) $recurse)
+              (func $recurse (result i32) call $recurse)
+              (func (export "lattice_alloc") (param i32) (result i32) \(testCase.alloc))
+              (func (export "lattice_validate_transaction") (param i32 i32) (result i32)
+                \(testCase.body))
+              (func (export "lattice_validate_action") (param i32 i32) (result i32)
+                \(testCase.body))
+            )
+            """
+            let module = try WasmPolicyModuleHeader(
+                node: WasmPolicyModule(bytes: Data(try wat2wasm(wat)))
+            )
+            try await module.storeRecursively(storer: store)
+            let policy = WasmPolicyRef(
+                moduleCID: module.rawCID, scope: testCase.scope, entrypoint: testCase.entrypoint
+            )
             let genesis = try await buildAndStoreGenesis(
                 spec: spec(policies: [policy]),
                 timestamp: 1_000,
                 target: easy,
                 fetcher: store
             )
-            let tx = transaction(signers: [CryptoUtils.generateKeyPair()], nonce: 0)
+            let tx = transaction(
+                signers: [CryptoUtils.generateKeyPair()],
+                nonce: 0,
+                actions: testCase.scope == .action
+                    ? [Action(key: "app/v1/data", oldValue: nil, newValue: "value")] : []
+            )
             let block = try await buildAndStoreBlock(
                 previous: genesis,
                 transactions: [tx],
@@ -482,9 +568,8 @@ final class TransactionPreflightTests: XCTestCase {
                 nonce: 1,
                 fetcher: store
             )
-            let fetcher = DenyingFetcher(
-                backing: store,
-                denied: testCase.denyModule ? [policy.moduleCID] : []
+            let fetcher = FailingFetcher(
+                backing: store, failing: policy.moduleCID, error: testCase.fetchError
             )
 
             let preflight = await ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
@@ -506,10 +591,51 @@ final class TransactionPreflightTests: XCTestCase {
         }
     }
 
-    func testMisbehavingPolicyIsUnavailableNotInvalid() async throws {
+    func testEveryEngineModuleDefectErrorIsAVerdict() throws {
+        // The engine's module-defect errors are matched by type name, so each
+        // name is pinned here against the error the engine really throws.
+        func module(_ body: String, imports: String = "") throws -> Data {
+            Data(try wat2wasm("""
+            (module
+              \(imports)
+              (memory (export "memory") 1)
+              (func (export "lattice_alloc") (param i32) (result i32) i32.const 1024)
+              (func (export "lattice_validate_transaction") (param i32 i32) (result i32)
+                \(body))
+            )
+            """))
+        }
+        var truncated = try module("i32.const 1")
+        truncated.removeLast(3)
+        var overlong = Data([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01])
+        overlong.append(contentsOf: [UInt8](repeating: 0x80, count: 6))
+        let defects: [(String, Data)] = [
+            ("WasmKit.TranslationError", try module("i64.const 1")),
+            ("WasmKit.ValidationError", try module("i32.add")),
+            ("WasmKit.ImportError", try module("i32.const 1", imports: "(import \"env\" \"f\" (func))")),
+            ("WasmParser.WasmParserError", Data([0, 1, 2, 3])),
+            ("WasmParser.StreamError<Swift.UInt8>", truncated),
+            ("WasmParser.LEBError", overlong),
+        ]
+        let policy = WasmPolicyRef(moduleCID: "inline", scope: .transaction)
+        for (typeName, bytes) in defects {
+            XCTAssertThrowsError(try WasmPolicyEvaluator.evaluate(
+                policy: policy, contextData: Data(), moduleBytes: bytes
+            )) { error in
+                XCTAssertEqual(String(reflecting: type(of: error)), typeName)
+                XCTAssertEqual(
+                    ChainLevel.classifyValidationFailureForTesting(error), .protocolInvalid, typeName
+                )
+                XCTAssertFalse(transactionPreflightEvidenceUnavailable(error), typeName)
+            }
+        }
+    }
+
+    func testMisbehavingPolicyIsInvalid() async throws {
         // A module without the configured entrypoint throws
-        // `.missingEntrypoint` at evaluation: no verdict on the transaction,
-        // so it stays pooled rather than being evicted.
+        // `.missingEntrypoint` at evaluation: a property of the chain's
+        // committed policy, so the transaction is evicted as import would
+        // exclude a block carrying it.
         let fetcher = StorableFetcher()
         let policy = try await storeWasmPolicy(
             accepts: true,
@@ -528,7 +654,7 @@ final class TransactionPreflightTests: XCTestCase {
             transaction(signers: [CryptoUtils.generateKeyPair()], nonce: 0),
             fetcher: fetcher
         )
-        XCTAssertEqual(result.disposition, .unavailable)
+        XCTAssertEqual(result.disposition, .invalid)
     }
 
     func testChildWithdrawalNeedsCandidateParentState() async throws {

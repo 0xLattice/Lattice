@@ -243,6 +243,18 @@ struct ForkChoice: Sendable {
         weights.insertRoot(hash)
     }
 
+    /// Whether `descendant` is `ancestor` or descends from it, or nil when
+    /// either is not routed. O(log n).
+    func isAncestorOrSelf(_ ancestor: String, of descendant: String) -> Bool? {
+        weights.encloses(ancestor, descendant)
+    }
+
+    /// Whether some block of `ancestors` is, or is an ancestor of, some block
+    /// of `descendants`; unrouted blocks are left out (`EulerWorkIndex.anyEncloses`).
+    func anyIsAncestorOrSelf(_ ancestors: [String], of descendants: [String]) -> Bool {
+        weights.anyEncloses(ancestors, descendants)
+    }
+
     /// Splice one toured component — `events`, opening at `rootHash` — into
     /// the weights in one operation, under `parentHash` or, with none, as a
     /// new genesis root; then record the component's grind locations, already
@@ -421,6 +433,16 @@ extension ChainTree {
     var segmentGraftBlockVisitCount: UInt64 { forkChoice.graftBlockVisitCount }
 #endif
 
+    /// The grind `id` as credited at `blockHash`, or nil if it is not credited
+    /// there. Reads the block's own work fact, never the derived totals, so
+    /// asking whether a proof is already credited costs nothing as the tree grows.
+    public func workContribution(
+        id: String,
+        at blockHash: String
+    ) -> VerifiedWorkContribution? {
+        graph.contribution(id: id, at: blockHash)
+    }
+
     /// Whether `blockHash` belongs to a complete accepted path ending at one of
     /// this path-defined chain's admitted genesis roots — i.e. it is CONNECTED,
     /// so its work routes into fork choice (excluded or not: work weighs, §9.9).
@@ -455,6 +477,14 @@ extension ChainTree {
         // Pure work, excluded subtrees included: validity never subtracts weight.
         materializeLocalWorkCachesIfNeeded()
         return graph.subtreeWeight(of: hash)
+    }
+
+    /// The work fork choice weighs `hash`'s subtree by: what
+    /// `forkChoiceSnapshot(startingAt:)` reports as `subtreeWork`, read from
+    /// the weight index without descending the subtree.
+    public func forkChoiceWeight(of hash: String) -> WorkSum? {
+        guard graph.contains(hash), forkChoice.isRouted(hash) else { return nil }
+        return forkChoice.weight(of: hash)
     }
 
     /// Public simulator/test view of the real local fork-choice descent.
@@ -720,13 +750,9 @@ extension ChainTree {
         guard localWorkCachesDirty else { return }
         graph.recomputeWorkCaches()
         localWorkCachesDirty = false
-    }
-
-    package func workContribution(
-        id: String,
-        at blockHash: String
-    ) -> VerifiedWorkContribution? {
-        graph.contribution(id: id, at: blockHash)
+#if DEBUG
+        localWorkCacheBlockVisitCount += UInt64(graph.records.count)
+#endif
     }
 
     /// GHOST descent chooses the child with greatest deduplicated verified

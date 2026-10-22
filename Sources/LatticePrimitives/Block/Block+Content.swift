@@ -83,7 +83,7 @@ public extension Block {
             for action in body.accountActions {
                 setPrevStatePath([ACCOUNT_STATE_PROPERTY, action.owner])
             }
-            for signer in Set(body.signers) {
+            if let signer = body.signers.first {
                 setPrevStatePath([ACCOUNT_STATE_PROPERTY, AccountStateHeader.nonceTrackingKey(signer)])
             }
             for action in body.actions {

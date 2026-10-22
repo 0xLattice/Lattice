@@ -986,6 +986,47 @@ final class WasmPolicyTests: XCTestCase {
         }
     }
 
+    func testGenesisRejectsAPolicyWithAnInvalidFunctionBody() async throws {
+        // The engine validates a function body only when it first runs, so a
+        // defective body would otherwise surface on the first transaction to
+        // reach it. Genesis validates every body, called or not.
+        let bodies = [
+            "the entrypoint": ("i64.const 1", ""),
+            "a function nothing calls": ("i32.const 1", "(func (result i32) i64.const 1)"),
+        ]
+        for (name, (entrypointBody, extraFunction)) in bodies {
+            let bytes = Data(try wat2wasm("""
+            (module
+              (memory (export "memory") 1)
+              (func (export "lattice_alloc") (param i32) (result i32) i32.const 1024)
+              (func (export "lattice_validate_transaction") (param i32 i32) (result i32)
+                \(entrypointBody))
+              \(extraFunction)
+            )
+            """))
+            let fetcher = StorableFetcher()
+            let module = try WasmPolicyModuleHeader(node: WasmPolicyModule(bytes: bytes))
+            try await module.storeRecursively(storer: fetcher)
+            let policy = WasmPolicyRef(moduleCID: module.rawCID, scope: .transaction)
+            let spec = ChainSpec.test(wasmPolicies: [policy])
+            let genesis = try await buildAndStoreGenesis(
+                spec: spec, timestamp: 1, target: UInt256.max, fetcher: fetcher
+            )
+
+            XCTAssertThrowsError(
+                try WasmPolicyEvaluator.validate(policy: policy, moduleBytes: bytes), name
+            )
+            let configured = try await TransactionBody.validateConfiguredPolicyModules(
+                spec: spec, fetcher: fetcher
+            )
+            XCTAssertFalse(configured, name)
+            let genesisValid = try await genesis.validateGenesis(
+                fetcher: fetcher, chainPath: [DEFAULT_ROOT_DIRECTORY]
+            ).0
+            XCTAssertFalse(genesisValid, name)
+        }
+    }
+
     func testPolicyDeclaringMemoryAboveTwoMiBInstantiatesAndEvaluates() async throws {
         // No node-local memory cap: 33 pages (2 MiB + 64 KiB) of declared
         // initial memory instantiates, and the policy's own result — it accepts

@@ -250,6 +250,45 @@ final class CrossChainReorgReplayEdgeTests: XCTestCase {
         assertMissingReceipt(onR, "R's state holds no receipt, so a withdrawal anchored there must be rejected")
     }
 
+    /// The receipt exists only on non-canonical fork L, yet the child keeps
+    /// the payout: a withdrawal anchored on L validates, and the next child
+    /// block — carried by canonical R's tip, as an honest miner would build
+    /// it — extends it and validates too. Consensus never ties a withdrawal
+    /// to parent canonicity, so the cost of settling an unpaid deposit is
+    /// one stale parent block; any defense is miner policy above this layer.
+    func testChildExtendsWithdrawalWhoseReceiptIsOnlyOnStaleParentFork() async throws {
+        let f = try await SwapFixture()
+        let childGenesis = try await f.childGenesis("Child", timestamp: f.t - 90_000)
+        let deposit = try await f.depositBlock(on: childGenesis, directory: "Child", timestamp: f.t - 80_000)
+
+        let l1 = try await f.receiptBlock(previous: f.nexusGenesis, directory: "Child", timestamp: f.t - 70_000)
+        let lCarrier = try await f.emptyNexusBlock(previous: l1, timestamp: f.t - 60_000)
+        let r1 = try await f.emptyNexusBlock(previous: f.nexusGenesis, timestamp: f.t - 70_000, nonce: 11)
+        let r2 = try await f.emptyNexusBlock(previous: r1, timestamp: f.t - 60_000, nonce: 12)
+        let r3 = try await f.emptyNexusBlock(previous: r2, timestamp: f.t - 50_000, nonce: 13)
+        let chain = ChainState.fromGenesis(block: f.nexusGenesis)
+        for block in [l1, lCarrier, r1, r2, r3] {
+            _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
+        }
+        let tip = await chain.canonicalTip
+        XCTAssertEqual(tip, try BlockHeader(node: r3).rawCID, "fixture: R must be canonical")
+
+        let withdrawn = try await f.withdrawal(
+            previous: deposit, carrier: lCarrier, directory: "Child", timestamp: f.t - 40_000
+        ).get()
+
+        let honest = try await buildAndStoreBlock(
+            previous: withdrawn, parentChainBlock: r3,
+            timestamp: f.t - 30_000, target: .max, fetcher: f.fetcher
+        )
+        XCTAssertEqual(honest.parentState.rawCID, r3.prevState.rawCID,
+                       "fixture: the honest block anchors on the canonical parent")
+        let valid = try await honest.validateNexus(
+            fetcher: f.fetcher, chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
+        ).0
+        XCTAssertTrue(valid, "a canonically carried child block may extend a stale-anchored withdrawal")
+    }
+
     /// After the withdrawal executed on the child (anchored on L), a later
     /// child block anchoring on R tries it again: rejected, and the deposit
     /// stays spent. The same replay anchored on L (receipt present) is

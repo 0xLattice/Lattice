@@ -229,8 +229,8 @@ private struct ConsensusBlockInput: Sendable {
               let postStateCID = CIDIdentity.canonicalString(fact.postStateCID),
               let prevStateCID = CIDIdentity.canonicalString(fact.prevStateCID),
               let specCID = CIDIdentity.canonicalString(fact.specCID),
-              let target = UInt256(fact.target, radix: 16),
-              let nextTarget = UInt256(fact.nextTarget, radix: 16),
+              let target = UInt256.fromHexDigits(fact.target),
+              let nextTarget = UInt256.fromHexDigits(fact.nextTarget),
               // Every block, genesis included, commits a positive target and
               // nextTarget: a genesis's target is block 1's schedule input
               // (§5.1 rule 5), and a zero target is not admissible.
@@ -369,6 +369,10 @@ public struct ChainTree: Sendable {
     /// Diagnostic prefix/subtree totals are derived local views. They are not
     /// fork-choice inputs and are rebuilt only when an API exposes them.
     var localWorkCachesDirty: Bool
+#if DEBUG
+    /// Blocks visited by every rebuild of the diagnostic totals so far.
+    var localWorkCacheBlockVisitCount: UInt64 = 0
+#endif
 
     /// Restore-replay defers the derived canonical projection: batches are
     /// durable, already-admitted facts, their commits are discarded, and no
@@ -853,6 +857,9 @@ public struct ChainTree: Sendable {
         )
     }
 
+    /// The public read view of one block, with its diagnostic totals: after any
+    /// block or work mutation this rebuilds them over the whole tree. To ask
+    /// only whether a grind is credited, use `workContribution(id:at:)`.
     public mutating func getConsensusBlock(hash: String) -> BlockMeta? {
         guard graph.contains(hash) else { return nil }
         materializeLocalWorkCachesIfNeeded()

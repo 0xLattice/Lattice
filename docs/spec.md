@@ -275,7 +275,7 @@ A genesis block `B` is valid if and only if ALL of the following hold:
 8. Every transaction's `chainPath` equals the runtime's absolute path
 9. All transaction bodies pass the chain's policies
 10. `|transactions| <= spec.maxNumberOfTransactionsPerBlock`
-11. `sum(stateDelta(tx) for tx in transactions) <= spec.maxStateGrowth`
+11. The block's state growth (section 6.6) is at most `spec.maxStateGrowth`
 12. **Balance conservation (genesis)**:
     ```
     totalCredits <= premineAmount
@@ -325,7 +325,8 @@ dropped, or held — is section 9.9's header admission.
    - No deposit or withdrawal actions are present; a root chain has no parent
 8. The chain's policies pass
 9. Transaction count within limits
-10. State delta within limits
+10. State growth within limits (section 6.6), measured over the transition
+    of rule 12
 11. **Fee rule and coinbase (non-genesis)**, section 8.2:
     ```
     totalCredits + totalDeposited <= totalDebits + totalWithdrawn
@@ -380,23 +381,31 @@ this order:
 5. For genesis, require the complete genesis shape (§5.1), including
    `nextTarget == target`.
 6. Require an exact continuity link proving that the immediate parent's
-   executed set produced `B.parentState` from `emptyHeader` — the parent's own
-   genesis pre-state — or, for a non-genesis block, that `B.parentState` is
-   `emptyHeader` itself. This applies at EVERY height, the genesis included
-   (§5.1 rule 4). Step 3's terminal binding
-   does not substitute for this — a carrier need not be imported, connected,
-   valid or canonical, so it establishes no anchor.
+   executed set carried its state forward to `B.parentState` from the
+   predecessor's `parentState` (from `emptyHeader`, the parent's own genesis
+   pre-state, for a genesis): some block of the executed set produced
+   `B.parentState`, and is or descends from a block that produced the
+   predecessor's `parentState`. This applies at EVERY height, the genesis
+   included (§5.1 rule 4). A non-genesis block may commit `emptyHeader` (no
+   parent state) only while its predecessor does too; dropping back to it
+   from a real anchor moves backward and is invalid. Step 3's terminal
+   binding does not substitute for this — a carrier need not be imported,
+   connected, valid or canonical, so it establishes no anchor.
 
-   Each block proves its own anchor from `emptyHeader`, NOT from its
-   predecessor's `parentState`. Anchoring against the predecessor is an
-   induction with no base: the weighed tier imports a block without running
-   these checks, so a weighed predecessor proved nothing, and a successor
-   matching its unchecked claim would be imported with no evidence at all.
-   A consequence of anchoring each block independently is that `parentState`
-   is no longer required to advance monotonically across a chain. That is
-   deliberate: `parentState` is read only to prove a receipt (§8.1 Phase 3),
-   so regressing it can only SHRINK the set of provable receipts, and the
-   matching deposit is spent from the child's own `prevState`.
+   The link proves the anchor itself, not only its relation to the
+   predecessor's: from `emptyHeader`, or between equal states, it proves that
+   the executed set produced `B.parentState`. Equality alone is never
+   evidence. The weighed tier imports a block without running these checks,
+   so a weighed predecessor proved nothing, and a successor matching its
+   unchecked claim would otherwise be imported with no evidence at all.
+
+   Anchors therefore advance monotonically along the parent's history and
+   never move backward or sideways. That is what makes a parent
+   reorganization reorganize the child: a miner on the canonical parent
+   anchors at its canonical state, which does not descend from an abandoned
+   branch, so it cannot extend a child block anchored there (§8.1, "Receipt
+   canonicity"). An ancestry test answers the link in time logarithmic in the
+   parent's size, whatever the distance between the two states.
 7. Apply the ordinary genesis or non-genesis transition rules to `B`, including
    withdrawal proofs against `B.parentState`.
 
@@ -596,7 +605,14 @@ For each `AccountAction(owner, delta)`:
   - If resulting balance > 0: set `accountState[owner] = newBalance`
   - If resulting balance == 0: delete `accountState[owner]`
 
-Per-signer nonces are tracked in the same trie via `_nonce_<signerPrefix>` keys.
+Nonces are tracked in the same trie via `_nonce_<signer>` keys. Only a
+transaction's first signer, `signers[0]`, has a nonce checked or advanced:
+the transactions in a block whose first signer is `S` must carry consecutive
+nonces starting at `S`'s next nonce (0 if `_nonce_<S>` is absent, else its
+value + 1), and `_nonce_<S>` becomes the last of them. Co-signers' nonces are
+neither checked nor advanced; the first signer's nonce already makes the body
+every signer signed unique, so it cannot be replayed. No signer may carry the
+reserved `_nonce_` prefix. A transaction with no signers has no nonce.
 
 ### 6.3 General State Transitions
 
@@ -639,7 +655,7 @@ Each action type reports a state delta in bytes:
 
 | Action Type | Delta |
 |---|---|
-| `AccountAction` (update) | `0` |
+| `AccountAction` | `0` (account entries are counted below) |
 | `Action` (insert) | `+len(key) + len(newValue)` |
 | `Action` (delete) | `-(len(key) + len(oldValue))` |
 | `Action` (update) | `len(newValue) - len(oldValue)` |
@@ -647,7 +663,30 @@ Each action type reports a state delta in bytes:
 | `WithdrawalAction` | `+len(withdrawer) + len(demander) + 32` |
 | `ReceiptAction` | `+len(withdrawer) + len(demander) + len(directory) + 24` |
 
-Total delta per block must not exceed `spec.maxStateGrowth`.
+Account entries are counted from the account-state transition, since whether
+an owner's entry is created or removed depends on its balance before the
+block. Every entry's value counts as 8 bytes (a uint64):
+
+| Account entry | Delta |
+|---|---|
+| Balance created (0 → positive), the coinbase recipient's included | `+len(owner) + 8` |
+| Balance removed (positive → 0) | `-(len(owner) + 8)` |
+| Nonce created (`_nonce_<signer>` absent before) | `+len("_nonce_" + signer) + 8` |
+| Balance or nonce changed | `0` |
+
+A block's state growth is the sum of its transactions' action deltas plus its
+account-entry deltas, and must not exceed `spec.maxStateGrowth`. It is checked
+after the transition, because account-entry deltas need it. A node may reject
+earlier on a floor known before the transition: the action deltas less
+`len(owner) + 8` for every owner whose balance nets to a debit, the most
+account removals could free. A floor over the limit is over it from any
+starting state.
+
+A chain's `maxStateGrowth` must leave room for these entries. A signer's first
+transaction creates its nonce entry, and a credit to a new address creates a
+balance entry: for a canonical address each is on the order of 70 bytes. A
+limit below a few hundred bytes is valid but admits few or no new accounts per
+block.
 
 ## 7. Transaction Validation
 
@@ -705,7 +744,8 @@ Credits (`delta > 0`) do not require signer authorization.
 
 Chain policies are content-addressed validation modules referenced by `ChainSpec.wasmPolicies`. In ABI version 1, policies are implemented as WASM modules. A policy declares a scope (`transaction` or `action`), ABI version, module CID, and exported entrypoint. The host passes a versioned canonical binary policy context containing the height and timestamp of the block being validated, the chain spec, chain path, and the transaction/action under validation. The policy returns `1` to accept and any other value to reject.
 
-Genesis validates every configured policy reference and entrypoint, even when
+Genesis validates every configured policy reference and entrypoint, and every
+function body of each module whether or not anything calls it, even when
 genesis contains no transaction or Action to exercise that scope. This prevents
 an immutable spec from admitting a latent missing, nondeterministic, or
 malformed module that would fail only after deployment.
@@ -721,11 +761,15 @@ and a trap is observable in the verdict. The call depth that reaches it also
 depends on the engine's frame layout, so nodes agree only while they run the
 same engine version: an engine change is a consensus change.
 
-A policy that traps — `unreachable`, an out-of-bounds memory or table access,
-an integer divide by zero or overflow, a null or mismatched indirect call, or
-call stack exhaustion — has rejected: a trap is a function of the module and
-the context, so it is a completed verdict of invalidity, never an
-availability gap. A node that cannot obtain the module has no verdict.
+Every outcome of a policy evaluation that is a function of the module and the
+context is a completed verdict, the same for a block being validated and for a
+transaction being considered for one. A policy rejects — the verdict is
+invalidity — when it returns anything but `1`; when it traps (`unreachable`,
+an out-of-bounds memory or table access, an integer divide by zero or
+overflow, a null or mismatched indirect call, call stack exhaustion); when its
+allocator or entrypoint returns something unusable; and when the module or its
+reference is defective. Only what depends on the node is availability, never a
+verdict: a module the node cannot obtain, or a failure of the node itself.
 
 A policy may grow its memory. `memory.grow` MUST fail (return -1) only when
 the growth would exceed the maximum the module declares, or WebAssembly's own
@@ -830,6 +874,19 @@ A parent receipt without a matching child deposit cannot authorize child value,
 because withdrawal requires both proofs. It is not cost-free: the signed parent
 payment and receipt-state insertion still execute.
 
+**Receipt canonicity.** Consensus binds a withdrawal to a parent state the
+parent executed, on any branch (§5.3 step 6), and child fork choice does not
+read parent canonicity (§9). A receipt that exists only on a parent branch the
+parent later abandons can therefore settle a withdrawal in some child block.
+It does not stand against honest miners: anchors only move forward (§5.3 step
+6), a miner on the canonical parent anchors at a state that does not descend
+from the abandoned branch, and so no honest miner can extend that child
+block. Only work anchored on the abandoned branch extends it, and once the
+honest child branch is heavier the child chain reorganizes and the withdrawal
+is undone with it. Keeping the withdrawal takes a majority of the child's
+hashrate, as reversing any confirmed child transaction does. The demander
+can wait for the withdrawal to be confirmed on the child, as for any payment.
+
 ### 8.2 Balance Conservation with Cross-Chain Transfers
 
 For any non-genesis block at index `i`, over its transactions' actions:
@@ -857,9 +914,9 @@ the transactions' account actions, so a recipient that is also a payer nets
 through one balance. There is no under-claim: the only way to burn is a `nil`
 recipient.
 
-A recipient without an account is created by the credit. That insertion is not
-counted against `maxStateGrowth` (account updates count 0, section 6), so a
-block adds at most one such uncounted account beyond its transactions'.
+A recipient without an account is created by the credit. That insertion
+counts against `maxStateGrowth` like any other account created by the block
+(section 6.6).
 
 Deposits lock value in deposit state and so reduce `F`. Withdrawals return the
 matching locked value and so add to `F`; explicit account actions determine any
@@ -1075,8 +1132,9 @@ work fact only after it is accepted and connected.
 
 The immediate parent authenticates only state continuity and child-genesis
 authorization. A continuity fact is bound to the exact parent path and
-`(fromStateCID, toStateCID)` pair. It proves transitive reachability through the
-parent's connected accepted graph, not parent canonicity and not a work total.
+`(fromStateCID, toStateCID)` pair. It proves that the parent's executed set
+produced `toStateCID` at or below a block that produced `fromStateCID` (§5.3
+step 6), not parent canonicity and not a work total.
 
 A parent MUST attest continuity only across blocks on its executed-from-genesis
 frontier — executed, every ancestor executed, none under an excluded block
@@ -1164,9 +1222,14 @@ imported at one of two tiers:
 "Accepted" in this section means *weighed*: present in the graph with verified
 work. Ranking is defined over weight; being *acted upon* — extended, served as
 head, or asserted as the node's state — requires the *validated* tier. A node
-MUST NOT act on a merely weighed tip; it builds on its heaviest validated tip
-and treats missing bodies of a heavier weighed branch as an availability gap
-(9.5-style: retried indefinitely, never a verdict).
+MUST NOT act on a merely weighed tip; it acts on its heaviest *validated* tip:
+descending from genesis, at each fork it follows the heaviest child that is
+validated (heaviest by the whole subtree's work, unvalidated descendants
+included), and stops where no child is validated. Missing bodies of a heavier
+weighed branch are an availability gap (9.5-style: retried indefinitely, never
+a verdict): the branch keeps its weight, is never marked, and takes over at
+its fork once its first block there is validated. A block whose body is not
+held is weighed and unvalidated, never invalid; weight needs only the header.
 
 Failure to obtain a body is availability, never invalidity. Only a **completed**
 deterministic check — a `postState` mismatch or a committed validity rule —

@@ -234,11 +234,18 @@ public enum WasmPolicyEvaluator {
         return raw == 1
     }
 
+    /// Validates the whole module: every function body, called or not. The
+    /// engine otherwise validates a body only when it first runs, which would
+    /// leave a defect in the chain's committed module to surface on the first
+    /// transaction that reaches it. Translation is per function and does not
+    /// depend on the compilation mode, so a module that passes here cannot
+    /// fail validation when an evaluation later translates a body lazily.
     public static func validate(
         policy: WasmPolicyRef,
         moduleBytes: Data
     ) throws {
-        _ = try instantiate(policy: policy, moduleBytes: moduleBytes)
+        _ = try instantiate(
+            policy: policy, moduleBytes: moduleBytes, compilationMode: .eager)
     }
 
     /// Process-wide cache of parsed/compiled modules, keyed by module content id.
@@ -246,7 +253,8 @@ public enum WasmPolicyEvaluator {
 
     private static func instantiate(
         policy: WasmPolicyRef,
-        moduleBytes: Data
+        moduleBytes: Data,
+        compilationMode: EngineConfiguration.CompilationMode = .lazy
     ) throws -> (
         memory: WasmKit.Memory,
         alloc: Function,
@@ -267,6 +275,7 @@ public enum WasmPolicyEvaluator {
             return try parseWasm(bytes: bytes, features: Self.executionFeatureSet)
         }
         let engine = Engine(configuration: EngineConfiguration(
+            compilationMode: compilationMode,
             stackSize: Self.callStackBytes, features: Self.executionFeatureSet
         ))
         let store = Store(engine: engine)

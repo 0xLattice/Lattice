@@ -366,51 +366,53 @@ enum BlockImport {
         }
     }
 
+    /// `predecessorParentState` is the same-chain predecessor's declared
+    /// `parentState`, nil for a genesis.
     static func validateParentFacts(
         _ lookup: ParentFactLookup,
         child: Block,
         childCID: String,
+        predecessorParentState: String?,
         context: ChainRuntimeContext
     ) -> BlockImportError? {
         let parentPath = Array(context.path.dropLast())
-        // Every block, the genesis included, proves its anchor the same way
-        // (§5.3 step 6, with no height exemption): continuity from
-        // `emptyHeader` — the parent's own genesis pre-state — to its declared
-        // `parentState`, i.e. "this state is reachable from real parent
-        // history".
+        // Every block proves that the parent chain carried its anchor forward
+        // from its predecessor's (§5.3 step 6): its `parentState` was produced
+        // by the parent's executed set, by a block that is or descends from
+        // one that produced the predecessor's `parentState`. A genesis has no
+        // predecessor and proves its anchor from `emptyHeader`, the parent's
+        // own genesis pre-state.
         //
-        // This previously delegated to `verifySecuringWork`'s terminal binding,
-        // which cannot carry it: that compares the child's declared
-        // `parentState` against a CARRIER's `prevState`, and a carrier is
-        // content-addressed bytes that need not be admitted, connected, valid or
-        // canonical (§9.5). Both sides were therefore attacker-chosen, and a
+        // Real: the anchor cannot be checked against a CARRIER's `prevState`
+        // (`verifySecuringWork`'s terminal binding). A carrier is
+        // content-addressed bytes that need not be admitted, connected, valid
+        // or canonical (§9.5), so both sides would be attacker-chosen, and a
         // forged `receiptState` could settle a withdrawal that was never paid.
-        // Anchored from the parent chain's GENESIS, not from the predecessor.
+        // Nor may an anchor equal to the predecessor's pass on that equality:
+        // a weighed predecessor never proved its own anchor, so a forged
+        // state would be laundered one height further along. The parent fact
+        // therefore always proves the anchor itself was produced, equal or not.
         //
-        // Comparing against the predecessor makes this an induction, and the
-        // induction has no base on the weighed tier: a weighed admission never
-        // runs these checks at all, so a weighed predecessor proved nothing
-        // about its own `parentState`. A block could then match its unchecked
-        // predecessor, take the equality branch, and be admitted with zero
-        // evidence — laundering a forged parent state through the tier that
-        // deliberately defers verification. That is the same shape as the
-        // defect this rule exists to close, one height further along.
-        //
-        // So every block proves its own anchor directly. `emptyHeader` is
-        // reachable only at the parent's genesis, making this "reachable from
-        // real parent history" for each block on its own evidence, and the
-        // executed-from-genesis frontier answers it in O(1) — so the equality
-        // shortcut bought nothing that is worth an induction.
-        let fromStateCID = LatticeState.emptyHeader.rawCID
+        // Forward: anchors may not move back or sideways in the parent's
+        // history. Otherwise a child block anchored on a parent branch that was
+        // then reorganized away (one holding a receipt the canonical parent no
+        // longer has) is extended by blocks anchored on the new canonical
+        // branch, and its withdrawal stands although the parent chain no longer
+        // pays it. Forward-only, honest miners on the canonical parent cannot
+        // build on it, so a parent reorganization reorganizes the child too.
+        let emptyCID = LatticeState.emptyHeader.rawCID
+        let fromStateCID = predecessorParentState ?? emptyCID
         let toStateCID = child.parentState.rawCID
-        // A child genesis's continuity is the base case of the induction
-        // along its chain: it always proves a real parent state (§5.1 rule 4).
-        if child.parent == nil, fromStateCID == toStateCID {
+        // A child genesis always proves a real parent state (§5.1 rule 4).
+        if child.parent == nil, toStateCID == emptyCID {
             return .protocolInvalid
         }
-        if fromStateCID == toStateCID {
-            // The block commits no parent state at all; there is nothing to
-            // anchor, and no parent fact may be offered for it.
+        if toStateCID == emptyCID {
+            // The block commits no parent state, which is the genesis
+            // pre-state: allowed only while its predecessor commits none
+            // either. Dropping back to it from a real anchor moves backward,
+            // and both anchors are in the blocks' own bytes.
+            guard fromStateCID == emptyCID else { return .protocolInvalid }
             return lookup(.none) == .absent ? nil : .providerMalformedEvidence
         }
 
@@ -1035,14 +1037,27 @@ enum BlockImport {
             return .failure(classifyValidationFailure(error))
         }
         guard validation.0 else { return .failure(.protocolInvalid) }
-        if !context.isRoot, let parentFacts,
-           let failure = validateParentFacts(
-               parentFacts,
-               child: block,
-               childCID: blockHash,
-               context: context
-           ) {
-            return .failure(failure)
+        if !context.isRoot, let parentFacts {
+            var predecessorParentState: String?
+            if let predecessor = block.parent {
+                do {
+                    guard let node = try await predecessor.resolve(fetcher: fetcher).node else {
+                        return .failure(.unavailableEvidence)
+                    }
+                    predecessorParentState = node.parentState.rawCID
+                } catch {
+                    return .failure(classifyResolutionFailure(error))
+                }
+            }
+            if let failure = validateParentFacts(
+                parentFacts,
+                child: block,
+                childCID: blockHash,
+                predecessorParentState: predecessorParentState,
+                context: context
+            ) {
+                return .failure(failure)
+            }
         }
         return .success(ExecutedTransition(
             stateDiff: validation.1,
@@ -1294,14 +1309,16 @@ func classifyValidationFailure(_ error: Error) -> BlockImportError {
     return .unavailableEvidence
 }
 
-/// What a Wasm policy trap or error says about the input it was evaluated on.
-/// Block import and transaction preflight both classify these through this one
-/// function, so on them the two paths cannot drift apart: a transaction
-/// preflight evicts is one import would exclude, and one import retries stays
-/// pooled. The switch is exhaustive with no `default`, so a new
+/// What the outcome of a Wasm policy evaluation says about the input it was
+/// evaluated on. Anything that is a function of the module and the input on
+/// the pinned engine is a completed verdict; only what depends on this node
+/// is not. Block import classifies through this one function and transaction
+/// preflight classifies through import, so the two paths cannot drift apart:
+/// a transaction preflight evicts is one import would exclude, and one import
+/// retries stays pooled. The switch is exhaustive with no `default`, so a new
 /// `WasmPolicyError` case fails to compile until it is given a verdict here.
-/// Any other error is not classified here (`nil`): each caller applies its own
-/// rule for an unenumerated error.
+/// An error that is not listed is not classified here (`nil`): the caller
+/// retries it, so a failure of this node can never become a verdict.
 enum WasmPolicyErrorVerdict: Sendable, Equatable {
     /// No verdict: retry, never exclude.
     case unavailable
@@ -1309,30 +1326,46 @@ enum WasmPolicyErrorVerdict: Sendable, Equatable {
     case invalid
 }
 
+/// The engine's errors for a module it refuses to decode, validate, translate
+/// or link. Each is a function of the module bytes. Most are not public, so
+/// they are matched by name; the engine version is pinned exactly.
+private let wasmModuleDefectErrorTypes: Set<String> = [
+    "WasmParser.WasmParserError",
+    "WasmParser.LEBError",
+    "WasmParser.StreamError<Swift.UInt8>",
+    "WasmKit.ValidationError",
+    "WasmKit.TranslationError",
+    "WasmKit.ImportError",
+]
+
 func wasmPolicyErrorVerdict(_ error: Error) -> WasmPolicyErrorVerdict? {
     // A trap (unreachable, an out-of-bounds access, an integer divide trap, a
     // bad indirect call, call stack exhaustion) is a function of the module
     // and the input on the pinned engine, so every node reaches it: a
     // completed verdict, never an availability gap.
     if error is Trap { return .invalid }
+    if wasmModuleDefectErrorTypes.contains(String(reflecting: type(of: error))) {
+        return .invalid
+    }
     guard let error = error as? WasmPolicyError else { return nil }
     switch error {
-    case .contextEncodingFailed:
-        // The policy input itself cannot be encoded (a field past the length
-        // prefix's range, a negative action index): a property of the input,
-        // so every node reaches the same verdict.
-        return .invalid
     case .missingModule:
         // Missing module bytes: this node cannot reach a verdict, but the
         // policy is not proven invalid. Unavailable, never invalid.
         return .unavailable
+    case .contextEncodingFailed:
+        // The policy input itself cannot be encoded (a field past the length
+        // prefix's range, a negative action index): a property of the input.
+        return .invalid
     case .unsupportedABI, .invalidModule, .missingMemory, .missingAllocator,
-         .missingEntrypoint, .invalidFunctionSignature, .invalidAllocation,
-         .invalidReturn, .nondeterministicConstruct:
-        // A misbehaving or malformed module is not a completed verdict on the
-        // input: retry, never exclude. Genesis validates the configured
-        // modules, so these are rare after it.
-        return .unavailable
+         .missingEntrypoint, .invalidFunctionSignature,
+         .nondeterministicConstruct:
+        // A property of the chain's committed policy: its reference or its
+        // module bytes. Genesis refuses these, so they are rare after it.
+        return .invalid
+    case .invalidAllocation, .invalidReturn:
+        // What the module's allocator or entrypoint returned for this input.
+        return .invalid
     }
 }
 
