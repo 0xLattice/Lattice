@@ -22,8 +22,9 @@ extension ChainTree {
     /// that produced `fromStateCID`. From the genesis pre-state, or between
     /// equal states, it is `executedSetProduced(toStateCID)`: equality is never
     /// evidence on its own, so a forged state cannot be carried along by
-    /// matching an unproven one. Each producer pair is an O(log n) ancestry
-    /// test, whatever the distance between the two states.
+    /// matching an unproven one. Logarithmic in the parent's size whatever the
+    /// distance between the two states, and near-linear in how many blocks
+    /// produced each, so many blocks sharing a state cannot make it quadratic.
     public func executedSetAdvanced(from fromStateCID: String, to toStateCID: String) -> Bool {
         guard let from = CIDIdentity.canonicalString(fromStateCID),
               let to = CIDIdentity.canonicalString(toStateCID) else {
@@ -32,10 +33,10 @@ extension ChainTree {
         if from == to || from == LatticeState.emptyHeader.rawCID {
             return frontier.chainProduced(stateCID: to)
         }
-        let earlier = frontier.anchoredProducers(of: from)
-        return frontier.anchoredProducers(of: to).contains { later in
-            earlier.contains { forkChoice.isAncestorOrSelf($0, of: later) == true }
-        }
+        return forkChoice.anyIsAncestorOrSelf(
+            frontier.anchoredProducers(of: from),
+            of: frontier.anchoredProducers(of: to)
+        )
     }
 
     /// Whether `blockHash` is a proven-invalid subtree root. Its work still

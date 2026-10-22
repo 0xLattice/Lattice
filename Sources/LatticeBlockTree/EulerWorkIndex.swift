@@ -71,29 +71,68 @@ struct EulerWorkIndex: Sendable {
         return !precedes(target, open) && !precedes(close, target)
     }
 
+    /// Whether some block of `ancestors` is, or encloses, some block of
+    /// `descendants`: exactly `encloses(a, d) == true` for some pair, unrouted
+    /// blocks left out, in O((|A| + |D|) log |A| log n) rather than per pair.
+    /// Tour ranges never cross, they nest or are disjoint, so the outermost
+    /// ancestor ranges are disjoint and ordered, and a descendant can lie only
+    /// in the last of them that opens before it.
+    func anyEncloses(_ ancestors: [String], _ descendants: [String]) -> Bool {
+        var ranges: [(open: Int, close: Int)] = ancestors.compactMap {
+            guard let open = openNode[$0], let close = closeNode[$0] else { return nil }
+            return (open, close)
+        }
+        guard !ranges.isEmpty else { return false }
+        ranges.sort { precedes($0.open, $1.open) }
+        var outermost: [(open: Int, close: Int)] = []
+        for range in ranges {
+            // Opening inside the last kept range means lying wholly inside it.
+            if let last = outermost.last, !precedes(last.close, range.open) { continue }
+            outermost.append(range)
+        }
+        for descendant in descendants {
+            guard let target = openNode[descendant] else { continue }
+            // How many outermost ranges open at or before `target`.
+            var low = 0, high = outermost.count
+            while low < high {
+                let middle = (low + high) / 2
+                if precedes(target, outermost[middle].open) { high = middle } else { low = middle + 1 }
+            }
+            if low > 0, !precedes(outermost[low - 1].close, target) { return true }
+        }
+        return false
+    }
+
     /// Whether node `a` comes before node `b` in the tour: their sides of
-    /// their lowest common ancestor in the sequence tree decide it.
+    /// their lowest common ancestor in the sequence tree decide it. O(log n),
+    /// allocating nothing.
     private func precedes(_ a: Int, _ b: Int) -> Bool {
         if a == b { return false }
-        var aboveA: [Int: Int] = [:]  // each ancestor of `a` (and `a`) -> the node below it on that path
-        var below = -1
-        var node = a
-        while node >= 0 {
-            aboveA[node] = below
-            below = node
-            node = nodes[node].parent
+        func depth(_ node: Int) -> Int {
+            var depth = 0
+            var node = node
+            while nodes[node].parent >= 0 {
+                node = nodes[node].parent
+                depth += 1
+            }
+            return depth
         }
-        var fromB = -1
-        node = b
-        while aboveA[node] == nil {
-            fromB = node
-            node = nodes[node].parent
+        // Climb both to their common ancestor, remembering the node each
+        // path arrived from (-1 when `a` or `b` is the ancestor itself).
+        var x = a, y = b
+        var fromA = -1, fromB = -1
+        var depthA = depth(a), depthB = depth(b)
+        while depthA > depthB { fromA = x; x = nodes[x].parent; depthA -= 1 }
+        while depthB > depthA { fromB = y; y = nodes[y].parent; depthB -= 1 }
+        while x != y {
+            fromA = x; x = nodes[x].parent
+            fromB = y; y = nodes[y].parent
         }
         // -1: in the left subtree, 0: the common ancestor itself, 1: in the right.
         func side(_ child: Int) -> Int {
-            child < 0 ? 0 : (nodes[node].left == child ? -1 : 1)
+            child < 0 ? 0 : (nodes[x].left == child ? -1 : 1)
         }
-        return side(aboveA[node]!) < side(fromB)
+        return side(fromA) < side(fromB)
     }
 
     /// Total work in the subtree rooted at `blockHash`, or nil when the block
