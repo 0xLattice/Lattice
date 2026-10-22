@@ -170,6 +170,11 @@ struct ExecutionFrontier: Sendable {
     ///
     /// O(1): the equivalent walk grows with chain height, and it is the shape a
     /// child's block 1 asks for every time it anchors.
+    /// The executed-from-genesis blocks whose post-state is `stateCID`.
+    func anchoredProducers(of stateCID: String) -> [String] {
+        (byPostState[stateCID] ?? []).filter { anchored.contains($0) }
+    }
+
     func chainProduced(stateCID: String) -> Bool {
         guard let candidates = byPostState[stateCID] else { return false }
         // The frontier is the one authority: executed from genesis and not
