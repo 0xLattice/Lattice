@@ -791,12 +791,15 @@ func makeChildGenesis(
 }
 
 /// Parent facts attesting exactly `states` as produced by the parent's
-/// executed set.
+/// executed set. They hold no order among those states, so they answer only
+/// the links that need none: from the genesis pre-state, or between equal
+/// states.
 struct ProducedParentStates: ParentChainFacts {
     let states: Set<String>
 
     func hasContinuity(_ link: ParentStateContinuityLink) -> Bool {
-        link.fromStateCID == LatticeState.emptyHeader.rawCID && states.contains(link.toStateCID)
+        (link.fromStateCID == LatticeState.emptyHeader.rawCID || link.fromStateCID == link.toStateCID)
+            && states.contains(link.toStateCID)
     }
 }
 

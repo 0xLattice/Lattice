@@ -366,51 +366,53 @@ enum BlockImport {
         }
     }
 
+    /// `predecessorParentState` is the same-chain predecessor's declared
+    /// `parentState`, nil for a genesis.
     static func validateParentFacts(
         _ lookup: ParentFactLookup,
         child: Block,
         childCID: String,
+        predecessorParentState: String?,
         context: ChainRuntimeContext
     ) -> BlockImportError? {
         let parentPath = Array(context.path.dropLast())
-        // Every block, the genesis included, proves its anchor the same way
-        // (§5.3 step 6, with no height exemption): continuity from
-        // `emptyHeader` — the parent's own genesis pre-state — to its declared
-        // `parentState`, i.e. "this state is reachable from real parent
-        // history".
+        // Every block proves that the parent chain carried its anchor forward
+        // from its predecessor's (§5.3 step 6): its `parentState` was produced
+        // by the parent's executed set, by a block that is or descends from
+        // one that produced the predecessor's `parentState`. A genesis has no
+        // predecessor and proves its anchor from `emptyHeader`, the parent's
+        // own genesis pre-state.
         //
-        // This previously delegated to `verifySecuringWork`'s terminal binding,
-        // which cannot carry it: that compares the child's declared
-        // `parentState` against a CARRIER's `prevState`, and a carrier is
-        // content-addressed bytes that need not be admitted, connected, valid or
-        // canonical (§9.5). Both sides were therefore attacker-chosen, and a
+        // Real: the anchor cannot be checked against a CARRIER's `prevState`
+        // (`verifySecuringWork`'s terminal binding). A carrier is
+        // content-addressed bytes that need not be admitted, connected, valid
+        // or canonical (§9.5), so both sides would be attacker-chosen, and a
         // forged `receiptState` could settle a withdrawal that was never paid.
-        // Anchored from the parent chain's GENESIS, not from the predecessor.
+        // Nor may an anchor equal to the predecessor's pass on that equality:
+        // a weighed predecessor never proved its own anchor, so a forged
+        // state would be laundered one height further along. The parent fact
+        // therefore always proves the anchor itself was produced, equal or not.
         //
-        // Comparing against the predecessor makes this an induction, and the
-        // induction has no base on the weighed tier: a weighed admission never
-        // runs these checks at all, so a weighed predecessor proved nothing
-        // about its own `parentState`. A block could then match its unchecked
-        // predecessor, take the equality branch, and be admitted with zero
-        // evidence — laundering a forged parent state through the tier that
-        // deliberately defers verification. That is the same shape as the
-        // defect this rule exists to close, one height further along.
-        //
-        // So every block proves its own anchor directly. `emptyHeader` is
-        // reachable only at the parent's genesis, making this "reachable from
-        // real parent history" for each block on its own evidence, and the
-        // executed-from-genesis frontier answers it in O(1) — so the equality
-        // shortcut bought nothing that is worth an induction.
-        let fromStateCID = LatticeState.emptyHeader.rawCID
+        // Forward: anchors may not move back or sideways in the parent's
+        // history. Otherwise a child block anchored on a parent branch that was
+        // then reorganized away (one holding a receipt the canonical parent no
+        // longer has) is extended by blocks anchored on the new canonical
+        // branch, and its withdrawal stands although the parent chain no longer
+        // pays it. Forward-only, honest miners on the canonical parent cannot
+        // build on it, so a parent reorganization reorganizes the child too.
+        let emptyCID = LatticeState.emptyHeader.rawCID
+        let fromStateCID = predecessorParentState ?? emptyCID
         let toStateCID = child.parentState.rawCID
-        // A child genesis's continuity is the base case of the induction
-        // along its chain: it always proves a real parent state (§5.1 rule 4).
-        if child.parent == nil, fromStateCID == toStateCID {
+        // A child genesis always proves a real parent state (§5.1 rule 4).
+        if child.parent == nil, toStateCID == emptyCID {
             return .protocolInvalid
         }
-        if fromStateCID == toStateCID {
-            // The block commits no parent state at all; there is nothing to
-            // anchor, and no parent fact may be offered for it.
+        if toStateCID == emptyCID {
+            // The block commits no parent state, which is the genesis
+            // pre-state: allowed only while its predecessor commits none
+            // either. Dropping back to it from a real anchor moves backward,
+            // and both anchors are in the blocks' own bytes.
+            guard fromStateCID == emptyCID else { return .protocolInvalid }
             return lookup(.none) == .absent ? nil : .providerMalformedEvidence
         }
 
@@ -1035,14 +1037,27 @@ enum BlockImport {
             return .failure(classifyValidationFailure(error))
         }
         guard validation.0 else { return .failure(.protocolInvalid) }
-        if !context.isRoot, let parentFacts,
-           let failure = validateParentFacts(
-               parentFacts,
-               child: block,
-               childCID: blockHash,
-               context: context
-           ) {
-            return .failure(failure)
+        if !context.isRoot, let parentFacts {
+            var predecessorParentState: String?
+            if let predecessor = block.parent {
+                do {
+                    guard let node = try await predecessor.resolve(fetcher: fetcher).node else {
+                        return .failure(.unavailableEvidence)
+                    }
+                    predecessorParentState = node.parentState.rawCID
+                } catch {
+                    return .failure(classifyResolutionFailure(error))
+                }
+            }
+            if let failure = validateParentFacts(
+                parentFacts,
+                child: block,
+                childCID: blockHash,
+                predecessorParentState: predecessorParentState,
+                context: context
+            ) {
+                return .failure(failure)
+            }
         }
         return .success(ExecutedTransition(
             stateDiff: validation.1,

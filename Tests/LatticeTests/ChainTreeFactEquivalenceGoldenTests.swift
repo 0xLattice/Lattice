@@ -161,14 +161,17 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
     /// The continuity link a node derives for `child` from `facts` — present
     /// exactly when the facts answer it — or, for `wrongPath`, a link naming
     /// another parent chain.
+    /// The link from `predecessor`'s anchor (the genesis pre-state for a
+    /// genesis) to `child`'s, as admission expects it.
     private func continuityLink(
         for child: Block,
+        after predecessor: Block? = nil,
         facts: ParentLevelFacts,
         wrongPath: Bool = false
     ) -> ParentStateContinuityLink? {
         let link = ParentStateContinuityLink(
             parentPath: wrongPath ? [DEFAULT_ROOT_DIRECTORY, "Other"] : [DEFAULT_ROOT_DIRECTORY],
-            fromStateCID: LatticeState.emptyHeader.rawCID,
+            fromStateCID: predecessor?.parentState.rawCID ?? LatticeState.emptyHeader.rawCID,
             toStateCID: child.parentState.rawCID
         )
         return wrongPath || facts.hasContinuity(link) ? link : nil
@@ -270,7 +273,7 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
         for (index, (name, block, carrierParent, wrong)) in cases.enumerated() {
             let proved = try await proof(
                 of: block, carrierParent: carrierParent, nonce: 10 + UInt64(index), fetcher: fetcher, context: childContext,
-                link: continuityLink(for: block, facts: facts, wrongPath: wrong)
+                link: continuityLink(for: block, after: childGenesis, facts: facts, wrongPath: wrong)
             )
             try await child.header("child/\(name)", block, package: proved.package, evidence: proved.evidence)
             if index == 0 {

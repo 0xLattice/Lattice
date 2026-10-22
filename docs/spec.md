@@ -376,26 +376,31 @@ this order:
 5. For genesis, require the complete genesis shape (§5.1), including
    `nextTarget == target`.
 6. Require an exact continuity link proving that the immediate parent's
-   executed set produced `B.parentState` from `emptyHeader` — the parent's own
-   genesis pre-state — or, for a non-genesis block, that `B.parentState` is
-   `emptyHeader` itself. This applies at EVERY height, the genesis included
-   (§5.1 rule 4). Step 3's terminal binding
-   does not substitute for this — a carrier need not be imported, connected,
-   valid or canonical, so it establishes no anchor.
+   executed set carried its state forward to `B.parentState` from the
+   predecessor's `parentState` (from `emptyHeader`, the parent's own genesis
+   pre-state, for a genesis): some block of the executed set produced
+   `B.parentState`, and is or descends from a block that produced the
+   predecessor's `parentState`. This applies at EVERY height, the genesis
+   included (§5.1 rule 4). A non-genesis block may commit `emptyHeader` (no
+   parent state) only while its predecessor does too; dropping back to it
+   from a real anchor moves backward and is invalid. Step 3's terminal
+   binding does not substitute for this — a carrier need not be imported,
+   connected, valid or canonical, so it establishes no anchor.
 
-   Each block proves its own anchor from `emptyHeader`, NOT from its
-   predecessor's `parentState`. Anchoring against the predecessor is an
-   induction with no base: the weighed tier imports a block without running
-   these checks, so a weighed predecessor proved nothing, and a successor
-   matching its unchecked claim would be imported with no evidence at all.
-   A consequence of anchoring each block independently is that `parentState`
-   is no longer required to advance monotonically across a chain, nor to
-   stay on one parent branch: consecutive blocks may anchor backward or
-   sideways, onto any branch the parent executed. `parentState` is read only
-   to prove a receipt (§8.1 Phase 3), and the matching deposit is spent from
-   the child's own `prevState`, so no receipt settles twice. But a sideways
-   anchor can prove a receipt that exists only on a non-canonical parent
-   branch (§8.1, "Receipt canonicity").
+   The link proves the anchor itself, not only its relation to the
+   predecessor's: from `emptyHeader`, or between equal states, it proves that
+   the executed set produced `B.parentState`. Equality alone is never
+   evidence. The weighed tier imports a block without running these checks,
+   so a weighed predecessor proved nothing, and a successor matching its
+   unchecked claim would otherwise be imported with no evidence at all.
+
+   Anchors therefore advance monotonically along the parent's history and
+   never move backward or sideways. That is what makes a parent
+   reorganization reorganize the child: a miner on the canonical parent
+   anchors at its canonical state, which does not descend from an abandoned
+   branch, so it cannot extend a child block anchored there (§8.1, "Receipt
+   canonicity"). An ancestry test answers the link in time logarithmic in the
+   parent's size, whatever the distance between the two states.
 7. Apply the ordinary genesis or non-genesis transition rules to `B`, including
    withdrawal proofs against `B.parentState`.
 
@@ -865,18 +870,17 @@ because withdrawal requires both proofs. It is not cost-free: the signed parent
 payment and receipt-state insertion still execute.
 
 **Receipt canonicity.** Consensus binds a withdrawal to a parent state the
-parent executed, on any branch (§5.3 step 6), never to the parent's canonical
-chain, and child fork choice does not read parent canonicity (§9). A receipt
-that exists only on a stale parent branch therefore settles a withdrawal, and
-the child chain keeps it while the canonical parent never paid the demander.
-Producing such a receipt costs one valid parent block that loses: far less
-than reorganizing the parent, and independent of the honest hashrate
-majority. The demander bears the loss, since the deposit is escrowed before
-the receipt and consensus releases it at any depth. Consensus leaves the
-defense to miner policy (declining to extend a withdrawal whose `parentState`
-is off the miner's parent chain) and to the demander, who can wait for the
-withdrawal to be confirmed under that policy, or deposit only once the receipt
-is confirmed on the canonical parent.
+parent executed, on any branch (§5.3 step 6), and child fork choice does not
+read parent canonicity (§9). A receipt that exists only on a parent branch the
+parent later abandons can therefore settle a withdrawal in some child block.
+It does not stand against honest miners: anchors only move forward (§5.3 step
+6), a miner on the canonical parent anchors at a state that does not descend
+from the abandoned branch, and so no honest miner can extend that child
+block. Only work anchored on the abandoned branch extends it, and once the
+honest child branch is heavier the child chain reorganizes and the withdrawal
+is undone with it. Keeping the withdrawal takes a majority of the child's
+hashrate, as reversing any confirmed child transaction does. The demander
+can wait for the withdrawal to be confirmed on the child, as for any payment.
 
 ### 8.2 Balance Conservation with Cross-Chain Transfers
 
@@ -1123,8 +1127,9 @@ work fact only after it is accepted and connected.
 
 The immediate parent authenticates only state continuity and child-genesis
 authorization. A continuity fact is bound to the exact parent path and
-`(fromStateCID, toStateCID)` pair. It proves transitive reachability through the
-parent's connected accepted graph, not parent canonicity and not a work total.
+`(fromStateCID, toStateCID)` pair. It proves that the parent's executed set
+produced `toStateCID` at or below a block that produced `fromStateCID` (§5.3
+step 6), not parent canonicity and not a work total.
 
 A parent MUST attest continuity only across blocks on its executed-from-genesis
 frontier — executed, every ancestor executed, none under an excluded block

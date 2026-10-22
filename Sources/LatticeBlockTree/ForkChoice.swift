@@ -243,6 +243,12 @@ struct ForkChoice: Sendable {
         weights.insertRoot(hash)
     }
 
+    /// Whether `descendant` is `ancestor` or descends from it, or nil when
+    /// either is not routed. O(log n).
+    func isAncestorOrSelf(_ ancestor: String, of descendant: String) -> Bool? {
+        weights.encloses(ancestor, descendant)
+    }
+
     /// Splice one toured component — `events`, opening at `rootHash` — into
     /// the weights in one operation, under `parentHash` or, with none, as a
     /// new genesis root; then record the component's grind locations, already

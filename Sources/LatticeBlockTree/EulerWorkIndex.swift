@@ -60,6 +60,42 @@ struct EulerWorkIndex: Sendable {
 
     // MARK: - Queries
 
+    /// Whether `descendant` is `ancestor` or lies in its subtree, or nil when
+    /// either is not routed. A subtree is the run between its block's open and
+    /// close, so this is two order comparisons, each O(log n) whatever the
+    /// distance between the blocks.
+    func encloses(_ ancestor: String, _ descendant: String) -> Bool? {
+        guard let open = openNode[ancestor],
+              let close = closeNode[ancestor],
+              let target = openNode[descendant] else { return nil }
+        return !precedes(target, open) && !precedes(close, target)
+    }
+
+    /// Whether node `a` comes before node `b` in the tour: their sides of
+    /// their lowest common ancestor in the sequence tree decide it.
+    private func precedes(_ a: Int, _ b: Int) -> Bool {
+        if a == b { return false }
+        var aboveA: [Int: Int] = [:]  // each ancestor of `a` (and `a`) -> the node below it on that path
+        var below = -1
+        var node = a
+        while node >= 0 {
+            aboveA[node] = below
+            below = node
+            node = nodes[node].parent
+        }
+        var fromB = -1
+        node = b
+        while aboveA[node] == nil {
+            fromB = node
+            node = nodes[node].parent
+        }
+        // -1: in the left subtree, 0: the common ancestor itself, 1: in the right.
+        func side(_ child: Int) -> Int {
+            child < 0 ? 0 : (nodes[node].left == child ? -1 : 1)
+        }
+        return side(aboveA[node]!) < side(fromB)
+    }
+
     /// Total work in the subtree rooted at `blockHash`, or nil when the block
     /// is not routed into fork choice.
     ///
