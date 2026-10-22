@@ -75,8 +75,10 @@ public extension ChainLevel {
             let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
             guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
             let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
+            // Only the floor is a permanent verdict: whether credits create
+            // accounts depends on the state the transaction lands on.
             guard spec.isValid,
-                  try body.getStateDelta() <= spec.maxStateGrowth,
+                  try TransactionBody.stateGrowthFloor(of: [body]).map({ $0 <= spec.maxStateGrowth }) ?? false,
                   try await TransactionBody.batchVerifyPolicies(
                     bodies: [body],
                     spec: spec,
@@ -93,8 +95,8 @@ public extension ChainLevel {
                 return result(.unavailable, tipCID: tip.cid)
             }
 
-            var hasFutureNonce = false
-            for signer in Set(body.signers).sorted() {
+            // Only the first signer's nonce is consensus (spec §6.2).
+            if let signer = body.signers.first {
                 let expected = try await state.accountState.nextExpectedNonce(
                     for: signer,
                     fetcher: fetcher
@@ -102,10 +104,9 @@ public extension ChainLevel {
                 if body.nonce < expected {
                     return result(.invalid, tipCID: tip.cid)
                 }
-                if body.nonce > expected { hasFutureNonce = true }
-            }
-            if hasFutureNonce {
-                return result(.future, tipCID: tip.cid)
+                if body.nonce > expected {
+                    return result(.future, tipCID: tip.cid)
+                }
             }
 
             if !body.withdrawalActions.isEmpty {

@@ -149,7 +149,7 @@ public extension Block {
         }
         if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: chainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
-        if try !validateStateDeltaSize(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
+        if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
             return (false, .empty, nil)
         }
@@ -160,7 +160,7 @@ public extension Block {
         // that reaches this point — pass empty literals instead of collecting.
         assert(transactionBodies.allSatisfy { $0.depositActions.isEmpty && $0.withdrawalActions.isEmpty && $0.receiptActions.isEmpty })
         if try !validateBalanceChangesForGenesis(spec: specNode, allAccountActions: allAccountActions) { return (false, .empty, nil) }
-        let (postStateValid, diff, materializedPostState) = try await validatePostState(transactionBodies: transactionBodies, allAccountActions: allAccountActions, allActions: transactionBodies.flatMap { $0.actions }, allDepositActions: [], allReceiptActions: [], allWithdrawalActions: [], fetcher: fetcher)
+        let (postStateValid, diff, materializedPostState) = try await validatePostState(spec: specNode, transactionBodies: transactionBodies, allAccountActions: allAccountActions, allActions: transactionBodies.flatMap { $0.actions }, allDepositActions: [], allReceiptActions: [], allWithdrawalActions: [], fetcher: fetcher)
         if !postStateValid { return (false, .empty, nil) }
         return (true, diff, materializedPostState)
     }
@@ -424,7 +424,7 @@ public extension Block {
         // spec; nil chainPath ⇒ root.
         if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: expectedChainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
-        if try !validateStateDeltaSize(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
+        if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
             return (false, .empty, nil)
         }
@@ -454,7 +454,7 @@ public extension Block {
         ) else { return (false, .empty, nil) }
         if let coinbase { allAccountActions.append(coinbase) }
 
-        let (postStateValid, diff, materializedPostState) = try await validatePostState(transactionBodies: transactionBodies, allAccountActions: allAccountActions, allActions: transactionBodies.flatMap { $0.actions }, allDepositActions: allDepositActions, allReceiptActions: allReceiptActions, allWithdrawalActions: allWithdrawalActions, fetcher: fetcher)
+        let (postStateValid, diff, materializedPostState) = try await validatePostState(spec: specNode, transactionBodies: transactionBodies, allAccountActions: allAccountActions, allActions: transactionBodies.flatMap { $0.actions }, allDepositActions: allDepositActions, allReceiptActions: allReceiptActions, allWithdrawalActions: allWithdrawalActions, fetcher: fetcher)
         if !postStateValid { return (false, .empty, nil) }
         return (true, diff, materializedPostState)
     }
@@ -515,11 +515,16 @@ public extension Block {
     }
 
 
-    func validatePostState(transactionBodies: [TransactionBody], allAccountActions: [AccountAction], allActions: [Action], allDepositActions: [DepositAction], allReceiptActions: [ReceiptAction], allWithdrawalActions: [WithdrawalAction], fetcher: Fetcher) async throws -> (Bool, StateDiff, LatticeState?) {
+    func validatePostState(spec: ChainSpec, transactionBodies: [TransactionBody], allAccountActions: [AccountAction], allActions: [Action], allDepositActions: [DepositAction], allReceiptActions: [ReceiptAction], allWithdrawalActions: [WithdrawalAction], fetcher: Fetcher) async throws -> (Bool, StateDiff, LatticeState?) {
         guard let prevStateNode = try await prevState.resolve(fetcher: fetcher).node else {
             return (false, .empty, nil)
         }
-        let (updatedState, diff) = try await prevStateNode.proveAndUpdateState(allAccountActions: allAccountActions, allActions: allActions, allDepositActions: allDepositActions, allReceiptActions: allReceiptActions, allWithdrawalActions: allWithdrawalActions, transactionBodies: transactionBodies, fetcher: fetcher)
+        let (updatedState, diff, accountGrowth) = try await prevStateNode.proveAndUpdateStateMeasuringGrowth(allAccountActions: allAccountActions, allActions: allActions, allDepositActions: allDepositActions, allReceiptActions: allReceiptActions, allWithdrawalActions: allWithdrawalActions, transactionBodies: transactionBodies, fetcher: fetcher)
+        // Growth is known only after the transition: account entries the
+        // block creates or removes depend on the balances it starts from.
+        if try !validateStateDeltaSize(spec: spec, transactionBodies: transactionBodies, accountGrowth: accountGrowth) {
+            return (false, .empty, nil)
+        }
         // Compare the expected postState CID (computed from prev state + TXs) against the
         // block's declared postState CID. Avoids a CAS fetch for the new postState — the
         // new state nodes are computed inline and may not yet be stored to DiskBroker.
@@ -651,14 +656,17 @@ public extension Block {
         return true
     }
 
-    func validateStateDeltaSize(spec: ChainSpec, transactionBodies: [TransactionBody]) throws -> Bool {
-        var delta = 0
-        for body in transactionBodies {
-            guard addStateDelta(try body.getStateDelta(), to: &delta) else {
-                return false
-            }
-        }
-        return delta <= spec.maxStateGrowth
+    /// The early, transition-free reject: a block whose growth floor is over
+    /// the limit is over it whatever balances it starts from. The exact check
+    /// is `validateStateDeltaSize`, after the transition.
+    func validateStateGrowthFloor(spec: ChainSpec, transactionBodies: [TransactionBody]) throws -> Bool {
+        try TransactionBody.stateGrowthFloor(of: transactionBodies)
+            .map { $0 <= spec.maxStateGrowth } ?? false
+    }
+
+    func validateStateDeltaSize(spec: ChainSpec, transactionBodies: [TransactionBody], accountGrowth: Int) throws -> Bool {
+        try TransactionBody.stateGrowth(of: transactionBodies, accountGrowth: accountGrowth)
+            .map { $0 <= spec.maxStateGrowth } ?? false
     }
 
     func validateMaxTransactionCount(spec: ChainSpec, transactionBodies: [TransactionBody]) -> Bool {

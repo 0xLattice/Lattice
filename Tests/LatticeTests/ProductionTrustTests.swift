@@ -450,7 +450,8 @@ final class DustAttackTests: XCTestCase {
             )
             let block = try await buildAndStoreBlock(
                 previous: genesis, transactions: [tx(body, funder)],
-                timestamp: base + 1000, target: UInt256(1000), nonce: 1, fetcher: fetcher
+                timestamp: base + 1000, target: UInt256(1000), nonce: 1,
+                allowStateGrowthViolation: true, fetcher: fetcher
             )
             return try await block.validateNexus(fetcher: fetcher).0
         }

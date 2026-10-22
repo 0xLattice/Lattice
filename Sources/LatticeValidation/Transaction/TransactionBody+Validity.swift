@@ -239,6 +239,32 @@ extension TransactionBody {
         return delta
     }
 
+    /// A block's state growth (spec §6.6): its transactions' action deltas
+    /// plus the account growth its transition measured; nil on overflow.
+    package static func stateGrowth(of bodies: [TransactionBody], accountGrowth: Int) throws -> Int? {
+        var growth = accountGrowth
+        for body in bodies {
+            guard addStateDelta(try body.getStateDelta(), to: &growth) else { return nil }
+        }
+        return growth
+    }
+
+    /// A floor on `stateGrowth`, known before the transition: the action
+    /// deltas, less the most account removals could free. Only an owner whose
+    /// balance nets to a debit can be removed; entries are never otherwise
+    /// freed. A floor over the limit is over it from any starting state.
+    package static func stateGrowthFloor(of bodies: [TransactionBody]) throws -> Int? {
+        let deltas = try netBalanceDeltas(
+            accountActions: bodies.flatMap(\.accountActions),
+            receiptActions: bodies.flatMap(\.receiptActions)
+        )
+        var removable = 0
+        for (owner, delta) in deltas {
+            if case .debit = delta { removable += owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES }
+        }
+        return try stateGrowth(of: bodies, accountGrowth: -removable)
+    }
+
     public static func batchVerifyPolicies(
         bodies: [TransactionBody],
         spec: ChainSpec,

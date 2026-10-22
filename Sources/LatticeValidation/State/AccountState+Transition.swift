@@ -3,31 +3,49 @@ import LatticePrimitives
 
 public extension AccountStateHeader {
     /// Aggregate deltas per owner, resolve current balances, apply net changes.
-    /// Also advances per-signer nonce tracking via `_nonce_<prefix>` keys in
-    /// the same trie (Ethereum-style per-account nonce).
+    /// Also advances each transaction's first signer's nonce via
+    /// `_nonce_<signer>` keys in the same trie (Ethereum-style per-account nonce).
     func proveAndUpdateState(
         allAccountActions: [AccountAction],
         allReceiptActions: [ReceiptAction] = [],
         transactionBodies: [TransactionBody] = [],
         fetcher: Fetcher
     ) async throws -> (AccountStateHeader, StateDiff) {
+        let (result, diff, _) = try await proveAndUpdateStateMeasuringGrowth(
+            allAccountActions: allAccountActions,
+            allReceiptActions: allReceiptActions,
+            transactionBodies: transactionBodies,
+            fetcher: fetcher
+        )
+        return (result, diff)
+    }
+
+    /// `proveAndUpdateState`, plus the bytes the transition adds to account
+    /// state (spec §6.6): `len(key) + ACCOUNT_ENTRY_VALUE_BYTES` for each
+    /// balance or nonce entry created, minus the same for each balance removed.
+    func proveAndUpdateStateMeasuringGrowth(
+        allAccountActions: [AccountAction],
+        allReceiptActions: [ReceiptAction] = [],
+        transactionBodies: [TransactionBody] = [],
+        fetcher: Fetcher
+    ) async throws -> (AccountStateHeader, StateDiff, Int) {
         let netDeltas = try TransactionBody.netBalanceDeltas(
             accountActions: allAccountActions,
             receiptActions: allReceiptActions
         )
         let ownerOrder = netDeltas.keys.sorted()
 
-        // Group transactions by signer account, validate each signer's contiguous
-        // nonce sequence independently. Multi-signer transactions advance every
-        // signer, not a synthetic signer-set namespace.
+        // Group transactions by their first signer and validate each such
+        // signer's contiguous nonce sequence. Co-signers' nonces are not
+        // consulted or advanced: the first signer's nonce already makes the
+        // body every signer signed unique, so it cannot be replayed.
         var signerOrder: [String] = []
         var groups: [String: [TransactionBody]] = [:]
         for tx in transactionBodies {
-            for signer in Set(tx.signers).sorted() {
-                guard !Self.isReservedAccountKey(signer) else { throw StateErrors.conflictingActions }
-                if groups[signer] == nil { signerOrder.append(signer) }
-                groups[signer, default: []].append(tx)
-            }
+            guard !tx.signers.contains(where: Self.isReservedAccountKey) else { throw StateErrors.conflictingActions }
+            guard let signer = tx.signers.first else { continue }
+            if groups[signer] == nil { signerOrder.append(signer) }
+            groups[signer, default: []].append(tx)
         }
         for signer in signerOrder {
             groups[signer]!.sort { $0.nonce < $1.nonce }
@@ -40,7 +58,7 @@ public extension AccountStateHeader {
             }
         }
 
-        if netDeltas.isEmpty && signerOrder.isEmpty { return (self, .empty) }
+        if netDeltas.isEmpty && signerOrder.isEmpty { return (self, .empty, 0) }
 
         // Resolve targeted paths to read current balances + current nonces
         var resolvePaths = [[String]: ResolutionStrategy]()
@@ -55,6 +73,7 @@ public extension AccountStateHeader {
 
         var proofs = [[String]: SparseMerkleProof]()
         var transforms = [[String]: Transform]()
+        var growth = 0
 
         for owner in ownerOrder {
             let delta = netDeltas[owner]!
@@ -74,9 +93,11 @@ public extension AccountStateHeader {
             if current == 0 && newBalance > 0 {
                 proofs[[owner]] = .insertion
                 transforms[[owner]] = .insert(String(newBalance))
+                growth += owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
             } else if current > 0 && newBalance == 0 {
                 proofs[[owner]] = .deletion
                 transforms[[owner]] = .delete
+                growth -= owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
             } else if current > 0 && newBalance > 0 {
                 proofs[[owner]] = .mutation
                 transforms[[owner]] = .update(String(newBalance))
@@ -102,15 +123,16 @@ public extension AccountStateHeader {
             } else {
                 proofs[[nonceKey]] = .insertion
                 transforms[[nonceKey]] = .insert(String(newNonce))
+                growth += nonceKey.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
             }
         }
 
-        if proofs.isEmpty { return (resolved, .empty) }
+        if proofs.isEmpty { return (resolved, .empty, growth) }
 
         let proven = try await resolved.proof(paths: proofs, fetcher: fetcher)
         guard let result = try proven.transform(transforms: transforms) else {
             throw TransformErrors.transformFailed("account state transform returned nil")
         }
-        return (result, diffCIDs(old: proven, new: result))
+        return (result, diffCIDs(old: proven, new: result), growth)
     }
 }
