@@ -2,6 +2,7 @@ import Foundation
 import cashew
 import LatticePrimitives
 import LatticePoW
+import UInt256
 
 public struct SameChainPredecessorRequirement: Sendable, Equatable {
     public let descendantCID: String
@@ -106,11 +107,69 @@ public struct ChainExclusionFact: Codable, Sendable, Equatable {
     }
 }
 
+/// A run (§9.10) whose carrier was folded: its final attributed value,
+/// `runWork(P, d) − grindWork(P)`, and the child block it credits. A folded
+/// run cannot grow — its blocks are gone and a branch attaching beyond the
+/// window is tallied, not weighed — so the value it had is the value it keeps.
+public struct FrozenRun: Codable, Sendable, Equatable, Hashable {
+    public let carrierBlockHash: String
+    public let directory: String
+    public let childBlockHash: String
+    public let value: UInt256
+
+    public init(carrierBlockHash: String, directory: String, childBlockHash: String, value: UInt256) {
+        self.carrierBlockHash = carrierBlockHash
+        self.directory = directory
+        self.childBlockHash = childBlockHash
+        self.value = value
+    }
+}
+
+/// Dead side branches folded into the held block they fork from (§9.7).
+/// `work` is the total credited work of every subtree ever folded at the
+/// block — cumulative, so a later fold ratchets it like any work fact.
+/// Credited there as one contribution, it keeps every comparison fork choice
+/// can still make exact: the block's subtree and its ancestors' include it, and
+/// the subtree of no held child ever did.
+///
+/// `covered` is, per directory, the part of `work` that sat under a folded
+/// carrier into that directory: that work was in the carrier's run, not in the
+/// run of this block's nearest carrier, so it is subtracted from what this
+/// block credits to that run. `frozenRuns` are those folded carriers' runs.
+public struct ChainFoldFact: Codable, Sendable, Equatable {
+    public let blockHash: String
+    public let work: UInt256
+    public let covered: [String: UInt256]
+    public let frozenRuns: [FrozenRun]
+
+    public init(blockHash: String, work: UInt256, covered: [String: UInt256], frozenRuns: [FrozenRun]) {
+        self.blockHash = blockHash
+        self.work = work
+        self.covered = covered
+        self.frozenRuns = frozenRuns
+    }
+}
+
+/// The contribution identity a fold is credited under at its block: one per
+/// block, so successive folds there ratchet one value.
+public struct FoldIdentity: Hashable, Scalar {
+    public let foldedAtBlockHash: String
+
+    public init(foldedAtBlockHash: String) {
+        self.foldedAtBlockHash = foldedAtBlockHash
+    }
+
+    public var contributionID: String? {
+        try? HeaderImpl<FoldIdentity>(node: self).rawCID
+    }
+}
+
 public enum ChainFactID: Codable, Hashable, Sendable {
     case block(String)
     case work(blockHash: String, grindID: String, work: String)
     case exclusion(String)
     case validation(String)
+    case fold(blockHash: String, work: String)
 }
 
 public enum ChainFact: Codable, Sendable, Equatable {
@@ -118,6 +177,7 @@ public enum ChainFact: Codable, Sendable, Equatable {
     case work(ChainWorkFact)
     case exclusion(ChainExclusionFact)
     case validation(ChainValidationFact)
+    case fold(ChainFoldFact)
 
     public var id: ChainFactID {
         switch self {
@@ -129,6 +189,18 @@ public enum ChainFact: Codable, Sendable, Equatable {
         )
         case .exclusion(let fact): .exclusion(fact.blockHash)
         case .validation(let fact): .validation(fact.blockHash)
+        case .fold(let fact): .fold(blockHash: fact.blockHash, work: fact.work.toHexString())
+        }
+    }
+
+    /// The held block this fact is about.
+    public var blockHash: String {
+        switch self {
+        case .block(let fact): fact.blockHash
+        case .work(let fact): fact.blockHash
+        case .exclusion(let fact): fact.blockHash
+        case .validation(let fact): fact.blockHash
+        case .fold(let fact): fact.blockHash
         }
     }
 }

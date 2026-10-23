@@ -1175,9 +1175,34 @@ trusted canonical projection.
 
 ### 9.7 Consensus Graph and Node State Lifecycle
 
-Lattice retains the complete accepted consensus graph and every verified local
-grind location. It performs no age-, depth-, body-, or state-retention pruning
-of consensus inputs.
+Lattice never loses counted work. By default a node retains the complete
+accepted consensus graph and every verified local grind location.
+
+A node MAY **fold** side branches beyond a window it chooses. A block is
+beyond the window when its timestamp is more than the window older than the
+canonical tip's. A side subtree is foldable when every block in it is beyond
+the window and it hangs off a kept block that is beyond it too. The kept
+blocks are the canonical chain, any block the node pins and its ancestors,
+and every executed block, which the node may also release after a second
+window it chooses. Executed blocks are what a child's parent-state
+continuity reads (§5.3).
+
+Folding deletes the subtree's blocks and facts and records one
+`ChainFoldFact` at the block it hangs from:
+- **`work`:** the folded subtrees' total weight, cumulative over every fold
+  there. It is credited at that block under `CID(FoldIdentity(B))` as a
+  ratcheting contribution that is not a grind. Every ancestor's subtree work is
+  therefore unchanged, and no held child's subtree ever contained it, so every
+  comparison fork choice can still make (§9.4) is the one it made before.
+- **`covered`:** per directory, the part of `work` that sat under a folded
+  carrier and so was that carrier's run, not the run of `B`'s carrier (§9.10).
+- **`frozenRuns`:** each folded carrier's final run.
+
+The window, the pins and whether to fold at all are operator choices; folding
+changes what a node stores, never which head it selects. A branch attaching
+beyond the window may be tallied by its headers and weighed only once it
+proves at least the work of the canonical child it competes with at the fork
+point (`deepForkBar`). A folded block sent again attaches there and cannot pass.
 
 State execution may derive local lifecycle metadata, but that metadata is not a
 block commitment or a second cross-volume relationship index. The node decides
@@ -1187,8 +1212,9 @@ projections, archival, and garbage collection.
 ### 9.8 Persistence
 
 The node durably preserves every accepted block's consensus fields, every
-distinct location fact and strengthening observation, and a monotone mutation
-order. A crash may occur after durable staging and before in-memory mutation;
+distinct location fact and strengthening observation, every fold, and a
+monotone mutation order. A compaction rewrites the durable facts as those a
+`ChainFoldPlan` retains plus its fold facts, then restores from them. A crash may occur after durable staging and before in-memory mutation;
 recovery therefore replays those already-authenticated facts idempotently through
 Lattice's graph and fork-choice reducer. The node does not reconstruct weights,
 ancestry, or canonical choice itself.
@@ -1287,7 +1313,7 @@ fact:
   checked before `now`: a header off the schedule is a proof-of-work failure
   even when its timestamp is after `now`.
 
-Weighed headers are never evicted. The exclusion is a separate batch from the
+Weighed headers are never evicted, except by folding (§9.7). The exclusion is a separate batch from the
 block's own (a batch carries an exclusion alone); the node MUST make both
 durable in one transaction, and replay applies them in any order.
 
@@ -1350,6 +1376,9 @@ as always.
 
 Attributed values are DERIVED, never facts: a node applies the rule from its
 own copy of the parent level, parent levels first, live and again at restore.
+A run whose carrier the parent folded (§9.7) is read from the parent's fold
+fact instead, and keeps the final value it had: its blocks are gone, and a
+branch attaching beyond the window is not weighed, so it could not grow.
 The result is a function of the parent graph alone — independent of arrival
 or replay order — and, like every run, independent of exclusion and of
 parent canonicity.
@@ -1484,7 +1513,9 @@ state); withdrawals return it.
 7. Parent canonicity alone cannot change child validity, weight, or fork choice
 8. A non-genesis child keeps the same parent-state reference or moves
    transitively forward through the immediate parent's connected accepted graph
-9. Lattice never prunes accepted graph or verified local-work facts
+9. Lattice never loses counted work: a node may fold side branches beyond its
+   window into their fork point (§9.7), and no other accepted graph or verified
+   local-work fact is pruned
 10. There is no finality threshold; a strictly heavier effective subtree may reorg at any depth
 11. Every successful consensus mutation has a monotonically increasing revision
 12. One explicit validation-time context governs one import attempt

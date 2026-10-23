@@ -147,3 +147,10 @@ predecessor attaches.
 Persistence records the accepted graph, proof-derived work locations, and
 authenticated parent-state facts. Recovery replays the same immutable facts and
 rebuilds the work index. A persisted canonical tip is only a cache.
+
+A node may fold dead side branches beyond a window it chooses into the block
+they fork from (spec §9.7). The fold is one work contribution there, equal to
+what the folded blocks weighed. Every comparison the descent can still make is
+unchanged, because a block's subtree and its ancestors' keep that work while no
+held child's subtree ever had it. Folded carriers' runs are frozen at their
+final values for the child chains they credit.

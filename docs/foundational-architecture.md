@@ -180,8 +180,10 @@ through another strategy, not that the content is objectively invalid.
 
 ## Pruning
 
-Lattice retains the complete accepted consensus graph and verified local grind
-coverage. It does not prune consensus inputs according to a node storage budget.
+Lattice never loses counted work. A node may fold dead side branches beyond a
+window it chooses into their fork point (spec §9.7). Otherwise Lattice retains
+the complete accepted consensus graph and verified local grind coverage, and
+does not prune consensus inputs according to a node storage budget.
 
 The node decides how long to retain block bodies, materialized state,
 `StateDiff` payloads, proof Volumes, and CAS pins. `StateDiff` is local
@@ -201,6 +203,7 @@ A change preserves the architecture only if all of these remain true:
 5. Fork choice compares effective `trueCumWork`, then same-chain child block CID.
 6. External ingress uses one import boundary; recovery replays durable facts.
 7. Durable facts precede visible mutation.
-9. Lattice retains consensus inputs; the node owns payload pruning.
+9. Lattice retains consensus inputs except folded side branches, whose work
+   stays counted at their fork point; the node owns payload pruning.
 10. Cross-chain interfaces carry proofs and exact parent facts, never trusted
     work totals or canonical-tip commands.

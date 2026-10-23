@@ -54,6 +54,7 @@ final class ChainTreeArchitectureTests: XCTestCase {
             case .work: "work"
             case .validation: "validation"
             case .exclusion: "exclusion"
+            case .fold: "fold"
             }
         }
     }

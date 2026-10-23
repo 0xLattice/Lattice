@@ -31,6 +31,7 @@ final class HeaderAdmissionTests: XCTestCase {
                 case .work: "work"
                 case .validation: "validation"
                 case .exclusion: "exclusion"
+                case .fold: "fold"
                 }
             }
         }

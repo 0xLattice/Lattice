@@ -146,6 +146,13 @@ struct ForkChoiceOracle {
                 excluded.insert(exclusion.blockHash)
             case .validation:
                 break // Execution never weighs and never selects (§9.9).
+            case .fold(let fold):
+                // Folded side branches weigh as one contribution at their
+                // fork point (§9.7).
+                observe(
+                    FoldIdentity(foldedAtBlockHash: fold.blockHash).contributionID!,
+                    fold.work, at: fold.blockHash
+                )
             }
         }
         settlePending()

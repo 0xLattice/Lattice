@@ -737,14 +737,15 @@ public struct ChainTree: Sendable {
         let key: TrustedImportBatch?
         /// The order of a batch with no key. Validations before exclusions: a
         /// root exclusion waits on the other root's validation, so this order
-        /// settles it in the same round.
+        /// settles it in the same round. Folds wait only on their block.
         let factTarget: (String, String)
 
         init(_ batch: BlockImportBatch) {
             self.batch = batch
             key = TrustedImportBatch(batch)
             factTarget = ChainTree.exclusionTarget(of: batch).map { ("x", $0) }
-                ?? ChainTree.validationTarget(of: batch).map { ("v", $0) } ?? ("z", "")
+                ?? ChainTree.validationTarget(of: batch).map { ("v", $0) }
+                ?? ChainTree.foldTarget(of: batch).map { ("f", $0.blockHash) } ?? ("z", "")
         }
     }
 
@@ -1172,6 +1173,9 @@ public struct ChainTree: Sendable {
         if let excluded = Self.exclusionTarget(of: batch) {
             return try applyExclusion(blockHash: excluded)
         }
+        if let fold = Self.foldTarget(of: batch) {
+            return try applyFold(fold)
+        }
         // A proven-invalid block is never executed: a validation for one is
         // the twin of excluding an executed block (`applyExclusion`).
         for fact in batch.facts {
@@ -1278,6 +1282,82 @@ public struct ChainTree: Sendable {
         guard batch.facts.count == 1,
               case .exclusion(let fact) = batch.facts[0] else { return nil }
         return CIDIdentity.canonicalString(fact.blockHash)
+    }
+
+    /// A fold batch is exactly one `.fold` fact, its hashes canonical and no
+    /// directory covering more than the fold's own work.
+    private static func foldTarget(of batch: BlockImportBatch) -> ChainFoldFact? {
+        guard batch.facts.count == 1,
+              case .fold(let fact) = batch.facts[0],
+              let hash = CIDIdentity.canonicalString(fact.blockHash),
+              fact.work > .zero,
+              fact.covered.values.allSatisfy({ $0 <= fact.work }) else { return nil }
+        var runs: [FrozenRun] = []
+        for run in fact.frozenRuns {
+            guard let carrier = CIDIdentity.canonicalString(run.carrierBlockHash),
+                  let child = CIDIdentity.canonicalString(run.childBlockHash) else { return nil }
+            runs.append(FrozenRun(
+                carrierBlockHash: carrier, directory: run.directory,
+                childBlockHash: child, value: run.value
+            ))
+        }
+        return ChainFoldFact(blockHash: hash, work: fact.work, covered: fact.covered, frozenRuns: runs)
+    }
+
+    /// Credit side branches folded into a held block (§9.7): one
+    /// contribution under the block's `FoldIdentity`, ratcheting like any work
+    /// fact. It weighs at the block as its own work does, so every ancestor's
+    /// subtree rises by exactly what the folded blocks weighed there, and no
+    /// held child's does. Its runs rise by the fold less what sat under folded
+    /// carriers into each directory, and those carriers' final runs are kept
+    /// for the child chains they credit.
+    private mutating func applyFold(_ fact: ChainFoldFact) throws -> SubmissionResult? {
+        let blockHash = fact.blockHash
+        guard graph.contains(blockHash) else {
+            throw ChainStateRestoreError.missingBlockFact
+        }
+        guard let id = FoldIdentity(foldedAtBlockHash: blockHash).contributionID,
+              forkChoice.acceptsLocation(of: id, at: blockHash) else {
+            throw ChainStateRestoreError.corruptConsensusGraph
+        }
+        let before = graph.fold(at: blockHash)
+        if let before, before.work >= fact.work { return nil }
+        guard hasUnreservedMutationCapacity else {
+            throw ChainStateRestoreError.corruptConsensusGraph
+        }
+        guard graph.setFold(fact, id: id) else {
+            throw ChainStateRestoreError.corruptConsensusGraph
+        }
+        localWorkCachesDirty = true
+        if forkChoice.isRouted(blockHash) {
+            func credited(_ fold: ChainFoldFact?, _ directory: String) -> WorkSum {
+                guard let fold else { return .zero }
+                let covered = fold.covered[directory] ?? .zero
+                return WorkSum(fold.work).subtracting(WorkSum(covered)) ?? .zero
+            }
+            runs.credit(at: blockHash) { directory in
+                credited(fact, directory).subtracting(credited(before, directory)) ?? .zero
+            }
+        }
+        runs.freeze(fact.frozenRuns)
+        forkChoice.applyContribution(
+            VerifiedWorkContribution(id: id, work: fact.work), at: blockHash
+        )
+        mutationGeneration += 1
+        let canonicalChange = deferProjectionForReplay
+            ? nil
+            : projectCanonicalChain(monotoneIncreaseAt: blockHash)
+        if canonicalChange != nil {
+            frontier.refreshTipSnapshot()
+        }
+        return SubmissionResult(
+            addedBlock: false,
+            addedContribution: true,
+            extendsCanonical: false,
+            commit: (canonicalChange ?? ChainCommit(tipHash: canonicalTip))
+                .atRevision(mutationGeneration),
+            weighed: [blockHash]
+        )
     }
 
     /// Record a proven-invalid subtree root. The block must already be present:
@@ -1414,10 +1494,13 @@ public struct ChainTree: Sendable {
         indexToBlockHash[blockHeight, default: []].insert(hash)
     }
 
+    /// The held blocks naming `hash` as parent one height above it. Read from
+    /// the graph's by-parent index: a height scan made every sibling insert
+    /// pay for every other block at that height.
     func findChildren(hash: String, blockHeight: UInt64) -> [String] {
         let (childHeight, overflow) = blockHeight.addingReportingOverflow(1)
-        guard !overflow, let hashes = indexToBlockHash[childHeight] else { return [] }
-        return hashes.filter { graph.parent(of: $0) == hash }
+        guard !overflow else { return [] }
+        return graph.blocks(naming: hash).filter { graph.height(of: $0) == childHeight }
     }
 
 }

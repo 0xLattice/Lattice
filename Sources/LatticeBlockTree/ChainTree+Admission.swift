@@ -71,11 +71,11 @@ extension ChainTree {
     }
 
     /// The block's strongest own grind (ties to the smaller ID) — never an
-    /// attributed run.
+    /// attributed run or a fold.
     package func strongestGrind(of blockHash: String) -> VerifiedWorkContribution? {
         guard let work = graph.work(of: blockHash) else { return nil }
         return work.contributions.values
-            .filter { !work.attributedRuns.contains($0.id) }
+            .filter { work.isGrind($0.id) }
             .max {
                 $0.work != $1.work ? $0.work < $1.work : $0.id > $1.id
             }

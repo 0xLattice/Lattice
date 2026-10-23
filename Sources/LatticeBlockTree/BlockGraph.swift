@@ -19,6 +19,9 @@ struct BlockWork: Sendable {
     /// The contribution IDs here that are a parent's attributed runs (§9.10),
     /// not grinds (see `BlockMeta.attributedRuns`).
     private(set) var attributedRuns: Set<String>
+    /// The contribution IDs here that are folded side branches (§9.7), not
+    /// grinds: one per block, under its `FoldIdentity`.
+    private(set) var folds: Set<String> = []
     private(set) var work: WorkSum
 
     static let empty = BlockWork(contributions: [:], attributedRuns: [], work: .zero)
@@ -37,7 +40,8 @@ struct BlockWork: Sendable {
     /// under its ID.
     mutating func set(
         _ contribution: VerifiedWorkContribution,
-        attributed: Bool
+        attributed: Bool,
+        fold: Bool = false
     ) -> Bool {
         if let existing = contributions[contribution.id],
            existing.work >= contribution.work {
@@ -51,18 +55,28 @@ struct BlockWork: Sendable {
         if attributed {
             attributedRuns.insert(contribution.id)
         }
+        if fold {
+            folds.insert(contribution.id)
+        }
         return true
     }
 
-    /// This block's grinds: every contribution that is not an attributed run.
+    /// Whether `id` is one of this block's own grinds: neither an attributed
+    /// run nor a fold.
+    func isGrind(_ id: String) -> Bool {
+        !attributedRuns.contains(id) && !folds.contains(id)
+    }
+
+    /// This block's grinds: every contribution that is not an attributed run
+    /// or a fold.
     var grinds: Set<String> {
-        Set(contributions.keys.filter { !attributedRuns.contains($0) })
+        Set(contributions.keys.filter(isGrind))
     }
 
     /// The credited work of this block's grinds alone. Derived from the
     /// contributions, never cached beside `work`, so it cannot drift from it.
     var grindWork: WorkSum {
-        WorkMeasure(contributions.values.filter { !attributedRuns.contains($0.id) }).total
+        WorkMeasure(contributions.values.filter { isGrind($0.id) }).total
     }
 }
 
@@ -86,6 +100,11 @@ struct BlockGraph: Sendable {
     private var childrenByHash: [String: [String]] = [:]
     private var workByHash: [String: BlockWork] = [:]
     private var anchorByHash: [String: DifficultyAnchor] = [:]
+    /// Every held block by the parent it names, held or not — the children an
+    /// arriving block already has, without scanning a height.
+    private var childrenByParentHash: [String: Set<String>] = [:]
+    /// The latest fold credited at each block that has one (§9.7).
+    private var foldByHash: [String: ChainFoldFact] = [:]
     private(set) var diagnosticsByHash: [String: BlockDiagnostics] = [:]
 
     /// Decompose restored or fixture blocks into the graph's tables.
@@ -104,6 +123,9 @@ struct BlockGraph: Sendable {
                 work: meta.work
             )
             anchorByHash[hash] = meta.difficultyAnchor
+            if let parent = meta.parentBlockHash {
+                childrenByParentHash[parent, default: []].insert(hash)
+            }
             diagnosticsByHash[hash] = BlockDiagnostics(
                 cumulativeWork: meta.cumulativeWork,
                 subtreeWeight: meta.subtreeWeight
@@ -149,6 +171,17 @@ struct BlockGraph: Sendable {
             stack.append(contentsOf: children(of: next))
         }
         return blocks
+    }
+
+    /// Every held block naming `parentHash` as its parent, whether or not
+    /// that parent is held.
+    func blocks(naming parentHash: String) -> Set<String> {
+        childrenByParentHash[parentHash] ?? []
+    }
+
+    /// The latest fold credited at `hash`, if any.
+    func fold(at hash: String) -> ChainFoldFact? {
+        foldByHash[hash]
     }
 
     func work(of hash: String) -> BlockWork? {
@@ -209,6 +242,9 @@ struct BlockGraph: Sendable {
         childrenByHash[hash] = children
         workByHash[hash] = .empty
         anchorByHash[hash] = difficultyAnchor
+        if let parent = record.parentBlockHash {
+            childrenByParentHash[parent, default: []].insert(hash)
+        }
         diagnosticsByHash[hash] = BlockDiagnostics(cumulativeWork: .zero, subtreeWeight: .zero)
     }
 
@@ -228,6 +264,22 @@ struct BlockGraph: Sendable {
         at hash: String
     ) -> Bool {
         workByHash[hash]?.set(contribution, attributed: attributed) == true
+    }
+
+    /// Credit `fact` at its held block under `id`: false unless its work is a
+    /// strict increase over the fold already there. The frozen runs of the
+    /// earlier fold are kept beside the new ones.
+    mutating func setFold(_ fact: ChainFoldFact, id: String) -> Bool {
+        let hash = fact.blockHash
+        guard workByHash[hash]?.set(
+            VerifiedWorkContribution(id: id, work: fact.work), attributed: false, fold: true
+        ) == true else { return false }
+        let earlier = foldByHash[hash]?.frozenRuns ?? []
+        let runs = earlier + fact.frozenRuns.filter { !earlier.contains($0) }
+        foldByHash[hash] = ChainFoldFact(
+            blockHash: hash, work: fact.work, covered: fact.covered, frozenRuns: runs
+        )
+        return true
     }
 
     /// Fill an anchor left absent by out-of-order admission. Write-once: the

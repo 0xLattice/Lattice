@@ -174,6 +174,7 @@ actor AdmissionStageRecorder {
                 case .work(let work): work.blockHash == blockHash
                 case .exclusion(let exclusion): exclusion.blockHash == blockHash
                 case .validation(let validation): validation.blockHash == blockHash
+                case .fold(let fold): fold.blockHash == blockHash
                 }
             }
         }

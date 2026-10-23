@@ -510,6 +510,8 @@ final class AdmissionDecisionGoldenTests: XCTestCase {
             AdmissionDecisionGolden.Fact(kind: "exclusion", block: fixtures.name(value.blockHash), grind: nil, work: nil)
         case .validation(let value):
             AdmissionDecisionGolden.Fact(kind: "validation", block: fixtures.name(value.blockHash), grind: nil, work: nil)
+        case .fold(let value):
+            AdmissionDecisionGolden.Fact(kind: "fold", block: fixtures.name(value.blockHash), grind: nil, work: value.work.toHexString())
         }
     }
 

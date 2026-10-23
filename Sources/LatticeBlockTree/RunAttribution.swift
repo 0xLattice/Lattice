@@ -68,6 +68,10 @@ struct RunAttribution: Sendable {
     /// from the parent like `difficultyAnchor`, and absent until the block is
     /// connected.
     private(set) var nearestCarrier: [String: [String: String]] = [:]
+    /// Directory → folded carrier → its final run (§9.7). Kept for every
+    /// directory, served or not: a fold is recorded once, and a directory
+    /// served later must still see what was folded before it.
+    private(set) var frozen: [String: [String: FrozenRun]] = [:]
 #if DEBUG
     /// Run-bucket updates. Each connected block costs one per directory it
     /// has a nearest committer for, so this is O(#directories) per block —
@@ -142,19 +146,38 @@ struct RunAttribution: Sendable {
             credited[directory] = committer
         }
         nearestCarrier[hash] = nearest
-        credit(work.work, nearest: credited)
+        let covered = graph.fold(at: hash)?.covered ?? [:]
+        credit(nearest: credited) { directory in
+            // Folded work that sat under a folded carrier into `directory`
+            // was that carrier's run, not this one's (`ChainFoldFact`).
+            covered[directory].flatMap { work.work.subtracting(WorkSum($0)) } ?? work.work
+        }
+    }
+
+    /// Record folded carriers' final runs.
+    mutating func freeze(_ runs: [FrozenRun]) {
+        for run in runs {
+            frozen[run.directory, default: [:]][run.carrierBlockHash] = run
+        }
     }
 
     /// A connected block's own work rose by `delta`: its runs rise by exactly
     /// that much.
     mutating func credit(_ delta: WorkSum, at hash: String) {
-        credit(delta, nearest: nearestCarrier[hash] ?? [:])
+        credit(nearest: nearestCarrier[hash] ?? [:]) { _ in delta }
     }
 
-    private mutating func credit(_ work: WorkSum, nearest: [String: String]) {
+    /// A connected block's runs rise by a per-directory amount: a fold credits
+    /// each run its work less what sat under folded carriers into that run's
+    /// directory.
+    mutating func credit(at hash: String, _ amount: (String) -> WorkSum) {
+        credit(nearest: nearestCarrier[hash] ?? [:], amount)
+    }
+
+    private mutating func credit(nearest: [String: String], _ amount: (String) -> WorkSum) {
         for (directory, committer) in nearest {
             let current = runWork[directory]?[committer] ?? .zero
-            runWork[directory, default: [:]][committer] = current + work
+            runWork[directory, default: [:]][committer] = current + amount(directory)
 #if DEBUG
             updateCount &+= 1
 #endif
@@ -230,23 +253,36 @@ extension ChainTree {
         parentBlocks: Set<String>? = nil,
         held: Set<String> = []
     ) -> (raised: [String], commit: ChainCommit?) {
-        guard let parentRuns = parent.runs.runWork[directory] else { return ([], nil) }
+        let parentRuns = parent.runs.runWork[directory] ?? [:]
+        // Runs whose carrier the parent folded: final values, read from its
+        // fold facts rather than derived from blocks it no longer holds.
+        let frozen = parent.frozenRuns(into: directory)
+        guard !parentRuns.isEmpty || !frozen.isEmpty else { return ([], nil) }
         var scope = Set(parentRuns.keys)
+        var frozenScope = Array(frozen.values)
         if let parentBlocks {
             let carriers = parentBlocks.compactMap { parent.runs.nearestCarrier[$0]?[directory] }
             let committersOfHeld = held.flatMap { parent.runs.committers[directory]?[$0] ?? [] }
             scope = Set(carriers).union(committersOfHeld)
+            frozenScope = frozenScope.filter { held.contains($0.childBlockHash) }
         }
         let deferred = deferProjectionForReplay
         deferProjectionForReplay = true
-        var raised: [String] = []
-        for committer in scope.sorted() {
+        var candidates: [(carrier: String, childBlock: String, value: UInt256)] = []
+        for committer in scope {
             guard let run = parentRuns[committer],
                   let childBlock = parent.graph[committer]?.childCommitments[directory],
-                  let hash = CIDIdentity.canonicalString(childBlock),
-                  graph.contains(hash),
                   let own = parent.graph.work(of: committer)?.grindWork,
-                  let value = run.subtracting(own)?.uint256Value,
+                  let value = run.subtracting(own)?.uint256Value else { continue }
+            candidates.append((committer, childBlock, value))
+        }
+        for run in frozenScope {
+            candidates.append((run.carrierBlockHash, run.childBlockHash, run.value))
+        }
+        var raised: [String] = []
+        for (committer, childBlock, value) in candidates.sorted(by: { $0.carrier < $1.carrier }) {
+            guard let hash = CIDIdentity.canonicalString(childBlock),
+                  graph.contains(hash),
                   let id = AttributedRunIdentity(
                       carrierBlockHash: committer, directory: directory
                   ).contributionID,
@@ -272,6 +308,12 @@ extension ChainTree {
             frontier.refreshTipSnapshot()
         }
         return (raised, change?.atRevision(mutationGeneration))
+    }
+
+    /// The runs into `directory` whose carrier this chain folded, by carrier:
+    /// final values from its fold facts (§9.7, §9.10).
+    func frozenRuns(into directory: String) -> [String: FrozenRun] {
+        runs.frozen[directory] ?? [:]
     }
 
     /// The commitments recorded for a held block (§9.10), or nil when the
