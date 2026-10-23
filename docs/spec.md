@@ -1354,6 +1354,29 @@ The result is a function of the parent graph alone — independent of arrival
 or replay order — and, like every run, independent of exclusion and of
 parent canonicity.
 
+### 9.11 Node-Local Finality
+
+The protocol has no finality (§12.5 #10). A node MAY nonetheless choose a
+**finality window** and decline inputs that land beyond it: a header whose
+parent is a held block older than the window, and a work fact or child proof
+crediting such a block. Age is measured from the timestamp of the best weighed
+tip, not the node's clock (`ChainTree.isBeyondWindow`), and the tip itself is
+never beyond, so a stalled chain can always be extended.
+
+Declining is choosing not to store, as a node may for any input. It is never a
+verdict and never blames a peer. The window is an operator choice; a node with
+none is an archive node. Every block a free schedule makes cheap attaches far
+in the past — under genesis, or under a fork point whose schedule has eased —
+so a window keeps them out without any rule about targets.
+
+The cost is the node's own: it does not follow a reorganization deeper than its
+window, even a heavier one, until its operator intervenes. A node MAY instead
+admit such a branch once its headers prove at least `deepForkBar` — the subtree
+work of the canonical child at the fork point, less the weight the
+attachment's own side already holds. A branch below that bar cannot change
+the canonical choice at the fork point. A child level's window must be at least
+its parent's, since a parent reorganization moves child anchors.
+
 ## 10. Economic Model
 
 ### 10.1 Reward Schedule
