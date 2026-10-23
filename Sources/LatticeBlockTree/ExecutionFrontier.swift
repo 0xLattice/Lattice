@@ -471,6 +471,7 @@ struct ExecutionFrontier: Sendable {
         in graph: BlockGraph
     ) -> Divergence {
         var current = mutatedAt
+        var below = mutatedAt
         while !canonicalHashes.contains(current) {
             guard let meta = graph[current] else { return .malformed }
             guard let parentHash = meta.parentBlockHash else {
@@ -478,14 +479,16 @@ struct ExecutionFrontier: Sendable {
             }
             guard let parent = graph[parentHash],
                   parent.blockHeight < meta.blockHeight else { return .malformed }
+            below = current
             current = parentHash
         }
-        return .canonical(current)
+        return .canonical(current, child: below)
     }
 
     /// Where the ancestor line of a mutated block meets the canonical path.
     private enum Divergence {
-        case canonical(String)
+        /// The canonical block the line meets, and its child on the line.
+        case canonical(String, child: String)
         /// The line ends at a genesis root that is not the canonical one.
         case otherRoot
         case malformed
@@ -515,9 +518,11 @@ struct ExecutionFrontier: Sendable {
             return TruncatedProjectionOutcome(commit: nil)
         }
         let divergence: String
+        let contender: String
         switch canonicalDivergencePoint(from: mutatedAt, in: graph) {
-        case .canonical(let hash):
+        case .canonical(let hash, let child):
             divergence = hash
+            contender = child
         case .otherRoot:
             // The increase landed under another genesis root, so nothing in
             // the canonical root's tree moved: if that root still wins among
@@ -537,12 +542,32 @@ struct ExecutionFrontier: Sendable {
         guard let divergenceHeight = graph.height(of: divergence) else { return nil }
         let (suffixHeight, overflow) = divergenceHeight.addingReportingOverflow(1)
         guard !overflow else { return nil }
-        let excludedRoots = forkChoice.excludedRoots
-        let children = excludedRoots.isEmpty
-            ? graph.children(of: divergence)
-            : graph.children(of: divergence).filter {
-                !excludedRoots.contains($0)
-            }
+        // The increase is confined to the subtree of `contender`, the
+        // divergence point's child on the mutated line. Before it, the
+        // canonical child already won against every sibling, and no other
+        // sibling moved, so the winner now is one of those two: two weight
+        // reads, however many siblings there are. Comparing every child made a
+        // flood of siblings quadratic.
+        let incumbent = canonicalHashByHeight[suffixHeight]
+        // The canonical child must sit where the path says, and without one
+        // the divergence point must be the tip; otherwise the index is not
+        // what this step assumes, and the caller re-materializes.
+        if let incumbent {
+            guard graph.parent(of: incumbent) == divergence else { return nil }
+        } else {
+            guard divergence == canonicalTip else { return nil }
+        }
+        let chosen: String?
+        if forkChoice.excludedRoots.contains(contender) {
+            // The descent never steps into an excluded root.
+            chosen = incumbent
+        } else if let incumbent {
+            chosen = forkChoice.preferred(among: [incumbent, contender])
+        } else {
+            // The divergence point is the tip: it had no selectable child, so
+            // the contender is the only one.
+            chosen = contender
+        }
         // Every child of the divergence point is unselectable: the mutation
         // landed under an excluded root that is the only child of a canonical
         // block. The descent from the root provably ends at that block, so it
@@ -550,14 +575,7 @@ struct ExecutionFrontier: Sendable {
         // steady state right after a canonical exclusion, when miners that have
         // not yet executed the block keep extending it, and it must not cost a
         // whole-chain projection per such block.
-        guard !children.isEmpty else { return TruncatedProjectionOutcome(commit: nil) }
-        // One GHOST step, taken exactly as the descent takes it: a lone child is
-        // followed WITHOUT a weight lookup, matching `ForkChoice.descend`, so a
-        // single-child step cannot depend on a weight comparison at all.
-        let chosen = children.count == 1
-            ? children[0]
-            : forkChoice.preferred(among: children)
-        guard let chosen else { return nil }
+        guard let chosen else { return TruncatedProjectionOutcome(commit: nil) }
         // The COMMON admission on a merged-mining child is a losing sibling, and
         // it must cost nothing. This point is the deepest canonical ancestor of
         // the mutated block, so the child leading to that block is never the
