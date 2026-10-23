@@ -1414,13 +1414,10 @@ public struct ChainTree: Sendable {
         indexToBlockHash[blockHeight, default: []].insert(hash)
     }
 
-    /// The held blocks naming `hash` as parent one height above it. Read from
-    /// the graph's by-parent index: a height scan made every sibling insert
-    /// pay for every other block at that height.
     func findChildren(hash: String, blockHeight: UInt64) -> [String] {
         let (childHeight, overflow) = blockHeight.addingReportingOverflow(1)
-        guard !overflow else { return [] }
-        return graph.blocks(naming: hash).filter { graph.height(of: $0) == childHeight }
+        guard !overflow, let hashes = indexToBlockHash[childHeight] else { return [] }
+        return hashes.filter { graph.parent(of: $0) == hash }
     }
 
 }

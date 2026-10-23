@@ -86,9 +86,6 @@ struct BlockGraph: Sendable {
     private var childrenByHash: [String: [String]] = [:]
     private var workByHash: [String: BlockWork] = [:]
     private var anchorByHash: [String: DifficultyAnchor] = [:]
-    /// Every held block by the parent it names, held or not — the children an
-    /// arriving block already has, without scanning a height.
-    private var childrenByParentHash: [String: Set<String>] = [:]
     private(set) var diagnosticsByHash: [String: BlockDiagnostics] = [:]
 
     /// Decompose restored or fixture blocks into the graph's tables.
@@ -107,9 +104,6 @@ struct BlockGraph: Sendable {
                 work: meta.work
             )
             anchorByHash[hash] = meta.difficultyAnchor
-            if let parent = meta.parentBlockHash {
-                childrenByParentHash[parent, default: []].insert(hash)
-            }
             diagnosticsByHash[hash] = BlockDiagnostics(
                 cumulativeWork: meta.cumulativeWork,
                 subtreeWeight: meta.subtreeWeight
@@ -155,12 +149,6 @@ struct BlockGraph: Sendable {
             stack.append(contentsOf: children(of: next))
         }
         return blocks
-    }
-
-    /// Every held block naming `parentHash` as its parent, whether or not
-    /// that parent is held.
-    func blocks(naming parentHash: String) -> Set<String> {
-        childrenByParentHash[parentHash] ?? []
     }
 
     func work(of hash: String) -> BlockWork? {
@@ -221,9 +209,6 @@ struct BlockGraph: Sendable {
         childrenByHash[hash] = children
         workByHash[hash] = .empty
         anchorByHash[hash] = difficultyAnchor
-        if let parent = record.parentBlockHash {
-            childrenByParentHash[parent, default: []].insert(hash)
-        }
         diagnosticsByHash[hash] = BlockDiagnostics(cumulativeWork: .zero, subtreeWeight: .zero)
     }
 
