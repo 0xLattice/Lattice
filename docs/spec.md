@@ -1357,25 +1357,29 @@ parent canonicity.
 ### 9.11 Node-Local Finality
 
 The protocol has no finality (§12.5 #10). A node MAY nonetheless choose a
-**finality window** and decline inputs that land beyond it: a header whose
-parent is a held block older than the window, and a work fact or child proof
-crediting such a block. Age is measured from the timestamp of the best weighed
-tip, not the node's clock (`ChainTree.isBeyondWindow`), and the tip itself is
-never beyond, so a stalled chain can always be extended.
-
+**finality window** of `N` blocks, per chain, and decline what lies more than
+`N` blocks below its best weighed tip: a header whose height is less than the
+tip's height minus `N`, and a work fact or child proof crediting such a block.
 Declining is choosing not to store, as a node may for any input. It is never a
-verdict and never blames a peer. The window is an operator choice; a node with
-none is an archive node. Every block a free schedule makes cheap attaches far
-in the past — under genesis, or under a fork point whose schedule has eased —
-so a window keeps them out without any rule about targets.
+verdict and never blames a peer; a node with no window is an archive node.
+
+A header carries its own height, so the rule needs no fork point: an orphan is
+judged on arrival, and its claimed height is verified when it connects
+(height = parent height + 1). A fork from a block more than `N` deep starts
+past the window, so it can never connect. A side branch stays inside only by
+keeping its height within `N` of the tip, which at the same height costs the
+same difficulty as the canonical chain. The tip's next height is never past
+the window, so a stalled chain can always be extended.
+
+A fork `d` blocks deep is behind the absolute schedule (§5.5) by about `d`
+blocks, so its first block may be up to `2^(d / halfLife)` easier than the
+chain's current difficulty. A window of a few half-lives therefore keeps out
+every nearly free block; a window of many half-lives does not.
 
 The cost is the node's own: it does not follow a reorganization deeper than its
-window, even a heavier one, until its operator intervenes. A node MAY instead
-admit such a branch once its headers prove at least `deepForkBar` — the subtree
-work of the canonical child at the fork point, less the weight the
-attachment's own side already holds. A branch below that bar cannot change
-the canonical choice at the fork point. A child level's window must be at least
-its parent's, since a parent reorganization moves child anchors.
+window, even a heavier one, until its operator intervenes. A child chain's
+window should be at least its parent's, since a parent reorganization can
+reorganize the child.
 
 ## 10. Economic Model
 
