@@ -172,6 +172,7 @@ let package = Package(
                 "LatticeBlockTree",
                 "LatticeBlockTreeReference",
                 .product(name: "cashew", package: "cashew"),
+                .product(name: "CID", package: "swift-cid"),
                 .product(name: "UInt256", package: "UInt256"),
             ]),
         .testTarget(

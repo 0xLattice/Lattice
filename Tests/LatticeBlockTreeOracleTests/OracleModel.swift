@@ -1,4 +1,5 @@
 import cashew
+import CID
 import UInt256
 import LatticePrimitives
 import LatticePoW
@@ -54,6 +55,10 @@ struct OracleProbe {
     /// The state CIDs blocks declare, plus the empty state.
     var states: [String]
     var directories: [String]
+    /// The directories the parent keeps runs for. Commitments are compared
+    /// only for these: what a block commits into an unserved directory is
+    /// stored content, not an in-memory consensus input.
+    var served: [String]
     var maxHeight: UInt64
 }
 
@@ -78,6 +83,9 @@ protocol OracleSubject {
         held: Set<String>
     ) -> OracleOutcome
     mutating func reevaluate() -> OracleOutcome
+    /// The cheap read, which materializes no cache: what most steps compare,
+    /// so a stale cache can carry across several unobserved mutations.
+    mutating func observeTip() -> [String: String]
     mutating func observe(_ probe: OracleProbe) -> [String: String]
 }
 
@@ -87,24 +95,28 @@ struct OracleRestoreFailure: Error, Equatable {
 
 // MARK: - Rendering of module-neutral values
 
-func render(_ value: WorkSum?) -> String {
-    value.map { $0.toHexString() } ?? "nil"
+/// Work and targets as minimal lowercase hex, whatever type or width holds
+/// them: a rewrite may change the representation, never the value.
+func hex(_ digits: String) -> String {
+    let trimmed = digits.lowercased().drop { $0 == "0" }
+    return trimmed.isEmpty ? "0" : String(trimmed)
 }
 
 func render(_ anchor: DifficultyAnchor?) -> String {
     guard let anchor else { return "nil" }
-    return "h\(anchor.blockHeight)@\(anchor.timestamp)/\(anchor.target.toHexString())"
+    return "h\(anchor.blockHeight)@\(anchor.timestamp)/\(hex(anchor.target.toHexString()))"
 }
 
 func render(_ contribution: VerifiedWorkContribution?) -> String {
     guard let contribution else { return "nil" }
-    return "\(contribution.id)=\(contribution.work.toHexString())"
+    return "\(contribution.id)=\(hex(contribution.work.toHexString()))"
 }
 
-func render(_ commitments: [String: String]?) -> String {
+func render(_ commitments: [String: String]?, only directories: [String]) -> String {
     guard let commitments else { return "nil" }
-    return commitments.sorted { $0.key < $1.key }.map { "\($0.key)→\($0.value)" }
-        .joined(separator: ",")
+    return directories.sorted().compactMap { directory in
+        commitments[directory].map { "\(directory)→\($0)" }
+    }.joined(separator: ",")
 }
 
 // MARK: - Deterministic randomness
@@ -129,6 +141,33 @@ struct SplitMix64: RandomNumberGenerator {
 /// A canonical CID for an arbitrary label.
 func oracleCID(_ label: String) -> String {
     try! HeaderImpl<PublicKey>(node: PublicKey(key: label)).rawCID
+}
+
+/// The CID with `digest` (a sha2-256 digest) under another shape: CIDv1 with
+/// `codec` (a one-byte multicodec), or CIDv0 when `codec` is nil. Two of
+/// these with one digest are different identities, so a key that kept only
+/// the digest would merge them.
+func oracleCID(digest: [UInt8], codec: UInt8?) -> String {
+    let multihash: [UInt8] = [0x12, 0x20] + digest
+    let bytes = codec.map { [0x01, $0] + multihash } ?? multihash
+    return try! CID(bytes).toBaseEncodedString
+}
+
+/// Whether `left`'s CID bytes sort before `right`'s.
+func oracleBytesPrecede(_ left: String, _ right: String) -> Bool {
+    try! CID(left).rawBuffer.lexicographicallyPrecedes(CID(right).rawBuffer)
+}
+
+/// The sha2-256 digest inside a CID string.
+func oracleDigest(_ cid: String) -> [UInt8] {
+    Array(try! CID(cid).rawBuffer.suffix(32))
+}
+
+/// A non-canonical spelling of a CIDv1: the same bytes in upper-case base32
+/// (multibase `B`). Identity keys must canonicalize it to the same block.
+func upperCaseSpelling(_ cid: String) -> String {
+    guard cid.hasPrefix("b") else { return cid }
+    return "B" + cid.dropFirst().uppercased()
 }
 
 func oracleSpec(targetBlockTime: UInt64) -> ChainSpec {

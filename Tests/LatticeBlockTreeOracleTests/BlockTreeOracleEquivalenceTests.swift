@@ -9,10 +9,26 @@ import LatticePoW
 /// chain and a child chain it commits into, applied to both, with every
 /// observable compared after every step.
 ///
-/// Scale it locally with `LATTICE_ORACLE_SEEDS` (seed count, default 8) and
+/// Scale it locally with `LATTICE_ORACLE_SEEDS` (seed count, default 32) and
 /// `LATTICE_ORACLE_STEPS` (steps per seed, default 100); replay one failing
 /// seed with `LATTICE_ORACLE_SEED`.
 final class BlockTreeOracleEquivalenceTests: XCTestCase {
+    /// The stream's identity shapes are what it means them to be: every
+    /// minted shape is a canonical key, distinct from its digest-sharing
+    /// siblings, and the upper-case spelling names the same key.
+    func testStreamIdentityShapes() {
+        let cid = oracleCID("oracle-shape")
+        let digest = oracleDigest(cid)
+        let shapes = [cid] + [UInt8(0x55), 0x70, nil].map { oracleCID(digest: digest, codec: $0) }
+        XCTAssertEqual(Set(shapes).count, shapes.count)
+        for shape in shapes {
+            XCTAssertEqual(CIDIdentity.canonicalString(shape), shape)
+        }
+        XCTAssertNotEqual(upperCaseSpelling(cid), cid)
+        XCTAssertEqual(CIDIdentity.canonicalString(upperCaseSpelling(cid)), cid)
+        XCTAssertNil(CIDIdentity.canonicalString("not-a-cid"))
+    }
+
     func testLiveBlockTreeMatchesFrozenReference() {
         let environment = ProcessInfo.processInfo.environment
         let steps = environment["LATTICE_ORACLE_STEPS"].flatMap(Int.init) ?? 100
@@ -20,7 +36,7 @@ final class BlockTreeOracleEquivalenceTests: XCTestCase {
         if let seed = environment["LATTICE_ORACLE_SEED"].flatMap(UInt64.init) {
             seeds = [seed]
         } else {
-            let count = environment["LATTICE_ORACLE_SEEDS"].flatMap(UInt64.init) ?? 8
+            let count = environment["LATTICE_ORACLE_SEEDS"].flatMap(UInt64.init) ?? 32
             seeds = Array(1...max(count, 1))
         }
         var coverage: [String: Int] = [:]
@@ -101,12 +117,18 @@ final class OracleRun {
     let childContext = try! ChainRuntimeContext(path: [DEFAULT_ROOT_DIRECTORY, childDirectory])
     let foreignHash: String
     var history: [String] = []
+    var digests: [[UInt8]] = []
+    var mintedCIDs: Set<String> = []
+    /// Decides which steps get the full observation, apart from the stream's
+    /// RNG so the schedule never changes what is generated.
+    var observationRNG: SplitMix64
     /// Counts of what the live outcomes showed.
     var coverage: [String: Int] = [:]
 
     init(seed: UInt64) {
         self.seed = seed
         rng = SplitMix64(seed: seed)
+        observationRNG = SplitMix64(seed: seed ^ 0x0B5E_4FA7_10A5_0B5E)
         states = (0..<6).map { oracleCID("oracle-state-\($0)") }
         specs = [oracleSpec(targetBlockTime: 1_000), oracleSpec(targetBlockTime: 2_000)]
         specCIDs = specs.map(specCID)
@@ -123,9 +145,45 @@ final class OracleRun {
     func chance(_ percent: Int) -> Bool { int(100) < percent }
     func element<T>(_ values: [T]) -> T? { values.isEmpty ? nil : values[int(values.count)] }
 
+    /// A new identity. Mostly a dag-cbor CIDv1; sometimes another codec or a
+    /// CIDv0, often reusing an earlier digest, so identities that differ only
+    /// outside the digest meet in one graph (and in one tie-break).
     func freshCID(_ tag: String) -> String {
         counter += 1
-        return oracleCID("oracle-\(seed)-\(tag)-\(counter)")
+        let base = oracleCID("oracle-\(seed)-\(tag)-\(counter)")
+        var minted = base
+        if chance(20) {
+            let digest = chance(50) ? element(digests) ?? oracleDigest(base) : oracleDigest(base)
+            let codec: UInt8? = [0x55, 0x70, nil][int(3)]  // raw, dag-pb, CIDv0
+            let shaped = oracleCID(digest: digest, codec: codec)
+            if !mintedCIDs.contains(shaped) { minted = shaped }
+        }
+        mintedCIDs.insert(minted)
+        digests.append(oracleDigest(minted))
+        return minted
+    }
+
+    /// Sometimes a non-canonical spelling of the same CID: the tree must key
+    /// it as the canonical one.
+    func spell(_ cid: String) -> String {
+        chance(5) ? upperCaseSpelling(cid) : cid
+    }
+
+    func spelled(_ batch: OracleBatch) -> OracleBatch {
+        OracleBatch(facts: batch.facts.map { fact in
+            switch fact {
+            case .block(var block):
+                block.hash = spell(block.hash)
+                block.parent = block.parent.map(spell)
+                block.postState = spell(block.postState)
+                block.prevState = spell(block.prevState)
+                return .block(block)
+            case .work(let hash, let grind, let work):
+                return .work(blockHash: spell(hash), grindID: spell(grind), work: work)
+            case .exclusion(let hash): return .exclusion(spell(hash))
+            case .validation(let hash): return .validation(spell(hash))
+            }
+        })
     }
 
     /// Mostly tiny, so equal-work siblings and equal subtrees are common.
@@ -161,7 +219,9 @@ final class OracleRun {
         var commitments: [String: String]?
         if side == .parent {
             if chance(25) {
-                commitments = [childDirectory: element(childPlan.order) ?? foreignHash]
+                // Sometimes a commitment that is not a CID at all.
+                commitments = [childDirectory: chance(5)
+                    ? "not-a-cid-\(counter)" : element(childPlan.order) ?? foreignHash]
             }
             if chance(5) {
                 commitments = (commitments ?? [:]).merging([otherDirectory: freshCID("other-child")]) { a, _ in a }
@@ -190,10 +250,12 @@ final class OracleRun {
     }
 
     /// A new block with its first grind, and sometimes its validation.
-    func newBlockBatch(_ side: OracleSide, block: OracleBlockFact, huge: Bool = false) -> OracleBatch {
+    func newBlockBatch(
+        _ side: OracleSide, block: OracleBlockFact, huge: Bool = false, amount fixed: UInt256? = nil
+    ) -> OracleBatch {
         let plan = plan(side)
         let grind = freshCID("\(side.rawValue)-grind")
-        let amount = huge ? hugeWork() : work()
+        let amount = fixed ?? (huge ? hugeWork() : work())
         plan.grinds.append((grind, block.hash))
         plan.grindWork[grind] = amount
         var facts: [OracleFact] = [.block(block), .work(blockHash: block.hash, grindID: grind, work: amount)]
@@ -204,8 +266,9 @@ final class OracleRun {
         return OracleBatch(facts: facts)
     }
 
-    func send(_ side: OracleSide, _ batch: OracleBatch) -> OracleAction {
+    func send(_ side: OracleSide, _ unspelled: OracleBatch) -> OracleAction {
         let plan = plan(side)
+        let batch = spelled(unspelled)
         plan.sent.append(batch)
         for case .block(let block) in batch.facts {
             plan.sentBlocks.insert(block.hash)
@@ -226,7 +289,45 @@ final class OracleRun {
         let plan = plan(side)
         let roll = int(100)
         switch roll {
-        case 0..<30, 30..<38:
+        case 0..<12:
+            // An equal-work sibling of a leaf: the tie-break, not the work,
+            // picks between them.
+            let parents = Set(plan.planned.values.compactMap(\.parent))
+            let candidates = plan.order.filter {
+                !plan.bad.contains($0) && !parents.contains($0) && plan.planned[$0]?.parent != nil
+            }
+            guard let siblingHash = element(Array(candidates.suffix(8))),
+                  let sibling = plan.planned[siblingHash],
+                  let parent = sibling.parent.flatMap({ plan.planned[$0] }),
+                  let grind = plan.grinds.first(where: { $0.hash == siblingHash }),
+                  let amount = plan.grindWork[grind.id] else { return .idle }
+            var block = makeBlock(side, under: parent)
+            if chance(35) {
+                // The sibling's own digest under another shape: two blocks a
+                // digest-only key would merge.
+                let codec: UInt8? = [0x71, 0x55, 0x70, nil][int(4)]
+                let twin = oracleCID(digest: oracleDigest(siblingHash), codec: codec)
+                if !mintedCIDs.contains(twin) {
+                    mintedCIDs.insert(twin)
+                    block.hash = twin
+                }
+            } else if chance(60) {
+                // A sibling whose CID text sorts against the other's the
+                // opposite way to its bytes (about one pair in twenty-five):
+                // only a byte-order tie-break picks the reference's block.
+                for attempt in 0..<200 {
+                    let candidate = oracleCID("oracle-\(seed)-inverted-\(counter)-\(attempt)")
+                    if !mintedCIDs.contains(candidate),
+                       (candidate < siblingHash) != oracleBytesPrecede(candidate, siblingHash) {
+                        mintedCIDs.insert(candidate)
+                        block.hash = candidate
+                        break
+                    }
+                }
+            }
+            plan.register(block)
+            return send(side, newBlockBatch(side, block: block, amount: amount))
+        case 12..<30, 30..<38:
             // Extend a fork; from 30, withhold the new block and deliver an
             // earlier withheld one instead (children before parents).
             guard let parent = pickParent(plan) else { return .idle }
@@ -315,8 +416,16 @@ final class OracleRun {
             plan.register(block)
             return send(side, newBlockBatch(side, block: block, huge: true))
         case 95:
-            // Malformed: zero work, or a parented height-0 block.
+            // Malformed: zero work, a parented height-0 block, or a block
+            // named by something that is not a CID.
             guard let parent = pickParent(plan) else { return .idle }
+            if chance(33) {
+                var block = makeBlock(side, under: parent)
+                block.hash = "not-a-cid-\(counter)"
+                return .apply(side, OracleBatch(facts: [
+                    .block(block), .work(blockHash: block.hash, grindID: freshCID("grind"), work: work()),
+                ]), reserved: false)
+            }
             if chance(50) {
                 let block = makeBlock(side, under: parent)
                 return send(side, OracleBatch(facts: [
@@ -409,16 +518,21 @@ final class OracleRun {
     func probe(_ side: OracleSide) -> OracleProbe {
         let plan = plan(side)
         return OracleProbe(
-            hashes: plan.order + [foreignHash],
+            hashes: plan.order + [foreignHash, "not-a-cid"],
             grinds: plan.grinds,
-            states: states + [LatticeState.emptyHeader.rawCID],
+            states: states + [LatticeState.emptyHeader.rawCID, "not-a-cid"],
             directories: [childDirectory, otherDirectory],
+            served: served,
             maxHeight: (plan.planned.values.map(\.height).max() ?? 0) + 1
         )
     }
 
     func observe<Subject: OracleSubject>(_ world: inout OracleWorld<Subject>) -> [OracleSide: [String: String]] {
         [.parent: world.parent.observe(probe(.parent)), .child: world.child.observe(probe(.child))]
+    }
+
+    func observeTip<Subject: OracleSubject>(_ world: inout OracleWorld<Subject>) -> [OracleSide: [String: String]] {
+        [.parent: world.parent.observeTip(), .child: world.child.observeTip()]
     }
 
     func describe(_ action: OracleAction) -> String {
@@ -487,8 +601,13 @@ final class OracleRun {
             book(action, applied: liveResult.applied, restored: liveResult.restored)
             tally(liveResult.lines)
 
-            let liveSeen = observe(&live)
-            let referenceSeen = observe(&reference)
+            // Full observation reads caches into being, so it runs on about
+            // one step in four (and the last); the rest compare the tip and
+            // revision alone, letting a stale cache ride several mutations.
+            let full = observationRNG.next() % 4 == 0 || step == steps - 1
+            if full { coverage["fully observed steps", default: 0] += 1 }
+            let liveSeen = full ? observe(&live) : observeTip(&live)
+            let referenceSeen = full ? observe(&reference) : observeTip(&reference)
             for side in [OracleSide.parent, .child] {
                 let live = liveSeen[side] ?? [:], reference = referenceSeen[side] ?? [:]
                 if (live["tipCumulativeWork"]?.count ?? 0) > 64 {

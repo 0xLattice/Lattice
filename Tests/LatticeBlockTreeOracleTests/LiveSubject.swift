@@ -116,13 +116,15 @@ struct LiveSubject: OracleSubject {
         OracleOutcome(rendered: Self.describe(tree.reevaluateForkChoice()))
     }
 
+    mutating func observeTip() -> [String: String] {
+        ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
+    }
+
     mutating func observe(_ probe: OracleProbe) -> [String: String] {
-        var seen: [String: String] = [:]
-        seen["tip"] = tree.canonicalTip
+        var seen = observeTip()
         seen["height"] = "\(tree.getHighestBlockHeight())"
-        seen["revision"] = "\(tree.currentRevision())"
         seen["tipSnapshot"] = Self.describe(tree.tipSnapshot)
-        seen["tipCumulativeWork"] = render(tree.getTipCumulativeWork())
+        seen["tipCumulativeWork"] = hex(tree.getTipCumulativeWork().toHexString())
         seen["specs"] = tree.specs.keys.sorted().joined(separator: ",")
         seen["preflight"] = Self.describe(tree.transactionPreflightTip())
         seen["unresolved"] = tree.unresolvedSameChainPredecessors()
@@ -134,37 +136,54 @@ struct LiveSubject: OracleSubject {
 
         for hash in probe.hashes {
             let key = "block \(hash)"
-            seen["\(key) status"] = [
-                "contains=\(tree.contains(blockHash: hash))",
-                "canonical=\(tree.isCanonical(hash: hash))",
-                "executed=\(tree.isExecuted(blockHash: hash))",
-                "executedAncestry=\(tree.hasExecutedAncestry(blockHash: hash))",
-                "excludedRoot=\(tree.isExcludedRoot(hash))",
-                "connected=\(tree.hasConnectedAncestry(blockHash: hash))",
-                "parent=\(tree.parentHash(of: hash) ?? "nil")",
-                "needs=\(tree.sameChainPredecessorRequirement(for: hash).map { "\($0.descendantCID)←\($0.predecessorCID)" } ?? "nil")",
-            ].joined(separator: " ")
-            seen["\(key) weight"] = render(tree.forkChoiceWeight(of: hash))
+            seen["\(key) contains"] = "\(tree.contains(blockHash: hash))"
+            seen["\(key) canonical"] = "\(tree.isCanonical(hash: hash))"
+            seen["\(key) executed"] = "\(tree.isExecuted(blockHash: hash))"
+            seen["\(key) executedAncestry"] = "\(tree.hasExecutedAncestry(blockHash: hash))"
+            seen["\(key) excludedRoot"] = "\(tree.isExcludedRoot(hash))"
+            seen["\(key) connected"] = "\(tree.hasConnectedAncestry(blockHash: hash))"
+            seen["\(key) parentHash"] = tree.parentHash(of: hash) ?? "nil"
+            seen["\(key) needs"] = tree.sameChainPredecessorRequirement(for: hash)
+                .map { "\($0.descendantCID)←\($0.predecessorCID)" } ?? "nil"
+            seen["\(key) weight"] = tree.forkChoiceWeight(of: hash).map { hex($0.toHexString()) } ?? "nil"
             let meta = tree.getConsensusBlock(hash: hash)
-            seen["\(key) meta"] = Self.describe(meta)
+            seen["\(key) meta"] = meta == nil ? "nil" : "present"
+            if let meta {
+                // One key per field, so a deliberate change to how a block is
+                // held shows exactly which consensus output moved. Child order
+                // is an artifact of insertion: compared as a set.
+                seen["\(key) meta.parent"] = meta.parentBlockHash ?? "nil"
+                seen["\(key) meta.height"] = "\(meta.blockHeight)"
+                seen["\(key) meta.anchor"] = render(meta.difficultyAnchor)
+                seen["\(key) meta.work"] = hex(meta.work.toHexString())
+                seen["\(key) meta.children"] = meta.childHashes.sorted().joined(separator: ",")
+                seen["\(key) meta.contributions"] = meta.workContributions.values
+                    .sorted { $0.id < $1.id }.map(render).joined(separator: ",")
+                seen["\(key) meta.attributedRuns"] = meta.attributedRuns.sorted().joined(separator: ",")
+                seen["\(key) meta.commitments"] = render(meta.childCommitments, only: probe.served)
+                seen["\(key) meta.cumulativeWork"] = hex(meta.cumulativeWork.toHexString())
+                seen["\(key) meta.subtreeWeight"] = hex(meta.subtreeWeight.toHexString())
+            }
             // The descent from every genesis and every fork: which child each
             // fork prefers, and where that leads. A block with one child
             // descends exactly as that child does.
             if let meta, meta.parentBlockHash == nil || meta.childHashes.count > 1 {
                 seen["\(key) descent"] = tree.forkChoiceSnapshot(startingAt: hash).map {
-                    "from=\($0.startingHash) tip=\($0.tipHash) work=\(render($0.subtreeWork))"
+                    "from=\($0.startingHash) tip=\($0.tipHash) work=\(hex($0.subtreeWork.toHexString()))"
                         + " path=\($0.canonicalPath.sorted().joined(separator: ","))"
                 } ?? "nil"
             }
-            seen["\(key) cumulativeWork"] = render(tree.getCumulativeWork(forHash: hash))
-            seen["\(key) subtreeWeight"] = render(tree.subtreeWeight(forHash: hash))
+            seen["\(key) cumulativeWork"] = tree.getCumulativeWork(forHash: hash)
+                .map { hex($0.toHexString()) } ?? "nil"
+            seen["\(key) subtreeWeight"] = tree.subtreeWeight(forHash: hash)
+                .map { hex($0.toHexString()) } ?? "nil"
             seen["\(key) difficultyAnchor"] = render(tree.difficultyAnchor(forBlockHash: hash))
             seen["\(key) header"] = Self.describe(tree.headerSnapshot(of: hash))
             seen["\(key) strongestGrind"] = render(tree.strongestGrind(of: hash))
             seen["\(key) scheduleSpec"] = tree.scheduleSpec(underParent: hash)
                 .map { "targetBlockTime=\($0.targetBlockTime)" } ?? "nil"
             seen["\(key) preflight"] = Self.describe(tree.transactionPreflightTip(at: hash))
-            seen["\(key) commitments"] = render(tree.recordedChildCommitments(of: hash))
+            seen["\(key) commitments"] = render(tree.recordedChildCommitments(of: hash), only: probe.served)
             seen["\(key) runs"] = probe.directories.map {
                 "\($0)=\(tree.nearestCarrier(of: hash, directory: $0) ?? "nil")"
             }.joined(separator: " ")
@@ -206,31 +225,12 @@ struct LiveSubject: OracleSubject {
     static func describe(_ snapshot: TipBlockSnapshot?) -> String {
         guard let snapshot else { return "nil" }
         return "post=\(snapshot.postStateCID) prev=\(snapshot.prevStateCID)"
-            + " spec=\(snapshot.specCID) target=\(snapshot.target.toHexString())"
-            + " next=\(snapshot.nextTarget.toHexString()) h=\(snapshot.tipHeight)"
+            + " spec=\(snapshot.specCID) target=\(hex(snapshot.target.toHexString()))"
+            + " next=\(hex(snapshot.nextTarget.toHexString())) h=\(snapshot.tipHeight)"
             + " t=\(snapshot.timestamp)"
     }
 
     static func describe(_ preflight: (cid: String, snapshot: TipBlockSnapshot?)) -> String {
         "\(preflight.cid) \(describe(preflight.snapshot))"
-    }
-
-    static func describe(_ meta: BlockMeta?) -> String {
-        guard let meta else { return "nil" }
-        // Child order is an artifact of insertion, not a consensus output:
-        // compared as a set.
-        return [
-            "hash=\(meta.blockHash)",
-            "parent=\(meta.parentBlockHash ?? "nil")",
-            "h=\(meta.blockHeight)",
-            "anchor=\(render(meta.difficultyAnchor))",
-            "work=\(render(meta.work))",
-            "children=\(meta.childHashes.sorted().joined(separator: ","))",
-            "contributions=\(meta.workContributions.values.sorted { $0.id < $1.id }.map { render($0) }.joined(separator: ","))",
-            "attributed=\(meta.attributedRuns.sorted().joined(separator: ","))",
-            "commitments=\(render(meta.childCommitments))",
-            "cumulative=\(render(meta.cumulativeWork))",
-            "subtree=\(render(meta.subtreeWeight))",
-        ].joined(separator: " ")
     }
 }
