@@ -1,5 +1,8 @@
 # Lattice Documentation
 
+These documents are read at [lattice.build/docs](https://lattice.build/docs/), which
+publishes them at the version `lattice-node` pins. Edit them here.
+
 Lattice has two shapes that must not be confused:
 
 - one mined root commits a nested, content-addressed tree of chain candidates;
@@ -44,18 +47,7 @@ structures and their ownership boundaries.
 
 ## Vocabulary
 
-| Term | Meaning |
-|---|---|
-| mined root | The outer block whose hash is evaluated along a proof path |
-| chain path | An absolute chain identity such as `Nexus/Payments` |
-| chain root | A genesis block in that path's accepted forest |
-| predecessor | The previous block on the same chain |
-| parent chain | The next chain level toward the mined root |
-| `parentState` | The carrier's committed `prevState`, never a parent-block backlink |
-| grind | One physical PoW attempt, identified by its root CID |
-| carrier | A level that commits descendants even when the grind misses its target |
-| accepted | Locally validated consensus evidence retained in the forest |
-| canonical | The currently preferred projection of accepted evidence |
+Terms are defined in the [glossary](https://lattice.build/docs/learn/glossary/).
 
 ## Reference
 
