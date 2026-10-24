@@ -32,6 +32,8 @@ struct ReferenceSubject: OracleSubject {
             case .work(let blockHash, let grindID, let work):
                 return .work(ChainWorkFact(
                     blockHash: blockHash,
+                    // VerifiedWorkContribution (live LatticePoW) canonicalizes the grind
+                    // ID for both sides: it is the trusted boundary, as in production.
                     contribution: VerifiedWorkContribution(id: grindID, work: work)
                 ))
             case .exclusion(let blockHash):
@@ -152,6 +154,7 @@ struct ReferenceSubject: OracleSubject {
                 // One key per field, so a deliberate change to how a block is
                 // held shows exactly which consensus output moved. Child order
                 // is an artifact of insertion: compared as a set.
+                seen["\(key) meta.hash"] = meta.blockHash
                 seen["\(key) meta.parent"] = meta.parentBlockHash ?? "nil"
                 seen["\(key) meta.height"] = "\(meta.blockHeight)"
                 seen["\(key) meta.anchor"] = render(meta.difficultyAnchor)

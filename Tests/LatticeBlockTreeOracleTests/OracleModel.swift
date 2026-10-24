@@ -112,10 +112,11 @@ func render(_ contribution: VerifiedWorkContribution?) -> String {
     return "\(contribution.id)=\(hex(contribution.work.toHexString()))"
 }
 
+/// No commitments and none to a served directory render the same: what a
+/// block commits to directories this node does not serve is not compared.
 func render(_ commitments: [String: String]?, only directories: [String]) -> String {
-    guard let commitments else { return "nil" }
-    return directories.sorted().compactMap { directory in
-        commitments[directory].map { "\(directory)→\($0)" }
+    directories.sorted().compactMap { directory in
+        commitments?[directory].map { "\(directory)→\($0)" }
     }.joined(separator: ",")
 }
 
