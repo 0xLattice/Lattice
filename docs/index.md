@@ -1,6 +1,6 @@
 # Lattice Documentation
 
-These documents are read at [lattice.build/docs](https://lattice.build/docs/protocol/spec/), which
+These documents are read at [lattice.build/docs](https://lattice.build/docs/), which
 publishes them at the version `lattice-node` pins. Edit them here.
 
 Lattice has two shapes that must not be confused:

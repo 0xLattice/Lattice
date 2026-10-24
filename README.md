@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="#quickstart">Quickstart</a> &bull;
-  <a href="https://lattice.build/docs/protocol/spec/">Documentation</a> &bull;
+  <a href="https://lattice.build/docs/">Documentation</a> &bull;
   <a href="docs/foundational-architecture.md">Architecture</a> &bull;
   <a href="docs/consensus-fork-choice.md">Fork Choice</a> &bull;
   <a href="docs/spec.md">Protocol Specification</a>
@@ -141,7 +141,7 @@ creates no local consensus fact and does not tell Lattice to retain the carrier.
 
 | Goal | Document |
 |---|---|
-| Learn the vocabulary | [Glossary](https://lattice.build/docs/learn/glossary/) |
+| Learn the vocabulary and reading order | [Glossary](https://lattice.build/docs/learn/glossary/) · [Documentation index](docs/index.md) |
 | Understand process and ownership boundaries | [Architecture](docs/foundational-architecture.md) |
 | Understand grind identity and GHOST | [Work and fork choice](docs/consensus-fork-choice.md) |
 | Follow a parent-child value exchange | [Cross-chain transfer guide](docs/cross-chain.md) |
