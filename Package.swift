@@ -151,6 +151,29 @@ let package = Package(
                 .product(name: "cashew", package: "cashew"),
                 .product(name: "UInt256", package: "UInt256"),
             ]),
+        // The 50.0.1 block tree, frozen verbatim as its own module: the
+        // equivalence oracle LatticeBlockTreeOracleTests drives beside the
+        // live LatticeBlockTree. Test-only; not part of any product.
+        .target(
+            name: "LatticeBlockTreeReference",
+            dependencies: [
+                "LatticePrimitives",
+                "LatticePoW",
+                .product(name: "cashew", package: "cashew"),
+                .product(name: "CID", package: "swift-cid"),
+                .product(name: "UInt256", package: "UInt256"),
+            ],
+            path: "Tests/LatticeBlockTreeReference"),
+        .testTarget(
+            name: "LatticeBlockTreeOracleTests",
+            dependencies: [
+                "LatticePrimitives",
+                "LatticePoW",
+                "LatticeBlockTree",
+                "LatticeBlockTreeReference",
+                .product(name: "cashew", package: "cashew"),
+                .product(name: "UInt256", package: "UInt256"),
+            ]),
         .testTarget(
             name: "LatticeTests",
             dependencies: [
