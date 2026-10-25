@@ -26,8 +26,9 @@ public enum BlockImportError: Error, Sendable, Equatable {
     /// that could succeed.
     case executedVerdictContradiction
     /// The header proves no work the chain accepts: its grind misses its
-    /// target, its target is off the schedule, or its bytes do not decode or
-    /// match their CID. The one header failure that blames its sender.
+    /// target, its target is off the schedule, or its bytes do not match their
+    /// CID (bytes that match but do not decode are dropped, spec section 9.9).
+    /// The one header failure that blames its sender.
     case proofOfWorkInvalid
 }
 

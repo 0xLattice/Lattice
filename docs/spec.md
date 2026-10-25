@@ -75,7 +75,7 @@ held to section 2's canonical form.)
 A header whose own links break this does not decode as a block; a child entry
 breaking it lives in the separate child-index node, so the header decodes and
 the block is structurally refused at admission (section 9.9). Either way it is
-refused before admission: never weighed, never stored. It is a well-formedness rule, not a validity rule
+never weighed, never stored. It is a well-formedness rule, not a validity rule
 (section 9.9).
 
 `children` is one plain DAG-CBOR map, so its canonical bytes are DAG-CBOR's.
