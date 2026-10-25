@@ -1363,14 +1363,13 @@ public struct ChainTree: Sendable {
         return !overflow && needed <= UInt64.max - mutationGeneration
     }
 
+    /// Commitments are not compared: the block CID binds them, and a fact
+    /// reaches this reducer only from the node after it verified the block
+    /// under that CID, so two facts for one block cannot disagree on them.
     private func matchesGraph(_ meta: BlockRecord, input: ConsensusBlockInput) -> Bool {
         meta.blockHash == input.blockHash
             && meta.parentBlockHash == input.parentBlockHash
             && meta.blockHeight == input.blockHeight
-            // Commitments are PoW-bound content, so two honest facts for one
-            // block agree; a disagreement is a graph conflict, rejected — never
-            // resolved by whichever fact happened to replay first.
-            && meta.childCommitments == input.childCommitments
     }
 
     private mutating func hydrateMetadata(from input: ConsensusBlockInput) {

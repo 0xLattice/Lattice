@@ -298,16 +298,18 @@ final class ParentRunAttributionTests: XCTestCase {
         XCTAssertNil(wrongDirectory, "wrong directory")
     }
 
-    /// Commitments are PoW-bound content: a second fact for a block with a
-    /// DIFFERENT map is a graph conflict, never first-writer-wins.
-    func testDisagreeingCommitmentsAreAGraphConflict() async throws {
+    /// Commitments are bound by the block CID, and a fact reaches the tree
+    /// only after the node verified the block under it, so a re-delivered
+    /// block's commitments are not compared: the block keeps those it was
+    /// recorded with.
+    func testRedeliveredBlockKeepsItsRecordedCommitments() async throws {
         let chain = try await linearByReplay()
         let same = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
         XCTAssertNil(same, "same block, same map: a no-op replay")
-        do {
-            _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("other")]))
-            XCTFail("disagreeing commitments must be rejected")
-        } catch ChainStateRestoreError.corruptConsensusGraph {}
+        let other = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("other")]))
+        XCTAssertNil(other, "re-delivery is a no-op")
+        let recorded = await chain.getConsensusBlock(hash: h("p1"))?.childCommitments
+        XCTAssertEqual(recorded, [d: h("c")])
     }
 
     /// Runs exist only for directories this node serves: a block committing
