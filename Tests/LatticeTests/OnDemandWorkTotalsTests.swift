@@ -9,21 +9,15 @@ import UInt256
 @testable import LatticeImport
 
 @MainActor
-final class LazyLocalWorkCacheTests: XCTestCase {
-    func testLinearAdmissionsLeaveLocalTotalsDirtyUntilAQueryNeedsThem() async throws {
+final class OnDemandWorkTotalsTests: XCTestCase {
+    /// The diagnostic totals are derived on demand: no block carries them.
+    func testLinearAdmissionsAnswerLocalTotalsOnDemand() async throws {
         let (chain, hashes) = try await lazyCacheLinearChain(count: 6)
         let rootHash = hashes[0]
         let tipHash = hashes[5]
 
-        let blocksBeforeQuery = await chain.hashToBlock
-        let rawBeforeQuery = try XCTUnwrap(blocksBeforeQuery[rootHash])
-        // Not materialized: the root was inserted like any block, with zero
-        // diagnostics until a query needs them.
-        XCTAssertEqual(rawBeforeQuery.subtreeWeight, .zero)
-
-        let queriedRootValue = await chain.getConsensusBlock(hash: rootHash)
-        let queriedRoot = try XCTUnwrap(queriedRootValue)
-        XCTAssertEqual(queriedRoot.subtreeWeight, WorkSum(UInt256(21)))
+        let rootWeight = await chain.subtreeWeight(forHash: rootHash)
+        XCTAssertEqual(rootWeight, WorkSum(UInt256(21)))
         let tipWork = await chain.getCumulativeWork(forHash: tipHash)
         XCTAssertEqual(tipWork, WorkSum(UInt256(21)))
     }
@@ -32,10 +26,6 @@ final class LazyLocalWorkCacheTests: XCTestCase {
         let (chain, hashes) = try await lazyCacheLinearChain(count: 6)
         let rootHash = hashes[0]
         let tipHash = hashes[5]
-
-        let blocksBeforePersist = await chain.hashToBlock
-        let rawBeforePersist = try XCTUnwrap(blocksBeforePersist[rootHash])
-        XCTAssertEqual(rawBeforePersist.subtreeWeight, .zero)
 
         let restored = try await ChainState.restoreWithoutContext(replaying: hashes.indices.map {
             lazyCacheAdmission(
@@ -47,21 +37,19 @@ final class LazyLocalWorkCacheTests: XCTestCase {
         let restoredTip = await restored.canonicalTip
         let restoredRootWork = await restored.subtreeWeight(forHash: rootHash)
         let restoredTipWork = await restored.getCumulativeWork(forHash: tipHash)
-        let blocksAfterReplay = await chain.hashToBlock
-        let rawAfterReplay = try XCTUnwrap(blocksAfterReplay[rootHash])
+        let liveRootWork = await chain.subtreeWeight(forHash: rootHash)
         XCTAssertEqual(restoredTip, tipHash)
         XCTAssertEqual(restoredRootWork, WorkSum(UInt256(21)))
         XCTAssertEqual(restoredTipWork, WorkSum(UInt256(21)))
-        XCTAssertEqual(rawAfterReplay.subtreeWeight, .zero)
+        XCTAssertEqual(liveRootWork, restoredRootWork)
     }
 
     /// Crediting further grinds to held blocks, asking first whether each is
     /// credited, moves fork choice exactly as a rebuild from the facts does —
-    /// through an equal-work tie — and never rebuilds the diagnostic totals.
+    /// through an equal-work tie.
     func testCreditingGrindsMatchesAFullRebuildWithoutRebuildingLocalTotals() async throws {
         let fork = try await lazyCacheFork(branchLength: 12)
         var facts = fork.facts
-        let visitsBefore = await fork.chain.localWorkCacheBlockVisitCount
         // Left leads, right overtakes, left draws level: the last is a tie.
         let credits: [(branch: [String], depth: Int, work: UInt64)] = [
             (fork.left, 3, 5), (fork.right, 11, 9), (fork.left, 0, 2),
@@ -87,11 +75,6 @@ final class LazyLocalWorkCacheTests: XCTestCase {
             let rebuiltTip = await rebuilt.canonicalTip
             XCTAssertEqual(tip, rebuiltTip)
         }
-        let visitsAfter = await fork.chain.localWorkCacheBlockVisitCount
-        XCTAssertEqual(visitsAfter, visitsBefore)
-        let dirty = await fork.chain.localWorkCachesDirty
-        XCTAssertTrue(dirty)
-
         // The tie: equal work under the two siblings, the smaller CID wins.
         let leftWeight = await fork.chain.forkChoice.weight(of: fork.left[0])
         let rightWeight = await fork.chain.forkChoice.weight(of: fork.right[0])
@@ -111,10 +94,6 @@ final class LazyLocalWorkCacheTests: XCTestCase {
             XCTAssertEqual(read, snapshot?.subtreeWork)
             XCTAssertEqual(read, weight)
         }
-        // Reading the totals is what rebuilds them: the counter is live.
-        let visitsAfterTotals = await fork.chain.localWorkCacheBlockVisitCount
-        XCTAssertGreaterThan(visitsAfterTotals, visitsAfter)
-
         // The direct question answers as the block's full view does, for every
         // grind at every block, a grind asked at another block, and an unknown
         // grind or block.
@@ -138,7 +117,6 @@ final class LazyLocalWorkCacheTests: XCTestCase {
         var cells: [UInt64] = []
         for branchLength in [16, 256] {
             let fork = try await lazyCacheFork(branchLength: branchLength)
-            let visitsBefore = await fork.chain.localWorkCacheBlockVisitCount
             let cellsBefore = await fork.chain.segmentWorkUpdateCellCount
             for index in 0..<8 {
                 let block = (index.isMultiple(of: 2) ? fork.left : fork.right)[index]
@@ -149,9 +127,7 @@ final class LazyLocalWorkCacheTests: XCTestCase {
                     lazyCacheWork(blockHash: block, id: id, work: UInt64(index + 1))
                 )
             }
-            let visitsAfter = await fork.chain.localWorkCacheBlockVisitCount
             let cellsAfter = await fork.chain.segmentWorkUpdateCellCount
-            XCTAssertEqual(visitsAfter, visitsBefore)
             cells.append(cellsAfter - cellsBefore)
         }
         // Sixteen times the blocks, and the weight update grows by a few tree

@@ -1,5 +1,4 @@
 import CID
-import UInt256
 import LatticePrimitives
 import LatticePoW
 
@@ -458,25 +457,41 @@ extension ChainTree {
     }
 
     /// Exact total proof-of-work from genesis to the current chain tip.
-    public mutating func getTipCumulativeWork() -> WorkSum {
-        materializeLocalWorkCachesIfNeeded()
-        return graph.cumulativeWork(of: canonicalTip) ?? .zero
+    public func getTipCumulativeWork() -> WorkSum {
+        getCumulativeWork(forHash: canonicalTip) ?? .zero
     }
 
-    /// Exact genesis-relative cumulative work at a specific block, or nil if the
-    /// block is unknown.
-    public mutating func getCumulativeWork(forHash hash: String) -> WorkSum? {
+    /// Exact cumulative work at a specific block, or nil if the block is
+    /// unknown: its own work plus every ancestor's, up the child edges to the
+    /// root of its held component. A grind has one location in a chain
+    /// (`acceptsLocation`), so no grind is on the path twice and the plain sum
+    /// is the deduplicated one. A derived diagnostic, walked on demand in
+    /// O(height) — never a fork-choice input.
+    public func getCumulativeWork(forHash hash: String) -> WorkSum? {
         guard graph.contains(hash) else { return nil }
-        materializeLocalWorkCachesIfNeeded()
-        return graph.cumulativeWork(of: hash)
+        var total = WorkSum.zero
+        var current = hash
+        while true {
+            total = total + (graph.work(of: current)?.work ?? .zero)
+            // A block held under a parent that never recorded it as a child
+            // (a child at a height its parent cannot have) roots its own
+            // component, as it does for the subtree measure.
+            guard let parent = graph.parent(of: current),
+                  graph.children(of: parent).contains(current) else { return total }
+            current = parent
+        }
     }
 
-    /// The same-chain subtree measure of `hash`, deduplicated by grind identity.
-    public mutating func subtreeWeight(forHash hash: String) -> WorkSum? {
+    /// The same-chain subtree measure of `hash`, deduplicated by grind
+    /// identity: fork choice's own weight once the block is connected, and the
+    /// sum over its held subtree while it is not. Pure work, excluded subtrees
+    /// included: validity never subtracts weight.
+    public func subtreeWeight(forHash hash: String) -> WorkSum? {
         guard graph.contains(hash) else { return nil }
-        // Pure work, excluded subtrees included: validity never subtracts weight.
-        materializeLocalWorkCachesIfNeeded()
-        return graph.subtreeWeight(of: hash)
+        if let weight = forkChoice.weight(of: hash) { return weight }
+        return graph.subtree(of: hash).reduce(.zero) {
+            $0 + (graph.work(of: $1)?.work ?? .zero)
+        }
     }
 
     /// The work fork choice weighs `hash`'s subtree by: what
@@ -498,132 +513,6 @@ extension ChainTree {
             tipHash: choice.tipHash,
             canonicalPath: choice.blocks
         )
-    }
-
-    /// Rebuild exact local prefix and subtree measures after a graph or work-fact
-    /// mutation without retaining an identity map at every block. Returns the
-    /// graph's diagnostic table with every recomputed total written into it.
-    static func recomputeWorkCaches(
-        in graph: BlockGraph
-    ) -> [String: BlockDiagnostics] {
-        var result = graph.diagnosticsByHash
-        func contributions(_ hash: String) -> [String: VerifiedWorkContribution] {
-            graph.work(of: hash)?.contributions ?? [:]
-        }
-        // Quantity is a property of the physical grind, not of the segment
-        // containing its one location.
-        var strongestWork: [String: UInt256] = [:]
-        for contribution in graph.records.flatMap({ contributions($0.blockHash).values })
-        where contribution.work > (strongestWork[contribution.id] ?? .zero) {
-            strongestWork[contribution.id] = contribution.work
-        }
-        func normalized(_ contribution: VerifiedWorkContribution) -> VerifiedWorkContribution {
-            VerifiedWorkContribution(
-                id: contribution.id,
-                work: strongestWork[contribution.id] ?? contribution.work
-            )
-        }
-        let ascending = graph.records.sorted {
-            if $0.blockHeight != $1.blockHeight { return $0.blockHeight < $1.blockHeight }
-            return $0.blockHash < $1.blockHash
-        }
-        let roots = ascending.filter { meta in
-            meta.parentBlockHash.flatMap { graph[$0] } == nil
-        }
-        for root in roots {
-            var activeCounts: [String: [UInt256: Int]] = [:]
-            var activeWork = WorkSum.zero
-            func adjustActiveWork(
-                _ contribution: VerifiedWorkContribution,
-                by delta: Int
-            ) {
-                let id = contribution.id
-                let oldWork = activeCounts[id]?.keys.max() ?? .zero
-                var counts = activeCounts[id] ?? [:]
-                let count = counts[contribution.work, default: 0] + delta
-                if count == 0 {
-                    counts.removeValue(forKey: contribution.work)
-                } else {
-                    counts[contribution.work] = count
-                }
-                if counts.isEmpty {
-                    activeCounts.removeValue(forKey: id)
-                } else {
-                    activeCounts[id] = counts
-                }
-                let newWork = counts.keys.max() ?? .zero
-                guard oldWork != newWork else { return }
-                if oldWork > .zero {
-                    activeWork = activeWork.subtracting(WorkSum(oldWork))!
-                }
-                if newWork > .zero {
-                    activeWork = activeWork + newWork
-                }
-            }
-            var pending: [(hash: String, exiting: Bool)] = [(root.blockHash, false)]
-            while let frame = pending.popLast() {
-                guard let meta = graph[frame.hash] else { continue }
-                if frame.exiting {
-                    for contribution in contributions(meta.blockHash).values {
-                        adjustActiveWork(normalized(contribution), by: -1)
-                    }
-                    continue
-                }
-
-                for contribution in contributions(meta.blockHash).values {
-                    adjustActiveWork(normalized(contribution), by: 1)
-                }
-                result[meta.blockHash]?.cumulativeWork = activeWork
-                pending.append((meta.blockHash, true))
-                for childHash in graph.children(of: meta.blockHash).reversed() {
-                    pending.append((childHash, false))
-                }
-            }
-        }
-
-        typealias Accumulator = (entries: [String: UInt256], total: WorkSum)
-        var subtreeAccumulators: [String: Accumulator] = [:]
-        func insert(
-            id: String,
-            work: UInt256,
-            into accumulator: inout Accumulator
-        ) {
-            guard work > (accumulator.entries[id] ?? .zero) else { return }
-            if let oldWork = accumulator.entries[id] {
-                accumulator.total = accumulator.total.subtracting(WorkSum(oldWork))!
-            }
-            accumulator.entries[id] = work
-            accumulator.total = accumulator.total + work
-        }
-
-        for meta in ascending.reversed() {
-            let childHashes = graph.children(of: meta.blockHash)
-            let largestChild = childHashes.max {
-                (subtreeAccumulators[$0]?.entries.count ?? 0)
-                    < (subtreeAccumulators[$1]?.entries.count ?? 0)
-            }
-            var accumulator = largestChild.flatMap {
-                subtreeAccumulators.removeValue(forKey: $0)
-            } ?? Accumulator(entries: [:], total: .zero)
-            for childHash in childHashes where childHash != largestChild {
-                guard let child = subtreeAccumulators.removeValue(forKey: childHash) else {
-                    continue
-                }
-                for (id, work) in child.entries {
-                    insert(id: id, work: work, into: &accumulator)
-                }
-            }
-            for (id, contribution) in contributions(meta.blockHash) {
-                insert(
-                    id: id,
-                    work: strongestWork[id] ?? contribution.work,
-                    into: &accumulator
-                )
-            }
-            result[meta.blockHash]?.subtreeWeight = accumulator.total
-            subtreeAccumulators[meta.blockHash] = accumulator
-        }
-        return result
     }
 
     @discardableResult
@@ -736,23 +625,9 @@ extension ChainTree {
         to blockHash: String,
         attributed: Bool
     ) {
-        guard graph.setWorkContribution(
+        _ = graph.setWorkContribution(
             contribution, attributed: attributed, at: blockHash
-        ) else {
-            return
-        }
-        localWorkCachesDirty = true
-    }
-
-    /// Rebuild non-consensus diagnostic totals lazily. Fork choice always uses
-    /// the identity-aware Euler work index (`weights`) instead.
-    mutating func materializeLocalWorkCachesIfNeeded() {
-        guard localWorkCachesDirty else { return }
-        graph.recomputeWorkCaches()
-        localWorkCachesDirty = false
-#if DEBUG
-        localWorkCacheBlockVisitCount += UInt64(graph.records.count)
-#endif
+        )
     }
 
     /// GHOST descent chooses the child with greatest deduplicated verified

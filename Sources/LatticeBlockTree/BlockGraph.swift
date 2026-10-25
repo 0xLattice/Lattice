@@ -66,19 +66,12 @@ struct BlockWork: Sendable {
     }
 }
 
-/// One block's derived diagnostic totals (see `BlockMeta.cumulativeWork` and
-/// `BlockMeta.subtreeWeight`): never fork-choice inputs, rebuilt on demand.
-struct BlockDiagnostics: Sendable {
-    var cumulativeWork: WorkSum
-    var subtreeWeight: WorkSum
-}
-
 /// The block tree `ChainState` holds: every held block's record, its child
-/// edges, its work facts, its difficulty anchor and the diagnostic prefix and
-/// subtree totals. This is the ONE representation of the tree — fork choice,
-/// the execution frontier and run attribution store no edge of their own and
-/// read this one. Every held block has a record, a children entry, a work
-/// entry and a diagnostics entry; an anchor only once it has one.
+/// edges, its work facts and its difficulty anchor. This is the ONE
+/// representation of the tree — fork choice, the execution frontier and run
+/// attribution store no edge of their own and read this one. Every held block
+/// has a record, a children entry and a work entry; an anchor only once it
+/// has one.
 struct BlockGraph: Sendable {
     private var recordByHash: [String: BlockRecord] = [:]
     /// The held children of each held block, in the order they were recorded
@@ -86,7 +79,6 @@ struct BlockGraph: Sendable {
     private var childrenByHash: [String: [String]] = [:]
     private var workByHash: [String: BlockWork] = [:]
     private var anchorByHash: [String: DifficultyAnchor] = [:]
-    private(set) var diagnosticsByHash: [String: BlockDiagnostics] = [:]
 
     /// Decompose restored or fixture blocks into the graph's tables.
     init(_ blocks: [String: BlockMeta] = [:]) {
@@ -104,10 +96,6 @@ struct BlockGraph: Sendable {
                 work: meta.work
             )
             anchorByHash[hash] = meta.difficultyAnchor
-            diagnosticsByHash[hash] = BlockDiagnostics(
-                cumulativeWork: meta.cumulativeWork,
-                subtreeWeight: meta.subtreeWeight
-            )
         }
     }
 
@@ -163,25 +151,15 @@ struct BlockGraph: Sendable {
         anchorByHash[hash]
     }
 
-    func cumulativeWork(of hash: String) -> WorkSum? {
-        diagnosticsByHash[hash]?.cumulativeWork
-    }
-
-    func subtreeWeight(of hash: String) -> WorkSum? {
-        diagnosticsByHash[hash]?.subtreeWeight
-    }
-
     /// The public read view of one block, assembled from the tables.
     func meta(of hash: String) -> BlockMeta? {
         guard let record = recordByHash[hash],
-              let work = workByHash[hash],
-              let diagnostics = diagnosticsByHash[hash] else { return nil }
+              let work = workByHash[hash] else { return nil }
         return BlockMeta(
             record: record,
             childHashes: childrenByHash[hash] ?? [],
             work: work,
-            difficultyAnchor: anchorByHash[hash],
-            diagnostics: diagnostics
+            difficultyAnchor: anchorByHash[hash]
         )
     }
 
@@ -197,8 +175,8 @@ struct BlockGraph: Sendable {
 
     // MARK: Mutations
 
-    /// Hold a newly admitted block with no work yet, zero diagnostics and the
-    /// children already held for it.
+    /// Hold a newly admitted block with no work yet and the children already
+    /// held for it.
     mutating func insert(
         _ record: BlockRecord,
         children: [String],
@@ -209,7 +187,6 @@ struct BlockGraph: Sendable {
         childrenByHash[hash] = children
         workByHash[hash] = .empty
         anchorByHash[hash] = difficultyAnchor
-        diagnosticsByHash[hash] = BlockDiagnostics(cumulativeWork: .zero, subtreeWeight: .zero)
     }
 
     /// Record `child` under a held `parent`, appended last, unless already
@@ -236,11 +213,5 @@ struct BlockGraph: Sendable {
     mutating func adoptDifficultyAnchor(_ anchor: DifficultyAnchor, at hash: String) {
         guard contains(hash), anchorByHash[hash] == nil else { return }
         anchorByHash[hash] = anchor
-    }
-
-    /// Rebuild the diagnostic prefix and subtree totals; see
-    /// `ChainTree.recomputeWorkCaches`.
-    mutating func recomputeWorkCaches() {
-        diagnosticsByHash = ChainTree.recomputeWorkCaches(in: self)
     }
 }

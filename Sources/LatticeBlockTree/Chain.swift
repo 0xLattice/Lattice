@@ -23,8 +23,8 @@ public struct BlockMeta: Sendable {
     /// Inherited from the parent, or self at height 1. Absent on genesis, which
     /// precedes the anchor and has no schedule to be measured against.
     ///
-    /// Derived, like `cumulativeWork` and `subtreeWeight` beside it: a pure
-    /// function of this block's ancestry, rebuildable by walking to height 1.
+    /// Derived: a pure function of this block's ancestry, rebuildable by
+    /// walking to height 1.
     /// Carried rather than walked only so reaching it is O(1) instead of O(chain).
     public let difficultyAnchor: DifficultyAnchor?
     public let work: WorkSum
@@ -40,26 +40,12 @@ public struct BlockMeta: Sendable {
     /// live admission and replay see the same commitments (§9.10).
     public let childCommitments: [String: String]
 
-    /// Backward cumulative proof-of-work prefix measure from genesis through
-    /// this block. Each physical grind has one block location in this chain.
-    ///
-    /// This is a derived diagnostic, rebuilt on demand from durable block work
-    /// facts after recovery. It is never a fork-choice input or persisted
-    /// source of truth.
-    public let cumulativeWork: WorkSum
-
-    /// The forward same-chain subtree measure, deduplicated by physical grind.
-    /// This derived diagnostic is rebuilt on demand from accepted work facts.
-    public let subtreeWeight: WorkSum
-
     package init(
         blockHash: String,
         parentBlockHash: String?,
         blockHeight: UInt64,
         childHashes: [String],
         workContributions: [VerifiedWorkContribution],
-        cumulativeWork: WorkSum = .zero,
-        subtreeWeight: WorkSum? = nil,
         difficultyAnchor: DifficultyAnchor? = nil,
         childCommitments: [String: String] = [:]
     ) {
@@ -76,8 +62,6 @@ public struct BlockMeta: Sendable {
         self.work = work
         self.childHashes = childHashes
         self.workContributions = contributions
-        self.cumulativeWork = cumulativeWork
-        self.subtreeWeight = subtreeWeight ?? work
         self.difficultyAnchor = difficultyAnchor
         self.childCommitments = childCommitments
         // Attributed runs are derived after the block (`applyParentRun`); a
@@ -90,8 +74,7 @@ public struct BlockMeta: Sendable {
         record: BlockRecord,
         childHashes: [String],
         work: BlockWork,
-        difficultyAnchor: DifficultyAnchor?,
-        diagnostics: BlockDiagnostics
+        difficultyAnchor: DifficultyAnchor?
     ) {
         self.blockHash = record.blockHash
         self.parentBlockHash = record.parentBlockHash
@@ -102,8 +85,6 @@ public struct BlockMeta: Sendable {
         self.attributedRuns = work.attributedRuns
         self.work = work.work
         self.difficultyAnchor = difficultyAnchor
-        self.cumulativeWork = diagnostics.cumulativeWork
-        self.subtreeWeight = diagnostics.subtreeWeight
     }
 }
 
@@ -355,8 +336,8 @@ public struct ChainTree: Sendable {
     /// from its own snapshot in O(1).
     private var offRootSpecCID: [String: String] = [:]
     var indexToBlockHash: [UInt64: Set<String>]
-    /// The block tree: records, child edges, work facts, anchors and the
-    /// diagnostic totals (BlockGraph.swift).
+    /// The block tree: records, child edges, work facts and anchors
+    /// (BlockGraph.swift).
     var graph: BlockGraph
     /// GHOST weights, grind locations and excluded roots (ForkChoice.swift).
     var forkChoice: ForkChoice
@@ -366,14 +347,6 @@ public struct ChainTree: Sendable {
     /// Parent-attributed run work (§9.10) for the served child directories
     /// (RunAttribution.swift).
     var runs: RunAttribution
-    /// Diagnostic prefix/subtree totals are derived local views. They are not
-    /// fork-choice inputs and are rebuilt only when an API exposes them.
-    var localWorkCachesDirty: Bool
-#if DEBUG
-    /// Blocks visited by every rebuild of the diagnostic totals so far.
-    var localWorkCacheBlockVisitCount: UInt64 = 0
-#endif
-
     /// Restore-replay defers the derived canonical projection: batches are
     /// durable, already-admitted facts, their commits are discarded, and no
     /// replay step reads the projection — so it is computed exactly once at
@@ -430,7 +403,6 @@ public struct ChainTree: Sendable {
         self.context = nil
         self.graph = BlockGraph(hashToBlock)
         self.forkChoice = ForkChoice()
-        self.localWorkCachesDirty = true
         var allByHeight = indexToBlockHash
         for meta in hashToBlock.values {
             allByHeight[meta.blockHeight, default: []].insert(meta.blockHash)
@@ -568,8 +540,7 @@ public struct ChainTree: Sendable {
             parentBlockHash: nil,
             blockHeight: 0,
             childHashes: [],
-            workContributions: [contribution],
-            cumulativeWork: WorkSum(contribution.work)
+            workContributions: [contribution]
         )
         return try! ChainTree(
             canonicalTip: blockHash,
@@ -790,6 +761,23 @@ public struct ChainTree: Sendable {
         graph.contains(blockHash)
     }
 
+    /// The parent CID a held block names, held or not; nil for a root or an
+    /// unknown block.
+    public func parent(of blockHash: String) -> String? {
+        graph.parent(of: blockHash)
+    }
+
+    /// A held block's height; nil for an unknown block.
+    public func height(of blockHash: String) -> UInt64? {
+        graph.height(of: blockHash)
+    }
+
+    /// A held block's held children, in the order they were recorded. Empty
+    /// for an unknown block or a leaf.
+    public func children(of blockHash: String) -> [String] {
+        graph.children(of: blockHash)
+    }
+
     public func currentRevision() -> UInt64 {
         mutationGeneration
     }
@@ -857,13 +845,11 @@ public struct ChainTree: Sendable {
         )
     }
 
-    /// The public read view of one block, with its diagnostic totals: after any
-    /// block or work mutation this rebuilds them over the whole tree. To ask
-    /// only whether a grind is credited, use `workContribution(id:at:)`.
-    public mutating func getConsensusBlock(hash: String) -> BlockMeta? {
-        guard graph.contains(hash) else { return nil }
-        materializeLocalWorkCachesIfNeeded()
-        return graph.meta(of: hash)
+    /// The public read view of one block. Its cumulative work and subtree
+    /// weight are derived on demand (`getCumulativeWork(forHash:)`,
+    /// `subtreeWeight(forHash:)`).
+    public func getConsensusBlock(hash: String) -> BlockMeta? {
+        graph.meta(of: hash)
     }
 
     public func getHighestBlockHeight() -> UInt64 {
@@ -967,7 +953,7 @@ public struct ChainTree: Sendable {
             canonicalChange = projectCanonicalChain(monotoneIncreaseAt: blockHash)
         }
         let extendsCanonical = input.parentBlockHash == oldTip
-            && canonicalHashes.contains(blockHash)
+            && isCanonical(hash: blockHash)
         return SubmissionResult(
             addedBlock: true,
             addedContribution: result.addedContribution,
@@ -1320,7 +1306,7 @@ public struct ChainTree: Sendable {
         // rebuilt. Selection moves only if the excluded block was on the
         // canonical path; otherwise the descent never reached it and every
         // decision stands.
-        let wasCanonical = canonicalHashes.contains(blockHash)
+        let wasCanonical = isCanonical(hash: blockHash)
         mutationGeneration += 1
         let canonicalChange = (deferProjectionForReplay || !wasCanonical)
             ? nil
@@ -1377,14 +1363,17 @@ public struct ChainTree: Sendable {
         return !overflow && needed <= UInt64.max - mutationGeneration
     }
 
+    /// Commitments are not compared: the block CID binds them, and a fact
+    /// reaches this reducer only from the node after it verified the block
+    /// under that CID, so two facts for one block cannot disagree on them.
+    /// The snapshot still is (by the caller): it is held for every block
+    /// anyway, so the comparison costs nothing, whereas comparing
+    /// commitments would mean keeping them resident for every block only to
+    /// re-check what the CID already binds.
     private func matchesGraph(_ meta: BlockRecord, input: ConsensusBlockInput) -> Bool {
         meta.blockHash == input.blockHash
             && meta.parentBlockHash == input.parentBlockHash
             && meta.blockHeight == input.blockHeight
-            // Commitments are PoW-bound content, so two honest facts for one
-            // block agree; a disagreement is a graph conflict, rejected — never
-            // resolved by whichever fact happened to replay first.
-            && meta.childCommitments == input.childCommitments
     }
 
     private mutating func hydrateMetadata(from input: ConsensusBlockInput) {

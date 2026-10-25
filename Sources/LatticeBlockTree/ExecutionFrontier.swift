@@ -2,11 +2,6 @@ import CID
 import UInt256
 import LatticePrimitives
 
-struct StateTransition: Hashable {
-    let from: String
-    let to: String
-}
-
 /// The canonical projection and the execution frontier as a value: the
 /// selected path, which blocks were executed and which are executed all the
 /// way from genesis, and the state-transition index behind continuity. It
@@ -17,7 +12,8 @@ struct ExecutionFrontier: Sendable {
     // MARK: Canonical projection (the selection result)
 
     private(set) var canonicalTip: String
-    private(set) var canonicalHashes: Set<String>
+    /// The canonical path, one block per height: membership is a height
+    /// lookup (`isCanonical`), so no second set of the same blocks is kept.
     private(set) var canonicalHashByHeight: [UInt64: String]
     private(set) var tipSnapshot: TipBlockSnapshot?
     /// Generation at which the canonical projection was last brought current
@@ -60,7 +56,9 @@ struct ExecutionFrontier: Sendable {
     // MARK: State-continuity index
 
     private(set) var snapshots: [String: TipBlockSnapshot]
-    private var byTransition: [StateTransition: Set<String>]
+    /// Blocks by declared post-state, for every block whose transition
+    /// changes state. A transition between two distinct states is one of
+    /// these filtered by its pre-state, so no index by transition is kept.
     private var byPostState: [String: Set<String>]
 
 #if DEBUG
@@ -90,24 +88,15 @@ struct ExecutionFrontier: Sendable {
         excluded: Set<String>
     ) throws {
         self.canonicalTip = canonicalTip
-        self.canonicalHashes = canonicalHashes
         self.tipSnapshot = tipSnapshot
         self.snapshots = snapshots
         if let tipSnapshot {
             self.snapshots[canonicalTip] = tipSnapshot
         }
         self.validated = validated
-        self.byTransition = [:]
         self.byPostState = [:]
         for (blockHash, snapshot) in self.snapshots
         where blocks.contains(blockHash) {
-            self.byTransition[
-                StateTransition(
-                    from: snapshot.prevStateCID,
-                    to: snapshot.postStateCID
-                ),
-                default: []
-            ].insert(blockHash)
             if snapshot.prevStateCID != snapshot.postStateCID {
                 self.byPostState[
                     snapshot.postStateCID,
@@ -164,6 +153,11 @@ struct ExecutionFrontier: Sendable {
         anchored.contains(blockHash)
     }
 
+    func isCanonical(_ blockHash: String, in graph: BlockGraph) -> Bool {
+        guard let height = graph.height(of: blockHash) else { return false }
+        return canonicalHashByHeight[height] == blockHash
+    }
+
     /// Whether this chain produced `stateCID` — i.e. some block whose declared
     /// post-state is `stateCID` was executed, and so was every block between it
     /// and the genesis.
@@ -186,8 +180,9 @@ struct ExecutionFrontier: Sendable {
     }
 
     /// The graph search behind `ChainState.stateContinuityPath`, for
-    /// canonical, distinct state CIDs. `mutating` only for its DEBUG visit
-    /// counter.
+    /// canonical, distinct state CIDs — so a block whose transition is
+    /// `from → to` changes state and is indexed under `to`. `mutating` only
+    /// for its DEBUG visit counter.
     mutating func continuityPath(
         from: String,
         to: String,
@@ -206,17 +201,14 @@ struct ExecutionFrontier: Sendable {
         func isAttestable(_ blockHash: String) -> Bool {
             anchored.contains(blockHash)
         }
-        if let directCandidates = byTransition[
-            StateTransition(from: from, to: to)
-        ] {
-            if let direct = directCandidates.lazy.filter({
-                isAttestable($0)
-            }).min() {
-                return [direct]
-            }
+        let targetCandidates = byPostState[to] ?? []
+        let snapshots = self.snapshots
+        if let direct = targetCandidates.lazy.filter({
+            snapshots[$0]?.prevStateCID == from && isAttestable($0)
+        }).min() {
+            return [direct]
         }
 
-        let targetCandidates = byPostState[to] ?? []
         var pending = Array(targetCandidates)
             .filter { isAttestable($0) }
             .sorted(by: >)
@@ -301,12 +293,6 @@ struct ExecutionFrontier: Sendable {
     ) {
         if let previous = snapshots[blockHash],
            previous != snapshot {
-            byTransition[
-                StateTransition(
-                    from: previous.prevStateCID,
-                    to: previous.postStateCID
-                )
-            ]?.remove(blockHash)
             if previous.prevStateCID != previous.postStateCID {
                 byPostState[
                     previous.postStateCID
@@ -314,13 +300,6 @@ struct ExecutionFrontier: Sendable {
             }
         }
         snapshots[blockHash] = snapshot
-        byTransition[
-            StateTransition(
-                from: snapshot.prevStateCID,
-                to: snapshot.postStateCID
-            ),
-            default: []
-        ].insert(blockHash)
         if snapshot.prevStateCID != snapshot.postStateCID {
             byPostState[
                 snapshot.postStateCID,
@@ -414,17 +393,17 @@ struct ExecutionFrontier: Sendable {
         )
         let newHashes = projection.canonicalHashes
         let newTip = projection.canonicalTip
-        guard newTip != canonicalTip || newHashes != canonicalHashes else { return nil }
+        let oldHashes = Set(canonicalHashByHeight.values)
+        guard newTip != canonicalTip || newHashes != oldHashes else { return nil }
 
-        let removed = canonicalHashes.subtracting(newHashes)
-        let added = newHashes.subtracting(canonicalHashes).reduce(
+        let removed = oldHashes.subtracting(newHashes)
+        let added = newHashes.subtracting(oldHashes).reduce(
             into: [String: UInt64]()
         ) { result, hash in
             if let height = graph.height(of: hash) { result[hash] = height }
         }
 
         canonicalTip = newTip
-        canonicalHashes = newHashes
         canonicalHashByHeight = [:]
         for hash in newHashes {
             if let height = graph.height(of: hash) {
@@ -472,7 +451,7 @@ struct ExecutionFrontier: Sendable {
     ) -> Divergence {
         var current = mutatedAt
         var below = mutatedAt
-        while !canonicalHashes.contains(current) {
+        while !isCanonical(current, in: graph) {
             guard let meta = graph[current] else { return .malformed }
             guard let parentHash = meta.parentBlockHash else {
                 return meta.blockHeight == 0 ? .otherRoot : .malformed
@@ -514,7 +493,7 @@ struct ExecutionFrontier: Sendable {
         // of its ancestors, so every canonical decision is reinforced and none
         // flips. This is the ordinary "stronger observation on a canonical
         // block" event, and it is now O(1) instead of a walk from the root.
-        guard !canonicalHashes.contains(mutatedAt) else {
+        guard !isCanonical(mutatedAt, in: graph) else {
             return TruncatedProjectionOutcome(commit: nil)
         }
         let divergence: String
@@ -589,7 +568,7 @@ struct ExecutionFrontier: Sendable {
         // re-materialize everything from the fork point to the tip only to
         // conclude nothing moved, which is worse than the whole-chain early-out
         // this change removes.
-        if canonicalHashes.contains(chosen) {
+        if isCanonical(chosen, in: graph) {
 #if DEBUG
             truncatedCanonicalProjectionCount += 1
 #endif
@@ -655,8 +634,6 @@ struct ExecutionFrontier: Sendable {
         }
 
         canonicalTip = tipHash
-        canonicalHashes.subtract(removed)
-        canonicalHashes.formUnion(added.keys)
         for hash in removed {
             guard let height = graph.height(of: hash),
                   canonicalHashByHeight[height] == hash else { continue }
@@ -679,7 +656,8 @@ extension ChainTree {
     // exactly as before.
 
     public var canonicalTip: String { frontier.canonicalTip }
-    var canonicalHashes: Set<String> { frontier.canonicalHashes }
+    /// The canonical path as a set. O(path): tests only.
+    var canonicalHashes: Set<String> { Set(frontier.canonicalHashByHeight.values) }
     var canonicalHashByHeight: [UInt64: String] { frontier.canonicalHashByHeight }
     public var tipSnapshot: TipBlockSnapshot? { frontier.tipSnapshot }
 
@@ -724,8 +702,7 @@ extension ChainTree {
     }
 
     public func isCanonical(hash: String) -> Bool {
-        guard let height = graph.height(of: hash) else { return false }
-        return canonicalHashByHeight[height] == hash
+        frontier.isCanonical(hash, in: graph)
     }
 
     public func canonicalBlockHash(atHeight height: UInt64) -> String? {
@@ -784,6 +761,64 @@ extension ChainTree {
     /// verified and may yet prove invalid.
     public func hasExecutedAncestry(blockHash: String) -> Bool {
         frontier.isAnchored(blockHash)
+    }
+
+    /// The tip a node acts on: the heaviest executed tip, or empty while the
+    /// canonical genesis root is not executed. From genesis, at each fork the
+    /// heaviest child that is executed is the step taken — fork choice's own
+    /// weight and tie-break — and the descent stops where no child is
+    /// executed. A block with no verdict is never stepped into: it weighs,
+    /// and is taken once it executes. Up to the executed prefix of the
+    /// canonical chain this is fork choice's own descent, so the walk starts
+    /// there.
+    ///
+    /// With `avoided` blocks, they and all they lead to are left out: from
+    /// the parent of the deepest avoided block on the act-on chain, the
+    /// heaviest executed step at each fork that is not avoided. The act-on
+    /// tip when none of them is on its chain, or the deepest is a root.
+    public func heaviestExecutedTip(avoiding avoided: Set<String> = []) -> String {
+        func descend(from start: String, skipping skipped: Set<String>) -> String {
+            var tip = start
+            while let next = forkChoice.preferred(among: graph.children(of: tip).filter {
+                isExecuted(blockHash: $0) && !skipped.contains($0)
+            }) {
+                tip = next
+            }
+            return tip
+        }
+        let prefix = executedPrefix()
+        guard !prefix.isEmpty else { return prefix }
+        let tip = descend(from: prefix, skipping: [])
+        guard let floor = avoided.compactMap({ graph.height(of: $0) }).min() else { return tip }
+        var deepest: String?
+        var cid: String? = tip
+        while let block = cid, let height = graph.height(of: block), height >= floor {
+            if avoided.contains(block) { deepest = block }
+            cid = graph.parent(of: block)
+        }
+        guard let deepest, let base = graph.parent(of: deepest) else { return tip }
+        return descend(from: base, skipping: avoided)
+    }
+
+    /// The deepest block on the canonical chain whose ancestry is executed
+    /// from genesis; empty while the canonical genesis root is not executed.
+    /// The executed blocks on one path are a prefix of it, so this is a
+    /// binary search over heights.
+    private func executedPrefix() -> String {
+        guard let genesis = canonicalBlockHash(atHeight: 0),
+              isExecuted(blockHash: genesis) else { return "" }
+        var low: UInt64 = 0
+        var high = highestBlockHeight
+        while low < high {
+            let middle = low + (high - low + 1) / 2
+            if let hash = canonicalBlockHash(atHeight: middle),
+               hasExecutedAncestry(blockHash: hash) {
+                low = middle
+            } else {
+                high = middle - 1
+            }
+        }
+        return canonicalBlockHash(atHeight: low) ?? canonicalTip
     }
 
     /// Whether `toStateCID` is reachable from `fromStateCID` through the
