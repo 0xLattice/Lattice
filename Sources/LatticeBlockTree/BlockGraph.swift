@@ -12,25 +12,45 @@ struct BlockRecord: Sendable, Equatable {
     let childCommitments: [String: String]
 }
 
-/// One block's verified work facts: every contribution by ID, which of them
-/// are a parent's attributed runs rather than grinds, and their credited total.
+/// One block's verified work facts: every contribution's work by ID, and
+/// which of them are a parent's attributed runs rather than grinds. The
+/// credited total is derived from them, never stored beside them.
 struct BlockWork: Sendable {
-    private(set) var contributions: [String: VerifiedWorkContribution]
+    private(set) var workByID: [String: Fixed256]
     /// The contribution IDs here that are a parent's attributed runs (§9.10),
     /// not grinds (see `BlockMeta.attributedRuns`).
     private(set) var attributedRuns: Set<String>
-    private(set) var work: WorkSum
 
-    static let empty = BlockWork(contributions: [:], attributedRuns: [], work: .zero)
+    static let empty = BlockWork(contributions: [:], attributedRuns: [])
 
     init(
         contributions: [String: VerifiedWorkContribution],
-        attributedRuns: Set<String>,
-        work: WorkSum
+        attributedRuns: Set<String>
     ) {
-        self.contributions = contributions
+        self.workByID = contributions.mapValues { Fixed256($0.work) }
         self.attributedRuns = attributedRuns
-        self.work = work
+    }
+
+    /// Every contribution, by ID.
+    var contributions: [String: VerifiedWorkContribution] {
+        Dictionary(uniqueKeysWithValues: workByID.map {
+            ($0.key, VerifiedWorkContribution(heldID: $0.key, work: $0.value.uint256))
+        })
+    }
+
+    func contribution(id: String) -> VerifiedWorkContribution? {
+        // The held key, not `id`: `String` equality is canonical
+        // equivalence, so the two can differ in bytes.
+        workByID.index(forKey: id).map {
+            VerifiedWorkContribution(heldID: workByID[$0].key, work: workByID[$0].value.uint256)
+        }
+    }
+
+    /// The block's credited work: every contribution, exactly.
+    var work: WorkSum {
+        var total = WorkTotal()
+        for work in workByID.values { total.add(work) }
+        return total.exact
     }
 
     /// False when `contribution` is not strictly stronger than the one held
@@ -39,15 +59,11 @@ struct BlockWork: Sendable {
         _ contribution: VerifiedWorkContribution,
         attributed: Bool
     ) -> Bool {
-        if let existing = contributions[contribution.id],
-           existing.work >= contribution.work {
+        let work = Fixed256(contribution.work)
+        if let existing = workByID[contribution.id], existing >= work {
             return false
         }
-        if let existing = contributions[contribution.id] {
-            work = work.subtracting(WorkSum(existing.work))!
-        }
-        contributions[contribution.id] = contribution
-        work = work + contribution.work
+        workByID[contribution.id] = work
         if attributed {
             attributedRuns.insert(contribution.id)
         }
@@ -56,13 +72,14 @@ struct BlockWork: Sendable {
 
     /// This block's grinds: every contribution that is not an attributed run.
     var grinds: Set<String> {
-        Set(contributions.keys.filter { !attributedRuns.contains($0) })
+        Set(workByID.keys.filter { !attributedRuns.contains($0) })
     }
 
-    /// The credited work of this block's grinds alone. Derived from the
-    /// contributions, never cached beside `work`, so it cannot drift from it.
+    /// The credited work of this block's grinds alone.
     var grindWork: WorkSum {
-        WorkMeasure(contributions.values.filter { !attributedRuns.contains($0.id) }).total
+        var total = WorkTotal()
+        for (id, work) in workByID where !attributedRuns.contains(id) { total.add(work) }
+        return total.exact
     }
 }
 
@@ -78,9 +95,15 @@ struct BlockGraph: Sendable {
     /// — `findChildren`'s order at insertion, then appends. Never re-sorted.
     private var childrenByHash: [String: [String]] = [:]
     private var workByHash: [String: BlockWork] = [:]
-    private var anchorByHash: [String: DifficultyAnchor] = [:]
+    /// Each block's difficulty anchor, as the height-1 block it is read
+    /// from: a reference, not a copy of that block's timestamp and target.
+    private var anchorBlockByHash: [String: String] = [:]
 
-    /// Decompose restored or fixture blocks into the graph's tables.
+    /// Decompose restored or fixture blocks into the graph's tables. A
+    /// fixture block holds no anchor, and none is derived for it later: only
+    /// admission (`insertBlock`) records one, at height 1, so
+    /// `ChainTree.difficultyAnchor(forBlockHash:)` answers nil for a
+    /// fixture block.
     init(_ blocks: [String: BlockMeta] = [:]) {
         for (hash, meta) in blocks {
             recordByHash[hash] = BlockRecord(
@@ -92,10 +115,8 @@ struct BlockGraph: Sendable {
             childrenByHash[hash] = meta.childHashes
             workByHash[hash] = BlockWork(
                 contributions: meta.workContributions,
-                attributedRuns: meta.attributedRuns,
-                work: meta.work
+                attributedRuns: meta.attributedRuns
             )
-            anchorByHash[hash] = meta.difficultyAnchor
         }
     }
 
@@ -144,33 +165,25 @@ struct BlockGraph: Sendable {
     }
 
     func contribution(id: String, at hash: String) -> VerifiedWorkContribution? {
-        workByHash[hash]?.contributions[id]
+        workByHash[hash]?.contribution(id: id)
     }
 
-    func difficultyAnchor(of hash: String) -> DifficultyAnchor? {
-        anchorByHash[hash]
+    /// The height-1 block `hash`'s difficulty anchor is read from.
+    func anchorBlock(of hash: String) -> String? {
+        anchorBlockByHash[hash]
     }
 
-    /// The public read view of one block, assembled from the tables.
-    func meta(of hash: String) -> BlockMeta? {
+    /// The public read view of one block, assembled from the tables. The
+    /// anchor's value lives on its height-1 block, so the caller supplies it.
+    func meta(of hash: String, difficultyAnchor: DifficultyAnchor?) -> BlockMeta? {
         guard let record = recordByHash[hash],
               let work = workByHash[hash] else { return nil }
         return BlockMeta(
             record: record,
             childHashes: childrenByHash[hash] ?? [],
             work: work,
-            difficultyAnchor: anchorByHash[hash]
+            difficultyAnchor: difficultyAnchor
         )
-    }
-
-    /// Every held block's public read view. O(N): assembled on read.
-    var metas: [String: BlockMeta] {
-        var result: [String: BlockMeta] = [:]
-        result.reserveCapacity(recordByHash.count)
-        for hash in recordByHash.keys {
-            result[hash] = meta(of: hash)
-        }
-        return result
     }
 
     // MARK: Mutations
@@ -180,13 +193,13 @@ struct BlockGraph: Sendable {
     mutating func insert(
         _ record: BlockRecord,
         children: [String],
-        difficultyAnchor: DifficultyAnchor?
+        anchorBlock: String?
     ) {
         let hash = record.blockHash
         recordByHash[hash] = record
         childrenByHash[hash] = children
         workByHash[hash] = .empty
-        anchorByHash[hash] = difficultyAnchor
+        anchorBlockByHash[hash] = anchorBlock
     }
 
     /// Record `child` under a held `parent`, appended last, unless already
@@ -210,8 +223,8 @@ struct BlockGraph: Sendable {
     /// Fill an anchor left absent by out-of-order admission. Write-once: the
     /// anchor is a function of ancestry, which never changes for a given block,
     /// so a second value would mean the ancestry was misread.
-    mutating func adoptDifficultyAnchor(_ anchor: DifficultyAnchor, at hash: String) {
-        guard contains(hash), anchorByHash[hash] == nil else { return }
-        anchorByHash[hash] = anchor
+    mutating func adoptAnchorBlock(_ anchorBlock: String, at hash: String) {
+        guard contains(hash), anchorBlockByHash[hash] == nil else { return }
+        anchorBlockByHash[hash] = anchorBlock
     }
 }

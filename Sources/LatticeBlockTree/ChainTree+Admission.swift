@@ -74,11 +74,12 @@ extension ChainTree {
     /// attributed run.
     package func strongestGrind(of blockHash: String) -> VerifiedWorkContribution? {
         guard let work = graph.work(of: blockHash) else { return nil }
-        return work.contributions.values
-            .filter { !work.attributedRuns.contains($0.id) }
+        return work.workByID
+            .filter { !work.attributedRuns.contains($0.key) }
             .max {
-                $0.work != $1.work ? $0.work < $1.work : $0.id > $1.id
+                $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key
             }
+            .flatMap { work.contribution(id: $0.key) }
     }
 
     /// Apply one locally authenticated admission batch through the single
