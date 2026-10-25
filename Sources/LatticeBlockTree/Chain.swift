@@ -12,6 +12,17 @@ public enum ChainStateRestoreError: Error, Sendable, Equatable {
     case executedVerdictContradiction
     /// A root genesis other than the root chain's configured one.
     case unpinnedRootGenesis
+    /// A block fact naming a parent, state, spec or child that is not the
+    /// standard CID (spec §3.1): not a Lattice block. Live apply refuses
+    /// it with this; restore, which replays only facts this node applied,
+    /// finds one corrupt (`corruptConsensusGraph`).
+    case nonStandardLink
+}
+
+/// `cid` in its canonical spelling when it is the standard CID (spec §3.1),
+/// the only identity the block tree holds; nil for anything else.
+func standardCID(_ cid: String) -> String? {
+    CIDIdentity.canonicalString(cid).flatMap { CIDIdentity.isStandard($0) ? $0 : nil }
 }
 
 // MARK: - Concrete Types
@@ -178,6 +189,13 @@ public struct TipBlockSnapshot: Sendable, Equatable {
     }
 }
 
+extension TipBlockSnapshot {
+    /// Whether its states and spec are standard CIDs in canonical spelling.
+    var namesStandardCIDs: Bool {
+        [postStateCID, prevStateCID, specCID].allSatisfy { CIDDigest($0) != nil }
+    }
+}
+
 /// The graph fields Lattice needs after admission has already authenticated a
 /// block. This deliberately excludes the block body and node-owned state data.
 private struct ConsensusBlockInput: Sendable {
@@ -207,16 +225,14 @@ private struct ConsensusBlockInput: Sendable {
         )
     }
 
+    /// Every identity a block fact names — its hash, parent, states, spec
+    /// and children — is the standard CID (spec §3.1); nil otherwise.
     init?(fact: ChainBlockFact) {
-        // The block hash is computed from the block's own bytes, so it is a
-        // canonical CID. Decoding refuses a header whose parent, states or
-        // spec are not standard CIDs (spec §3.1); a fact recorded outside
-        // that boundary keeps the canonical CID shape it names.
-        guard let blockHash = CIDIdentity.canonicalString(fact.blockHash),
-              BlockID(blockHash) != nil,
-              let postStateCID = CIDIdentity.canonicalString(fact.postStateCID),
-              let prevStateCID = CIDIdentity.canonicalString(fact.prevStateCID),
-              let specCID = CIDIdentity.canonicalString(fact.specCID),
+        guard let blockHash = standardCID(fact.blockHash),
+              let postStateCID = standardCID(fact.postStateCID),
+              let prevStateCID = standardCID(fact.prevStateCID),
+              let specCID = standardCID(fact.specCID),
+              let childCommitments = Self.standardCommitments(fact.childCommitments ?? [:]),
               let target = UInt256.fromHexDigits(fact.target),
               let nextTarget = UInt256.fromHexDigits(fact.nextTarget),
               // Every block, genesis included, commits a positive target and
@@ -226,13 +242,13 @@ private struct ConsensusBlockInput: Sendable {
               (fact.parentBlockHash == nil) == (fact.blockHeight == 0) else {
             return nil
         }
-        let normalizedParent = fact.parentBlockHash.flatMap(CIDIdentity.canonicalString)
+        let normalizedParent = fact.parentBlockHash.flatMap(standardCID)
         guard fact.parentBlockHash == nil || normalizedParent != nil else { return nil }
         self.blockHash = blockHash
         parentBlockHash = normalizedParent
         blockHeight = fact.blockHeight
         timestamp = fact.timestamp
-        childCommitments = fact.childCommitments ?? [:]
+        self.childCommitments = childCommitments
         snapshot = TipBlockSnapshot(
             postStateCID: postStateCID,
             prevStateCID: prevStateCID,
@@ -242,6 +258,33 @@ private struct ConsensusBlockInput: Sendable {
             tipHeight: fact.blockHeight,
             timestamp: fact.timestamp
         )
+    }
+
+    /// Whether the parent, children, states and spec it names are standard
+    /// CIDs in canonical spelling: what the block graph holds.
+    var namesStandardCIDs: Bool {
+        (parentBlockHash.map { BlockID($0) != nil } ?? true)
+            && childCommitments.values.allSatisfy { BlockID($0) != nil }
+            && snapshot.namesStandardCIDs
+    }
+
+    /// The commitments with every child CID standard, or nil.
+    private static func standardCommitments(_ commitments: [String: String]) -> [String: String]? {
+        var result: [String: String] = [:]
+        for (directory, child) in commitments {
+            guard let standard = standardCID(child) else { return nil }
+            result[directory] = standard
+        }
+        return result
+    }
+
+    /// Whether the fact names a parent, state, spec or child that is not
+    /// the standard CID: it is not a Lattice block (`nonStandardLink`).
+    static func namesNonStandardLink(_ fact: ChainBlockFact) -> Bool {
+        let links = [fact.postStateCID, fact.prevStateCID, fact.specCID]
+            + (fact.parentBlockHash.map { [$0] } ?? [])
+            + (fact.childCommitments.map { Array($0.values) } ?? [])
+        return links.contains { standardCID($0) == nil }
     }
 }
 
@@ -270,11 +313,10 @@ private struct TrustedImportBatch {
         guard workFacts.count == 1,
               let work = workFacts.first,
               work.contribution.work > .zero,
-              let workBlockHash = CIDIdentity.canonicalString(work.blockHash),
-              let contributionID = CIDIdentity.canonicalString(work.contribution.id),
               // Both are computed from content this node holds, so both are
-              // canonical CIDs: any other shape is corrupt.
-              BlockID(workBlockHash) != nil, GrindID(contributionID) != nil else {
+              // standard CIDs: any other shape is corrupt.
+              let workBlockHash = standardCID(work.blockHash),
+              let contributionID = standardCID(work.contribution.id) else {
             return nil
         }
         let contribution = VerifiedWorkContribution(
@@ -417,7 +459,8 @@ public struct ChainTree: Sendable {
 
     /// `indexToBlockHash` is accepted for the fixtures that pass one and
     /// otherwise ignored: the blocks are indexed from `hashToBlock`. Every
-    /// block, parent and contribution ID must be a canonical CID.
+    /// block, parent, child, state, spec and contribution ID must be a
+    /// standard CID in canonical spelling.
     package init(
         canonicalTip: String,
         canonicalHashes: Set<String>,
@@ -452,6 +495,16 @@ public struct ChainTree: Sendable {
         }) else {
             throw ChainStateRestoreError.corruptConsensusGraph
         }
+        // The tree holds only standard CIDs (spec §3.1).
+        let snapshots = tipSnapshotsByHash.values + (tipSnapshot.map { [$0] } ?? [])
+        guard hashToBlock.values.allSatisfy({
+                  BlockID($0.blockHash) != nil
+                      && ($0.parentBlockHash.map { BlockID($0) != nil } ?? true)
+                      && $0.childCommitments.values.allSatisfy { BlockID($0) != nil }
+              }),
+              snapshots.allSatisfy(\.namesStandardCIDs) else {
+            throw ChainStateRestoreError.corruptConsensusGraph
+        }
         self.context = nil
         self.mutationGeneration = mutationGeneration
         self.reservedImportRevisions = 0
@@ -462,11 +515,8 @@ public struct ChainTree: Sendable {
             ($0.blockHeight, $0.blockHash) < ($1.blockHeight, $1.blockHash)
         }
         for meta in metas {
-            guard let id = BlockID(meta.blockHash) else {
-                throw ChainStateRestoreError.corruptConsensusGraph
-            }
             _ = graph.insert(
-                id, parent: meta.parentBlockHash, height: meta.blockHeight,
+                BlockID(meta.blockHash)!, parent: meta.parentBlockHash, height: meta.blockHeight,
                 childCommitments: meta.childCommitments
             )
         }
@@ -759,6 +809,9 @@ public struct ChainTree: Sendable {
                     completed = true
                 } catch ChainStateRestoreError.missingBlockFact {
                     deferred.append(entry)
+                } catch ChainStateRestoreError.nonStandardLink {
+                    // Only a bug or a hand-edited store holds one.
+                    throw ChainStateRestoreError.corruptConsensusGraph
                 }
             }
             guard completed else {
@@ -883,7 +936,7 @@ public struct ChainTree: Sendable {
         for block in ordered {
             let entry = graph[block]
             guard entry.parent != BlockGraph.none else {
-                if entry.height == 0, graph.foreignParents[block] == nil {
+                if entry.height == 0 {
                     connected.insert(block)
                 }
                 continue
@@ -1004,9 +1057,9 @@ public struct ChainTree: Sendable {
         if contribution.work == .zero || (isRoot && input.blockHeight != 0) {
             return .discarded()
         }
-        // Both are computed from content this node holds, so both are
-        // canonical CIDs: any other shape is refused here.
-        guard let id = BlockID(input.blockHash), let grindID = GrindID(contribution.id) else {
+        // The tree holds only standard CIDs (spec §3.1).
+        guard let id = BlockID(input.blockHash), let grindID = GrindID(contribution.id),
+              input.namesStandardCIDs else {
             return .discarded()
         }
         let held = graph.handle(input.blockHash)
@@ -1249,7 +1302,13 @@ public struct ChainTree: Sendable {
             return nil
         }
         guard let trusted = authenticated() else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            let malformed = batch.facts.contains {
+                if case .block(let fact) = $0 { return ConsensusBlockInput.namesNonStandardLink(fact) }
+                return false
+            }
+            throw malformed
+                ? ChainStateRestoreError.nonStandardLink
+                : ChainStateRestoreError.corruptConsensusGraph
         }
         // Applied only once the batch has landed: `defer` would also run on the
         // throw paths, marking a block executed out of a batch that was rejected

@@ -13,9 +13,9 @@ import LatticePoW
 /// `LATTICE_ORACLE_STEPS` (steps per seed, default 100); replay one failing
 /// seed with `LATTICE_ORACLE_SEED`.
 final class BlockTreeOracleEquivalenceTests: XCTestCase {
-    /// The stream's identity shapes are what it means them to be: every
-    /// minted shape is a canonical key, distinct from its digest-sharing
-    /// siblings, and the upper-case spelling names the same key.
+    /// The stream's identity shapes are what it means them to be: each
+    /// non-standard shape is a canonical spelling distinct from its
+    /// digest-sharing siblings, and the upper-case spelling names the same key.
     func testStreamIdentityShapes() {
         let cid = oracleCID("oracle-shape")
         let digest = oracleDigest(cid)
@@ -124,7 +124,6 @@ final class OracleRun {
     let childContext = try! ChainRuntimeContext(path: [DEFAULT_ROOT_DIRECTORY, childDirectory])
     let foreignHash: String
     var history: [String] = []
-    var digests: [[UInt8]] = []
     var mintedCIDs: Set<String> = []
     /// Decides which steps get the full observation, apart from the stream's
     /// RNG so the schedule never changes what is generated.
@@ -136,13 +135,7 @@ final class OracleRun {
         self.seed = seed
         rng = SplitMix64(seed: seed)
         observationRNG = SplitMix64(seed: seed ^ 0x0B5E_4FA7_10A5_0B5E)
-        let canonicalStates = (0..<6).map { oracleCID("oracle-state-\($0)") }
-        // Header-chosen states need not be canonical: a twin of a canonical
-        // state under another codec, and a CIDv0, are other states.
-        states = canonicalStates + [
-            oracleCID(digest: oracleDigest(canonicalStates[0]), codec: 0x55),
-            oracleCID(digest: oracleDigest(canonicalStates[1]), codec: nil),
-        ]
+        states = (0..<6).map { oracleCID("oracle-state-\($0)") }
         specs = [oracleSpec(targetBlockTime: 1_000), oracleSpec(targetBlockTime: 2_000)]
         specCIDs = specs.map(specCID)
         foreignHash = oracleCID("oracle-\(seed)-foreign")
@@ -158,24 +151,24 @@ final class OracleRun {
     func chance(_ percent: Int) -> Bool { int(100) < percent }
     func element<T>(_ values: [T]) -> T? { values.isEmpty ? nil : values[int(values.count)] }
 
-    /// A new identity: a dag-cbor sha2-256 CIDv1, the only shape a block hash
-    /// or grind ID takes (both are computed locally). With `shaped`, an
-    /// identity a header names: sometimes another codec or a CIDv0, often
-    /// reusing an earlier digest, so identities that differ only outside the
-    /// digest meet in one graph.
-    func freshCID(_ tag: String, shaped: Bool = false) -> String {
+    /// A new identity: a dag-cbor sha2-256 CIDv1, the only shape the tree
+    /// holds (spec §3.1).
+    func freshCID(_ tag: String) -> String {
         counter += 1
-        let base = oracleCID("oracle-\(seed)-\(tag)-\(counter)")
-        var minted = base
-        if shaped, chance(20) {
-            let digest = chance(50) ? element(digests) ?? oracleDigest(base) : oracleDigest(base)
-            let codec: UInt8? = [0x55, 0x70, nil][int(3)]  // raw, dag-pb, CIDv0
-            let shaped = oracleCID(digest: digest, codec: codec)
-            if !mintedCIDs.contains(shaped) { minted = shaped }
-        }
+        let minted = oracleCID("oracle-\(seed)-\(tag)-\(counter)")
         mintedCIDs.insert(minted)
-        digests.append(oracleDigest(minted))
         return minted
+    }
+
+    /// `cid` under a shape that is not the standard CID: the same digest
+    /// under another codec or as a CIDv0, or no CID at all.
+    func nonStandard(_ cid: String) -> String {
+        switch int(4) {
+        case 0: oracleCID(digest: oracleDigest(cid), codec: 0x55)  // raw
+        case 1: oracleCID(digest: oracleDigest(cid), codec: 0x70)  // dag-pb
+        case 2: oracleCID(digest: oracleDigest(cid), codec: nil)  // CIDv0
+        default: "not-a-cid-\(counter)"
+        }
     }
 
     /// Sometimes a non-canonical spelling of the same CID: the tree must key
@@ -234,12 +227,10 @@ final class OracleRun {
         var commitments: [String: String]?
         if side == .parent {
             if chance(25) {
-                // Sometimes a commitment that is not a CID at all.
-                commitments = [childDirectory: chance(5)
-                    ? "not-a-cid-\(counter)" : element(childPlan.order) ?? foreignHash]
+                commitments = [childDirectory: element(childPlan.order) ?? foreignHash]
             }
             if chance(5) {
-                commitments = (commitments ?? [:]).merging([otherDirectory: freshCID("other-child", shaped: true)]) { a, _ in a }
+                commitments = (commitments ?? [:]).merging([otherDirectory: freshCID("other-child")]) { a, _ in a }
             }
         }
         let timestamp = (parent?.timestamp ?? 1_000_000) + Int64(int(2_000)) - 100
@@ -291,6 +282,15 @@ final class OracleRun {
         return .apply(side, batch, reserved: chance(5))
     }
 
+    /// A block naming a non-standard link: refused at the tree's entry, so
+    /// never booked. Applied unreserved: the reference adapter refuses it
+    /// for the 50.0.1 tree, which has no such rule.
+    func malformed(_ side: OracleSide, _ block: OracleBlockFact, amount: UInt256) -> OracleAction {
+        .apply(side, OracleBatch(facts: [
+            .block(block), .work(blockHash: block.hash, grindID: freshCID("grind"), work: amount),
+        ]), reserved: false)
+    }
+
     func deliverWithheld(_ side: OracleSide) -> OracleAction? {
         let plan = plan(side)
         guard !plan.withheld.isEmpty else { return nil }
@@ -319,12 +319,9 @@ final class OracleRun {
             var block = makeBlock(side, under: parent)
             if chance(35) {
                 // A block naming its parent under another shape of the same
-                // digest: a different identity, so it never connects to the
-                // parent a digest-only key would hand it.
-                let codec: UInt8? = [0x55, 0x70, nil][int(3)]
-                block.parent = oracleCID(digest: oracleDigest(parent.hash), codec: codec)
-                plan.register(block, bad: true)
-                return send(side, newBlockBatch(side, block: block, amount: amount))
+                // digest: not a Lattice block, refused at the tree's entry.
+                block.parent = nonStandard(parent.hash)
+                return malformed(side, block, amount: amount)
             } else if chance(60) {
                 // A sibling whose CID text sorts against the other's the
                 // opposite way to its bytes (about one pair in twenty-five):
@@ -430,9 +427,21 @@ final class OracleRun {
             plan.register(block)
             return send(side, newBlockBatch(side, block: block, huge: true))
         case 95:
-            // Malformed: zero work, a parented height-0 block, or a block
-            // named by something that is not a CID.
+            // Malformed: zero work, a parented height-0 block, a block named
+            // by something that is not a CID, or a block naming a state,
+            // spec or child that is not the standard CID.
             guard let parent = pickParent(plan) else { return .idle }
+            if chance(40) {
+                var block = makeBlock(side, under: parent)
+                switch int(4) {
+                case 0: block.postState = nonStandard(block.postState)
+                case 1: block.prevState = nonStandard(block.prevState)
+                case 2: block.spec = nonStandard(block.spec)
+                default:
+                    block.childCommitments = [childDirectory: nonStandard(element(childPlan.order) ?? foreignHash)]
+                }
+                return malformed(side, block, amount: work())
+            }
             if chance(33) {
                 var block = makeBlock(side, under: parent)
                 block.hash = "not-a-cid-\(counter)"

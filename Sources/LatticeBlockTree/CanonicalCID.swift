@@ -4,5 +4,5 @@ import LatticePrimitives
 typealias BlockID = CIDDigest
 /// A grind's identity: the CID of the block or run its work was proven on.
 typealias GrindID = CIDDigest
-/// A post- or pre-state a block declares, when that state is a canonical CID.
+/// A post- or pre-state a block declares.
 typealias StateID = CIDDigest

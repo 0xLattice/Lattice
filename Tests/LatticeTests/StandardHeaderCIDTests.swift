@@ -122,6 +122,59 @@ final class StandardHeaderCIDTests: XCTestCase {
         XCTAssertFalse(index.isWellFormed)
     }
 
+    /// The block tree holds only standard CIDs: live apply refuses a fact
+    /// naming any other link with `nonStandardLink`, and restore, which only
+    /// replays facts a node applied, finds such a store corrupt.
+    func testTheTreeRefusesAFactWithANonStandardLink() async throws {
+        let fetcher = StorableFetcher()
+        let genesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
+        let block = try await AdmissionFixture.makeChild(of: genesis, fetcher: fetcher, timestamp: 2_000, nonce: 1)
+        let genesisBatch = try testAdmissionBatch(for: genesis)
+        let shape = try XCTUnwrap(nonStandardShapes.first).cid
+
+        func batch(
+            parent: String? = nil, post: String? = nil, prev: String? = nil,
+            spec: String? = nil, children: [String: String]? = nil
+        ) throws -> BlockImportBatch {
+            let honest = try testAdmissionBatch(for: block)
+            return BlockImportBatch(facts: honest.facts.map {
+                guard case .block(let fact) = $0 else { return $0 }
+                return .block(ChainBlockFact(
+                    blockHash: fact.blockHash,
+                    parentBlockHash: parent ?? fact.parentBlockHash,
+                    blockHeight: fact.blockHeight,
+                    postStateCID: post ?? fact.postStateCID,
+                    prevStateCID: prev ?? fact.prevStateCID,
+                    specCID: spec ?? fact.specCID,
+                    target: fact.target,
+                    nextTarget: fact.nextTarget,
+                    timestamp: fact.timestamp,
+                    stateDiff: fact.stateDiff,
+                    childCommitments: children ?? fact.childCommitments
+                ))
+            })
+        }
+        let malformed = [
+            try batch(parent: shape),
+            try batch(post: shape),
+            try batch(prev: shape),
+            try batch(spec: shape),
+            try batch(children: ["Child": shape]),
+        ]
+        for batch in malformed {
+            var tree = try ChainTree.restoreWithoutContext(replaying: [genesisBatch])
+            XCTAssertThrowsError(try tree.apply(batch)) {
+                XCTAssertEqual($0 as? ChainStateRestoreError, .nonStandardLink)
+            }
+            XCTAssertFalse(tree.contains(blockHash: try BlockHeader(node: block).rawCID))
+            XCTAssertThrowsError(try ChainTree.restoreWithoutContext(replaying: [genesisBatch, batch])) {
+                XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+            }
+        }
+        var tree = try ChainTree.restoreWithoutContext(replaying: [genesisBatch])
+        XCTAssertNoThrow(try tree.apply(try batch()))
+    }
+
     func testAllStandardHeadersDecodeUnchanged() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)

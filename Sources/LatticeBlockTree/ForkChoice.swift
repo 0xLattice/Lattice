@@ -215,7 +215,7 @@ extension BlockGraph {
         let parent = self[root].parent
         if parent != Self.none {
             guard isRouted(parent) else { return false }
-        } else if self[root].height != 0 || foreignParents[root] != nil {
+        } else if self[root].height != 0 {
             return false
         }
         // A member of a disconnected component cannot already be routed
@@ -398,9 +398,6 @@ extension ChainTree {
         let graph = mutableGraph
         let entry = graph[block]
         guard entry.parent != BlockGraph.none else {
-            // A parent that is not a canonical CID is never held: the block
-            // waits forever, unrouted.
-            guard graph.foreignParents[block] == nil else { return true }
             guard entry.height == 0 else { return false }
             return graph.routeRoot(block)
         }

@@ -31,6 +31,19 @@ struct OracleBlockFact: Equatable {
     var childCommitments: [String: String]?
 }
 
+extension OracleBlockFact {
+    /// Whether it names a parent, state, spec or child that is not the
+    /// standard CID (spec §3.1), whatever its spelling.
+    var namesNonStandardLink: Bool {
+        let links = [postState, prevState, spec] + (parent.map { [$0] } ?? [])
+            + (childCommitments.map { Array($0.values) } ?? [])
+        return links.contains {
+            LatticePrimitives.CIDIdentity.canonicalString($0)
+                .map(LatticePrimitives.CIDIdentity.isStandard) != true
+        }
+    }
+}
+
 /// One `BlockImportBatch`.
 struct OracleBatch: Equatable {
     var facts: [OracleFact]
