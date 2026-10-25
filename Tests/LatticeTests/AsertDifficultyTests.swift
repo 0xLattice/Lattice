@@ -600,6 +600,43 @@ final class AsertDifficultyTests: XCTestCase {
         }
     }
 
+    /// Children first: every block arrives before its parent, so no anchor
+    /// can be inherited on the way in. The height-1 block's arrival connects
+    /// the whole waiting chain and hands its anchor down it, so the anchor is
+    /// a read — `difficultyAnchor` writes nothing, and a tree held by two
+    /// owners can be asked it.
+    func testAnchorsSetWhenAWaitingChainConnects() async throws {
+        let fetcher = StorableFetcher()
+        let chainSpec = spec(targetBlockTime: 1_000)
+        let genesis = try await buildAndStoreGenesis(
+            spec: chainSpec, timestamp: 1_000, target: UInt256(1) << 240, fetcher: fetcher
+        )
+        let chain = ChainState.fromGenesis(block: genesis)
+        var blocks: [Block] = []
+        var previous = genesis
+        for (i, gap) in [1_000, 300, 7_000, 1_000, 40].enumerated() {
+            let block = try await buildAndStoreBlock(
+                previous: previous, timestamp: previous.timestamp + Int64(gap),
+                nonce: UInt64(i), fetcher: fetcher
+            )
+            blocks.append(block)
+            previous = block
+        }
+        for block in blocks.reversed() {
+            _ = await chain.submitTestBlock(blockHeader: try VolumeImpl<Block>(node: block), block: block)
+        }
+
+        let tree = await chain.tree
+        let shared = tree
+        for block in blocks {
+            let hash = try VolumeImpl<Block>(node: block).rawCID
+            let walked = try await BlockBuilder.resolveDifficultyAnchor(from: block, fetcher: fetcher)
+            XCTAssertNotNil(shared.difficultyAnchor(forBlockHash: hash), "height \(block.height)")
+            XCTAssertEqual(shared.difficultyAnchor(forBlockHash: hash), walked, "height \(block.height)")
+            XCTAssertEqual(tree.difficultyAnchor(forBlockHash: hash), walked, "height \(block.height)")
+        }
+    }
+
     // MARK: - Grindability across the curve
 
     /// A later timestamp must never yield a HARDER target, at any point on the

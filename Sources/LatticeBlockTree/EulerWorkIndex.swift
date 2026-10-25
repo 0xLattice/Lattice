@@ -39,7 +39,9 @@ protocol DirectWorkSource {
 ///
 /// Blocks are named by handle. Block `h`'s OPEN is node `2h` and its CLOSE is
 /// node `2h + 1`, so no map from block to node is kept; a node of height 0 is
-/// not in the tree.
+/// not in the tree. Node indices are computed in `Int`; the one representation
+/// limit is that node links are UInt32, which covers block handles below
+/// 2^31 (`reserve` refuses past that). Block handles themselves are UInt32.
 struct EulerWorkIndex: Sendable {
     /// One step of an Euler tour, by block handle.
     enum Event: Sendable, Equatable {
@@ -76,7 +78,8 @@ struct EulerWorkIndex: Sendable {
     var isEmpty: Bool { root == Self.none }
 
     func contains(_ block: UInt32) -> Bool {
-        inTree(block * 2)
+        let node = Int(block) * 2
+        return node < nodes.count && nodes[node].height != 0
     }
 
     private func inTree(_ node: UInt32) -> Bool {
@@ -290,6 +293,7 @@ struct EulerWorkIndex: Sendable {
     /// Make room for block `block`'s two nodes.
     private mutating func reserve(_ block: UInt32) {
         let needed = Int(block) * 2 + 2
+        precondition(needed <= Int(Self.none), "Euler node links are UInt32: block handles below 2^31")
         if nodes.count < needed {
             nodes.append(contentsOf: repeatElement(Node(), count: needed - nodes.count))
         }

@@ -126,7 +126,9 @@ extension BlockGraph {
     /// a block's declared post-state without running it, so an unverified
     /// claim would otherwise stay attestable forever; and a child chain
     /// settles cross-chain withdrawals against an attested parent state.
-    func continuity(from: UInt32, to: UInt32) -> Bool {
+    /// `visits` counts the blocks the search read: the caller's own counter,
+    /// so the search writes nothing a shared graph's other holders see.
+    func continuity(from: UInt32, to: UInt32, visits: inout UInt64) -> Bool {
         let candidates = anchoredProducers(of: to)
         if candidates.contains(where: { self[$0].prevState == from }) {
             return true
@@ -136,9 +138,7 @@ extension BlockGraph {
         while let block = pending.popLast() {
             guard visited.insert(block).inserted else { continue }
             let entry = self[block]
-#if DEBUG
-            stateContinuityBlockVisitCount &+= 1
-#endif
+            visits &+= 1
             if entry.prevState == from { return true }
             let parent = entry.parent
             guard parent != Self.none, isAnchored(parent),
@@ -394,7 +394,6 @@ extension ChainTree {
     var truncatedCanonicalProjectionCount: UInt64 { graph.truncatedCanonicalProjectionCount }
     var canonicalProjectionBlockVisitCount: UInt64 { graph.canonicalProjectionBlockVisitCount }
     var canonicalProjectionSegmentVisitCount: UInt64 { graph.canonicalProjectionSegmentVisitCount }
-    var stateContinuityBlockVisitCount: UInt64 { graph.stateContinuityBlockVisitCount }
 #endif
 
     /// Recompute canonical projection after local simulation/test mutation.
@@ -575,13 +574,20 @@ extension ChainTree {
         // A state no block declares produces nothing; one no block declares
         // as pre-state matches none (`none` is no block's state).
         guard let toState = graph.stateHandle(to) else { return false }
-        // A query: the search only counts its visits (DEBUG), never edits.
-        return graph.continuity(from: graph.stateHandle(from) ?? BlockGraph.none, to: toState)
+        // A query: the graph is only read; the visit count is this tree's own.
+        var visits: UInt64 = 0
+        defer {
+#if DEBUG
+            stateContinuityBlockVisitCount &+= visits
+#endif
+        }
+        return graph.continuity(from: graph.stateHandle(from) ?? BlockGraph.none, to: toState, visits: &visits)
     }
 
     /// Record that a held block's transition was executed.
     mutating func markValidated(blockHash: String) {
-        guard let block = graph.handle(blockHash) else { return }
+        // Already recorded: nothing to change (and nothing to write).
+        guard let block = graph.handle(blockHash), !graph.isValidated(block) else { return }
         mutableGraph.markValidated(block)
     }
 

@@ -349,6 +349,10 @@ public struct ChainTree: Sendable {
     /// replay step reads the projection — so it is computed exactly once at
     /// the end of replay instead of per event.
     var deferProjectionForReplay = false
+#if DEBUG
+    /// Blocks read by `hasStateContinuity` searches on this tree.
+    internal(set) var stateContinuityBlockVisitCount: UInt64 = 0
+#endif
     /// Advances for every successful consensus mutation.
     var mutationGeneration: UInt64
     /// Capacity held across the node's asynchronous stage boundary. These
@@ -379,7 +383,7 @@ public struct ChainTree: Sendable {
     /// An independent tree with this one's contents, to mutate while this
     /// one stays held: the explicit form of the copy that `mutableGraph`
     /// refuses to make implicitly. O(blocks).
-    package func detached() -> ChainTree {
+    public func detached() -> ChainTree {
         var copy = self
         copy.storage = storage.copy()
         return copy
@@ -928,12 +932,7 @@ public struct ChainTree: Sendable {
     }
 
     private func getConsensusBlock(_ block: UInt32) -> BlockMeta {
-        let anchor = graph[block].anchor
-        return BlockMeta(
-            graph: graph,
-            block: block,
-            difficultyAnchor: anchor == BlockGraph.none ? nil : graph.anchor(setBy: anchor)
-        )
+        BlockMeta(graph: graph, block: block, difficultyAnchor: difficultyAnchor(of: block))
     }
 
     public func getHighestBlockHeight() -> UInt64 {
@@ -953,44 +952,34 @@ public struct ChainTree: Sendable {
     }
 #endif
 
-    /// The difficulty anchor for a block, filling any gap and caching the
-    /// result along the way.
+    /// The difficulty anchor for a block: a read, never a write.
     ///
-    /// Admission normally inherits the anchor from the parent, which is O(1).
-    /// A block can arrive before its parent though, and it has no anchor to
-    /// inherit at that moment — so rather than leave a hole its descendants
-    /// would inherit, this walks up to the nearest ancestor that does have one
-    /// and writes it back down the path it walked. Height 1 always has an
+    /// Admission sets every anchor eagerly: height 1 is its own anchor, a
+    /// block under an anchored parent inherits it, and a block that connects
+    /// a waiting component hands its anchor down that component
+    /// (`propagateAnchor`). So the first cached entry is almost always the
+    /// block's own. A block never linked to its parent's entry (one naming
+    /// it at the wrong height) is the exception, and this walks up to the
+    /// nearest ancestor holding one, writing nothing. Height 1 always has an
     /// anchor from its own admission, so the walk always terminates.
     ///
-    /// The result is a pure function of the block's ancestry either way; the
-    /// cache only decides how much of that ancestry has to be re-read. What is
-    /// cached is the height-1 block the anchor is read from, never a copy.
-    public mutating func difficultyAnchor(forBlockHash hash: String) -> DifficultyAnchor? {
-        guard var current = graph.handle(hash) else { return nil }
-        var unresolved: [UInt32] = []
-        var resolved = BlockGraph.none
+    /// What is held is the height-1 block the anchor is read from, never a
+    /// copy.
+    public func difficultyAnchor(forBlockHash hash: String) -> DifficultyAnchor? {
+        graph.handle(hash).flatMap(difficultyAnchor(of:))
+    }
+
+    private func difficultyAnchor(of block: UInt32) -> DifficultyAnchor? {
+        var current = block
         while true {
             let entry = graph[current]
             if entry.anchor != BlockGraph.none {
-                resolved = entry.anchor
-                break
+                return graph.anchor(setBy: entry.anchor)
             }
-            unresolved.append(current)
             guard entry.height > 1, entry.parent != BlockGraph.none,
-                  graph.isHeld(entry.parent) else { break }
+                  graph.isHeld(entry.parent) else { return nil }
             current = entry.parent
         }
-        guard resolved != BlockGraph.none else { return nil }
-        // Write-once: the anchor is a function of ancestry, which never
-        // changes for a given block.
-        if !unresolved.isEmpty {
-            let graph = mutableGraph
-            for step in unresolved {
-                graph[step].anchor = resolved
-            }
-        }
-        return graph.anchor(setBy: resolved)
     }
 
     // MARK: - Block Submission
@@ -1154,6 +1143,7 @@ public struct ChainTree: Sendable {
         } else if parent != BlockGraph.none {
             graph[block].anchor = graph[parent].anchor
         }
+        graph.propagateAnchor(from: block)
         graph.recordSnapshot(input.snapshot, at: block)
         // A block declaring a spec other than its root's (a `spec !=
         // parent.spec` exclusion, or below one) keeps its root's spec for the

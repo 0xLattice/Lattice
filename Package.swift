@@ -40,7 +40,7 @@ let package = Package(
         .package(url: "https://github.com/swift-libp2p/swift-multicodec.git", exact: "0.2.1"),
         .package(url: "https://github.com/JohnSundell/CollectionConcurrencyKit.git", from: "0.2.0"),
         // The block tree's interned identities (`OrderedSet`).
-        .package(url: "https://github.com/apple/swift-collections.git", from: "1.6.0"),
+        .package(url: "https://github.com/apple/swift-collections.git", exact: "1.6.0"),
         // Exact: the policy engine decides verdicts, so an engine change is a consensus change.
         .package(url: "https://github.com/swiftwasm/WasmKit.git", exact: "0.2.2"),
     ],

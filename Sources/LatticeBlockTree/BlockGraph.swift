@@ -145,7 +145,6 @@ final class BlockGraph: @unchecked Sendable {
     var truncatedCanonicalProjectionCount: UInt64 = 0
     var canonicalProjectionBlockVisitCount: UInt64 = 0
     var canonicalProjectionSegmentVisitCount: UInt64 = 0
-    var stateContinuityBlockVisitCount: UInt64 = 0
     var runUpdateCount: UInt64 = 0
 #endif
 
@@ -187,7 +186,6 @@ final class BlockGraph: @unchecked Sendable {
         copy.truncatedCanonicalProjectionCount = truncatedCanonicalProjectionCount
         copy.canonicalProjectionBlockVisitCount = canonicalProjectionBlockVisitCount
         copy.canonicalProjectionSegmentVisitCount = canonicalProjectionSegmentVisitCount
-        copy.stateContinuityBlockVisitCount = stateContinuityBlockVisitCount
         copy.runUpdateCount = runUpdateCount
 #endif
         return copy
@@ -481,9 +479,19 @@ final class BlockGraph: @unchecked Sendable {
     ) -> UInt32 {
         let block = intern(id)
         precondition(!isHeld(block))
-        let children = pendingChildren(of: id, height: height)
-        for child in self.children(ofUnheld: block) where !children.contains(child) {
-            self[child].flags.insert(.unlinked)
+        // The orphans already naming it: those at the height above become its
+        // children, in the order they wait; any other never will. One pass,
+        // however many wait.
+        let (childHeight, overflow) = height.addingReportingOverflow(1)
+        var children: [UInt32] = []
+        var waiting = self[block].firstChild
+        while waiting != Self.none {
+            if !overflow, self[waiting].height == childHeight {
+                children.append(waiting)
+            } else {
+                self[waiting].flags.insert(.unlinked)
+            }
+            waiting = self[waiting].nextSibling
         }
         self[block].firstChild = Self.none
         for child in children.reversed() {
@@ -510,15 +518,23 @@ final class BlockGraph: @unchecked Sendable {
         return block
     }
 
-    /// The blocks waiting under an unheld entry, linked or about to be.
-    private func children(ofUnheld block: UInt32) -> [UInt32] {
-        var result: [UInt32] = []
-        var child = self[block].firstChild
-        while child != Self.none {
-            result.append(child)
-            child = self[child].nextSibling
+    /// Hand `block`'s anchor down to the descendants it just connected that
+    /// have none yet. Each block's anchor is written once, so over a chain's
+    /// life this is O(blocks).
+    func propagateAnchor(from block: UInt32) {
+        let anchor = self[block].anchor
+        guard anchor != Self.none else { return }
+        var pending = [block]
+        while let next = pending.popLast() {
+            var child = self[next].firstChild
+            while child != Self.none {
+                if self[child].anchor == Self.none, self[child].height > 1 {
+                    self[child].anchor = anchor
+                    pending.append(child)
+                }
+                child = self[child].nextSibling
+            }
         }
-        return result
     }
 
     /// Record `child` first among `parent`'s children: O(1) however many

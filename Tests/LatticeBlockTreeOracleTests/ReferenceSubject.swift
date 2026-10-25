@@ -149,6 +149,11 @@ struct ReferenceSubject: OracleSubject {
             seen["\(key) needs"] = tree.sameChainPredecessorRequirement(for: hash)
                 .map { "\($0.descendantCID)←\($0.predecessorCID)" } ?? "nil"
             seen["\(key) weight"] = tree.forkChoiceWeight(of: hash).map { hex($0.toHexString()) } ?? "nil"
+            // The reference fills its anchor cache lazily, on a query; the live
+            // tree sets anchors as blocks connect. Neither cache is a consensus
+            // output (nothing reads `BlockMeta.difficultyAnchor` but the read
+            // view), so the meta is compared with the anchor resolved.
+            _ = tree.difficultyAnchor(forBlockHash: hash)
             let meta = tree.getConsensusBlock(hash: hash)
             seen["\(key) meta"] = meta == nil ? "nil" : "present"
             if let meta {

@@ -220,7 +220,7 @@ final class BlockSubmissionE2ETests: XCTestCase {
         _ = await chain.submitTestBlock(blockHeader: b1Header, block: b1)
 
         let proof = VerifiedWorkContribution(
-            id: "accepted-root-proof",
+            id: testCID("accepted-root-proof"),
             work: ownWork &* UInt256(4)
         )
         let promoted = await chain.submitTestBlock(

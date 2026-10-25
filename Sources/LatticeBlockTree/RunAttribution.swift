@@ -162,6 +162,8 @@ extension ChainTree {
     /// directory it hosts after every restart, and it runs synchronously on
     /// the actor — one whole-graph walk per directory.
     public mutating func serveRuns(for directory: String) {
+        // Idempotent, and serving an already-served directory changes nothing.
+        guard !graph.served.contains(directory) else { return }
         mutableGraph.serve(directory)
     }
 

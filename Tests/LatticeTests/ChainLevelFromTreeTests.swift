@@ -54,6 +54,16 @@ final class ChainLevelFromTreeTests: XCTestCase {
         XCTAssertEqual(height, 10)
     }
 
+    /// Serving a directory already served is a no-op and writes nothing:
+    /// with a second holder of the tree, a write would trap in DEBUG.
+    func testServingAServedDirectoryAgainWritesNothing() throws {
+        var tree = try Self.tree(blocks: 3)
+        tree.serveRuns(for: "kid")
+        let held = tree
+        tree.serveRuns(for: "kid")
+        XCTAssertEqual(held.canonicalTip, tree.canonicalTip)
+    }
+
     func testATreeWithoutContextHasNoLevel() throws {
         XCTAssertNil(ChainLevel(tree: try ChainTree.restoreWithoutContext(
             replaying: [Self.batch(0)]

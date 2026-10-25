@@ -109,7 +109,7 @@ final class LinearChainTests: XCTestCase {
     func testLinearChainTipIsHighest() async {
         let (chain, _) = makeLinearChain(length: 5)
         let tip = await chain.canonicalTip
-        XCTAssertEqual(tip, "block_4")
+        XCTAssertEqual(tip, blockCID("block_4"))
         let highest = await chain.getHighestBlockHeight()
         XCTAssertEqual(highest, 4)
     }
@@ -334,7 +334,7 @@ final class NakamotoConsensusTests: XCTestCase {
     func testNakamotoLongestChainRule() async {
         let (chain, _) = makeLinearChain(length: 6, prefix: "main")
         let tip = await chain.canonicalTip
-        XCTAssertEqual(tip, "main_5")
+        XCTAssertEqual(tip, blockCID("main_5"))
         for i in 0..<6 {
             let onMain = await chain.isCanonical(hash: blockCID("main_\(i)"))
             XCTAssertTrue(onMain)
@@ -482,7 +482,7 @@ final class EdgeCaseTests: XCTestCase {
         let g = makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: genesisChildren)
         allBlocks.insert(g, at: 0)
 
-        let chain = makeChain(blocks: allBlocks, canonicalHashes: Set([blockCID("G"), "F0_1"]))
+        let chain = makeChain(blocks: allBlocks, canonicalHashes: Set([blockCID("G"), blockCID("F0_1")]))
         let reorg = await chain.reevaluateForkChoice()
         XCTAssertNotNil(reorg)
         let manyForksTip = await chain.canonicalTip
