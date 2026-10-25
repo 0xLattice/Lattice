@@ -258,6 +258,52 @@ final class TransactionPreflightTests: XCTestCase {
         XCTAssertEqual(badSignatureResult.disposition, .invalid)
     }
 
+    func testClassifyFromTheTreesBasisMatchesTheLevel() async throws {
+        let fetcher = StorableFetcher()
+        let signer = CryptoUtils.generateKeyPair()
+        let genesis = try await buildAndStoreGenesis(
+            spec: spec(),
+            timestamp: 1_000,
+            target: easy,
+            fetcher: fetcher
+        )
+        let chain = ChainState.fromGenesis(block: genesis)
+        let level = ChainLevel(testChain: chain)
+        let address = testAddress(publicKey: signer.publicKey)
+        let tree = await chain.tree
+
+        let ready = transaction(signers: [signer], nonce: 0)
+        let overspend = transaction(
+            signers: [signer],
+            nonce: 0,
+            accountActions: [AccountAction(owner: address, delta: -1)]
+        )
+        let missingBody = Transaction(
+            signatures: [:],
+            body: HeaderImpl<TransactionBody>(rawCID: testCID("missing-body"))
+        )
+        let cases: [(Transaction, String?, TransactionPreflightDisposition)] = [
+            (ready, nil, .ready),
+            (overspend, nil, .invalid),
+            (missingBody, nil, .unavailable),
+            // A block this chain never executed has no snapshot.
+            (ready, testCID("not-executed"), .unavailable),
+        ]
+        for (tx, tipCID, expected) in cases {
+            let basis = tree.transactionPreflightTip(at: tipCID)
+            let classified = await TransactionPreflight.classify(
+                tx,
+                tipCID: basis.cid,
+                snapshot: basis.snapshot,
+                chainPath: level.context.path,
+                fetcher: fetcher
+            )
+            let viaLevel = await level.preflightTransaction(tx, at: tipCID, fetcher: fetcher)
+            XCTAssertEqual(classified, viaLevel)
+            XCTAssertEqual(classified.disposition, expected)
+        }
+    }
+
     func testValueCreatingTransactionIsInvalid() async throws {
         let fetcher = StorableFetcher()
         let signer = CryptoUtils.generateKeyPair()

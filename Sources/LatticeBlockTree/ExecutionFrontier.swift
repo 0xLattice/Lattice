@@ -715,7 +715,7 @@ extension ChainTree {
     /// being resolved. The snapshot is nil unless the block is on the
     /// executed-from-genesis frontier: a weighed block's post-state is a
     /// declared claim, never a state to classify against.
-    package func transactionPreflightTip(
+    public func transactionPreflightTip(
         at blockHash: String? = nil
     ) -> (cid: String, snapshot: TipBlockSnapshot?) {
         let cid = blockHash ?? canonicalTip
