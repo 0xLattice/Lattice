@@ -51,6 +51,13 @@ final class BlockTreeOracleEquivalenceTests: XCTestCase {
         // reaching a path shows up in the log.
         print("oracle coverage (\(seeds.count) seeds × \(steps) steps): "
             + coverage.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))
+        // The act-on queries compare equal trivially when the act-on tip is
+        // always the best tip or no avoidance ever moves it; a stream that
+        // stops reaching either fails here rather than passing vacuously.
+        if environment["LATTICE_ORACLE_SEED"] == nil {
+            XCTAssertGreaterThan(coverage["act-on ≠ best tip"] ?? 0, 0)
+            XCTAssertGreaterThan(coverage["avoiding changed the answer"] ?? 0, 0)
+        }
     }
 }
 
@@ -610,16 +617,28 @@ final class OracleRun {
             let referenceSeen = full ? observe(&reference) : observeTip(&reference)
             for side in [OracleSide.parent, .child] {
                 var live = liveSeen[side] ?? [:], reference = referenceSeen[side] ?? [:]
-                // `cumulativeWork` is compared only for connected blocks. One
-                // that can never connect (it arrived before a parent that
-                // cannot have it as a child) got a cache-timing-dependent
-                // value in 50.0.1: zero, or whatever it held when last read
-                // as a root. The live walk answers it deterministically.
+                // `cumulativeWork` is not compared for a block whose parent is
+                // held but never recorded it as a child (it arrived first, at a
+                // height the parent cannot have, so it can never connect):
+                // 50.0.1 gave it a cache-timing-dependent value — zero, or
+                // whatever it held when last read as a root. The live walk
+                // answers it deterministically. An orphan whose parent is not
+                // held is compared like any block.
                 for key in live.keys where key.hasSuffix(" cumulativeWork") {
-                    let hash = key.dropFirst("block ".count).dropLast(" cumulativeWork".count)
-                    if live["block \(hash) connected"] == "false" {
+                    let hash = String(key.dropFirst("block ".count).dropLast(" cumulativeWork".count))
+                    if Self.isUnlinked(hash, in: live) {
                         live[key] = nil
                         reference[key] = nil
+                    }
+                }
+                if full {
+                    let tips = live["heaviestExecutedTip"]?.split(separator: ",", omittingEmptySubsequences: false) ?? []
+                    let actOn = tips.first.map(String.init) ?? ""
+                    if actOn != live["tip"] {
+                        coverage["act-on ≠ best tip", default: 0] += 1
+                    }
+                    if live.contains(where: { $0.key.hasSuffix(" heaviestExecutedTip avoiding") && $0.value != actOn }) {
+                        coverage["avoiding changed the answer", default: 0] += 1
                     }
                 }
                 if (live["tipCumulativeWork"]?.count ?? 0) > 64 {
@@ -635,6 +654,18 @@ final class OracleRun {
             }
         }
         return nil
+    }
+
+    /// Whether `hash` names a parent that is held but does not list it as a
+    /// child, read from the observed graph keys.
+    static func isUnlinked(_ hash: String, in seen: [String: String]) -> Bool {
+        guard let graph = seen["block \(hash) graph"],
+              let start = graph.range(of: "parent=") else { return false }
+        let parent = String(graph[start.upperBound...].prefix { $0 != " " })
+        guard seen["block \(parent) contains"] == "true",
+              let parentGraph = seen["block \(parent) graph"],
+              let children = parentGraph.range(of: "children=") else { return false }
+        return !parentGraph[children.upperBound...].split(separator: ",").contains { $0 == hash }
     }
 
     func tally(_ lines: [String]) {

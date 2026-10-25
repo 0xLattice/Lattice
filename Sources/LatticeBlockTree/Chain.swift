@@ -1366,6 +1366,10 @@ public struct ChainTree: Sendable {
     /// Commitments are not compared: the block CID binds them, and a fact
     /// reaches this reducer only from the node after it verified the block
     /// under that CID, so two facts for one block cannot disagree on them.
+    /// The snapshot still is (by the caller): it is held for every block
+    /// anyway, so the comparison costs nothing, whereas comparing
+    /// commitments would mean keeping them resident for every block only to
+    /// re-check what the CID already binds.
     private func matchesGraph(_ meta: BlockRecord, input: ConsensusBlockInput) -> Bool {
         meta.blockHash == input.blockHash
             && meta.parentBlockHash == input.parentBlockHash
