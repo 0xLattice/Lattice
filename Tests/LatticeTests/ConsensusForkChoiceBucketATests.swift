@@ -23,14 +23,14 @@ final class ConsensusForkChoiceBucketATests: XCTestCase {
         let mainWork = UInt256(2)
         let forkWork = UInt256(1)
         return [
-            makeBlockMeta(hash: "G", height: 0, childHashes: ["M1", "F1"], work: forkWork, cumulativeWork: UInt256(1)),
-            makeBlockMeta(hash: "M1", previousHash: "G", height: 1, childHashes: ["M2"], work: mainWork, cumulativeWork: UInt256(3)),
-            makeBlockMeta(hash: "M2", previousHash: "M1", height: 2, work: mainWork, cumulativeWork: UInt256(5)),
-            makeBlockMeta(hash: "F1", previousHash: "G", height: 1, childHashes: ["F2"], work: forkWork, cumulativeWork: UInt256(2)),
-            makeBlockMeta(hash: "F2", previousHash: "F1", height: 2, childHashes: ["F3"], work: forkWork, cumulativeWork: UInt256(3)),
-            makeBlockMeta(hash: "F3", previousHash: "F2", height: 3, childHashes: ["F4"], work: forkWork, cumulativeWork: UInt256(4)),
-            makeBlockMeta(hash: "F4", previousHash: "F3", height: 4, childHashes: ["F5"], work: forkWork, cumulativeWork: UInt256(5)),
-            makeBlockMeta(hash: "F5", previousHash: "F4", height: 5, work: forkWork, cumulativeWork: UInt256(6)),
+            makeBlockMeta(hash: "G", height: 0, childHashes: ["M1", "F1"], work: forkWork),
+            makeBlockMeta(hash: "M1", previousHash: "G", height: 1, childHashes: ["M2"], work: mainWork),
+            makeBlockMeta(hash: "M2", previousHash: "M1", height: 2, work: mainWork),
+            makeBlockMeta(hash: "F1", previousHash: "G", height: 1, childHashes: ["F2"], work: forkWork),
+            makeBlockMeta(hash: "F2", previousHash: "F1", height: 2, childHashes: ["F3"], work: forkWork),
+            makeBlockMeta(hash: "F3", previousHash: "F2", height: 3, childHashes: ["F4"], work: forkWork),
+            makeBlockMeta(hash: "F4", previousHash: "F3", height: 4, childHashes: ["F5"], work: forkWork),
+            makeBlockMeta(hash: "F5", previousHash: "F4", height: 5, work: forkWork),
         ]
     }
 

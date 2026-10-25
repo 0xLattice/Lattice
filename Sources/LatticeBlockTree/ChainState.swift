@@ -84,7 +84,6 @@ public actor ChainState {
     var forkChoice: ForkChoice { tree.forkChoice }
     var frontier: ExecutionFrontier { tree.frontier }
     var runs: RunAttribution { tree.runs }
-    var localWorkCachesDirty: Bool { tree.localWorkCachesDirty }
     var mutationGeneration: UInt64 {
         get { tree.mutationGeneration }
         set { tree.mutationGeneration = newValue }
@@ -101,7 +100,6 @@ public actor ChainState {
 #if DEBUG
     var excludedRootsForTesting: Set<String> { tree.excludedRootsForTesting }
     var segmentWorkUpdateCellCount: UInt64 { tree.segmentWorkUpdateCellCount }
-    var localWorkCacheBlockVisitCount: UInt64 { tree.localWorkCacheBlockVisitCount }
     var segmentGraftCount: UInt64 { tree.segmentGraftCount }
     var segmentGraftBlockVisitCount: UInt64 { tree.segmentGraftBlockVisitCount }
     var fullCanonicalProjectionCount: UInt64 { tree.fullCanonicalProjectionCount }
@@ -332,10 +330,6 @@ public actor ChainState {
         monotoneIncreaseAt mutatedAt: String? = nil
     ) -> ChainCommit? {
         tree.projectCanonicalChain(forceFull: forceFull, monotoneIncreaseAt: mutatedAt)
-    }
-
-    func materializeLocalWorkCachesIfNeeded() {
-        tree.materializeLocalWorkCachesIfNeeded()
     }
 
     func addToBlockIndex(hash: String, blockHeight: UInt64) {

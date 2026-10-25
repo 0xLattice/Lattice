@@ -164,8 +164,6 @@ struct ReferenceSubject: OracleSubject {
                     .sorted { $0.id < $1.id }.map(render).joined(separator: ",")
                 seen["\(key) meta.attributedRuns"] = meta.attributedRuns.sorted().joined(separator: ",")
                 seen["\(key) meta.commitments"] = render(meta.childCommitments, only: probe.served)
-                seen["\(key) meta.cumulativeWork"] = hex(meta.cumulativeWork.toHexString())
-                seen["\(key) meta.subtreeWeight"] = hex(meta.subtreeWeight.toHexString())
             }
             // The descent from every genesis and every fork: which child each
             // fork prefers, and where that leads. A block with one child

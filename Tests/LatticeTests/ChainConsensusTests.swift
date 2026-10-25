@@ -15,26 +15,7 @@ func makeBlockMeta(
     previousHash: String? = nil,
     height: UInt64,
     childHashes: [String] = [],
-    work: UInt256 = UInt256(1),
-    cumulativeWork: UInt256 = .zero
-) -> BlockMeta {
-    makeBlockMeta(
-        hash: hash,
-        previousHash: previousHash,
-        height: height,
-        childHashes: childHashes,
-        work: work,
-        cumulativeWork: WorkSum(cumulativeWork)
-    )
-}
-
-func makeBlockMeta(
-    hash: String,
-    previousHash: String? = nil,
-    height: UInt64,
-    childHashes: [String] = [],
-    work: UInt256 = UInt256(1),
-    cumulativeWork: WorkSum
+    work: UInt256 = UInt256(1)
 ) -> BlockMeta {
     let contribution = VerifiedWorkContribution(
         id: testCID("work:\(hash)"),
@@ -45,8 +26,7 @@ func makeBlockMeta(
         parentBlockHash: previousHash,
         blockHeight: height,
         childHashes: childHashes,
-        workContributions: [contribution],
-        cumulativeWork: cumulativeWork
+        workContributions: [contribution]
     )
 }
 
