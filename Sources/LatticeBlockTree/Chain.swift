@@ -14,8 +14,8 @@ public enum ChainStateRestoreError: Error, Sendable, Equatable {
     case unpinnedRootGenesis
     /// A block fact naming a parent, state, spec or child that is not the
     /// standard CID (spec §3.1): not a Lattice block. Live apply refuses
-    /// it with this; restore, which replays only facts this node applied,
-    /// finds one corrupt (`corruptConsensusGraph`).
+    /// it with this; restore finds a store holding one corrupt
+    /// (`corruptConsensusGraph`) and fails loudly rather than drop history.
     case nonStandardLink
 }
 
@@ -236,7 +236,7 @@ private struct ConsensusBlockInput: Sendable {
               let postStateCID = standardCID(fact.postStateCID),
               let prevStateCID = standardCID(fact.prevStateCID),
               let specCID = standardCID(fact.specCID),
-              (fact.childCommitments ?? [:]).values.allSatisfy({ standardCID($0) != nil }),
+              (fact.childCommitments ?? [:]).values.allSatisfy({ BlockID($0) != nil }),
               let target = UInt256.fromHexDigits(fact.target),
               let nextTarget = UInt256.fromHexDigits(fact.nextTarget),
               // Every block, genesis included, commits a positive target and
@@ -268,7 +268,7 @@ private struct ConsensusBlockInput: Sendable {
     /// CIDs in canonical spelling: what the block graph holds.
     var namesStandardCIDs: Bool {
         (parentBlockHash.map { BlockID($0) != nil } ?? true)
-            && childCommitments.values.allSatisfy { standardCID($0) != nil }
+            && childCommitments.values.allSatisfy { BlockID($0) != nil }
             && snapshot.namesStandardCIDs
     }
 
@@ -277,8 +277,9 @@ private struct ConsensusBlockInput: Sendable {
     static func namesNonStandardLink(_ fact: ChainBlockFact) -> Bool {
         let links = [fact.postStateCID, fact.prevStateCID, fact.specCID]
             + (fact.parentBlockHash.map { [$0] } ?? [])
-            + (fact.childCommitments.map { Array($0.values) } ?? [])
+        // Children are held as committed, so only the canonical spelling.
         return links.contains { standardCID($0) == nil }
+            || (fact.childCommitments ?? [:]).values.contains { BlockID($0) == nil }
     }
 }
 
@@ -494,7 +495,7 @@ public struct ChainTree: Sendable {
         guard hashToBlock.values.allSatisfy({
                   BlockID($0.blockHash) != nil
                       && ($0.parentBlockHash.map { BlockID($0) != nil } ?? true)
-                      && $0.childCommitments.values.allSatisfy { standardCID($0) != nil }
+                      && $0.childCommitments.values.allSatisfy { BlockID($0) != nil }
               }),
               snapshots.allSatisfy(\.namesStandardCIDs) else {
             throw ChainStateRestoreError.corruptConsensusGraph
@@ -804,7 +805,7 @@ public struct ChainTree: Sendable {
                 } catch ChainStateRestoreError.missingBlockFact {
                     deferred.append(entry)
                 } catch ChainStateRestoreError.nonStandardLink {
-                    // Only a bug or a hand-edited store holds one.
+                    // No live chain holds one; a store that does fails loudly.
                     throw ChainStateRestoreError.corruptConsensusGraph
                 }
             }

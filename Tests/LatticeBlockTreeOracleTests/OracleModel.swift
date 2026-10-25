@@ -36,11 +36,11 @@ extension OracleBlockFact {
     /// standard CID (spec §3.1), whatever its spelling.
     var namesNonStandardLink: Bool {
         let links = [postState, prevState, spec] + (parent.map { [$0] } ?? [])
-            + (childCommitments.map { Array($0.values) } ?? [])
+        // A child is held as committed, so only in its canonical spelling.
         return links.contains {
             LatticePrimitives.CIDIdentity.canonicalString($0)
                 .map(LatticePrimitives.CIDIdentity.isStandard) != true
-        }
+        } || (childCommitments ?? [:]).values.contains { !LatticePrimitives.CIDIdentity.isStandard($0) }
     }
 }
 

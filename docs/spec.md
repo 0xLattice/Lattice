@@ -70,9 +70,12 @@ Every CID link in a block — `previousBlock`, `transactions`, `spec`,
 in the `children` map — MUST be the standard CID: CIDv1, dag-cbor (`0x71`),
 sha2-256 (`0x12`), a 32-byte digest, i.e. the bytes `01 71 12 20` then the
 digest, in its canonical spelling, with no encryption info; a header with any
-other link is malformed.
-Such bytes do not decode as a block, so the header is refused before admission:
-never weighed, never stored. It is a well-formedness rule, not a validity rule
+other link is malformed. (`rewardRecipient` is an account, not a link: it is
+held to section 2's canonical form.)
+A header whose own links break this does not decode as a block, and a child
+index naming a non-standard child is refused where the index is admitted
+(section 9.9); either way the header is refused before admission: never
+weighed, never stored. It is a well-formedness rule, not a validity rule
 (section 9.9).
 
 `children` is one plain DAG-CBOR map, so its canonical bytes are DAG-CBOR's.
