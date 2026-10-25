@@ -165,12 +165,12 @@ final class ForkChoiceFuzzTests: XCTestCase {
             let numForks = Int.random(in: 0...5, using: &rng)
 
             var blocks: [BlockMeta] = []
-            let genesis = makeBlockMeta(hash: "G", height: 0)
+            let genesis = makeBlockMeta(hash: blockCID("G"), height: 0)
             blocks.append(genesis)
 
-            var tip = "G"
+            var tip = blockCID("G")
             for i in 1..<chainLength {
-                let hash = "main_\(i)"
+                let hash = blockCID("main_\(i)")
                 let meta = makeBlockMeta(hash: hash, previousHash: tip, height: UInt64(i))
                 blocks[blocks.count - 1].childHashes.append(hash)
                 blocks.append(meta)
@@ -185,8 +185,8 @@ final class ForkChoiceFuzzTests: XCTestCase {
 
                 for j in 0..<forkLen {
                     let forkIdx = UInt64(forkPoint + j + 1)
-                    let hash = "fork\(f)_\(j)"
-                    let prevHash = j == 0 ? blocks[forkPoint].blockHash : "fork\(f)_\(j-1)"
+                    let hash = blockCID("fork\(f)_\(j)")
+                    let prevHash = j == 0 ? blocks[forkPoint].blockHash : blockCID("fork\(f)_\(j-1)")
                     let meta = makeBlockMeta(hash: hash, previousHash: prevHash, height: forkIdx)
                     if j == 0 {
                         blocks[forkPoint].childHashes.append(hash)
@@ -197,7 +197,7 @@ final class ForkChoiceFuzzTests: XCTestCase {
                 }
             }
 
-            let mainHashes = Set((1..<chainLength).map { "main_\($0)" } + ["G"])
+            let mainHashes = Set((1..<chainLength).map { blockCID("main_\($0)") } + [blockCID("G")])
             let chain = makeChain(blocks: blocks, canonicalHashes: mainHashes)
 
             let canonicalTip = await chain.canonicalTip
@@ -207,7 +207,7 @@ final class ForkChoiceFuzzTests: XCTestCase {
             let tipBlock = await chain.getConsensusBlock(hash: canonicalTip)
             XCTAssertNotNil(tipBlock, "Chain tip must exist in block map")
 
-            let genesisOnMain = await chain.isCanonical(hash: "G")
+            let genesisOnMain = await chain.isCanonical(hash: blockCID("G"))
             XCTAssertTrue(genesisOnMain, "Genesis must always be on main chain")
         }
     }
@@ -220,25 +220,25 @@ final class ForkChoiceFuzzTests: XCTestCase {
             let forkLen = mainLen + Int.random(in: 1...5, using: &rng)
 
             var blocks: [BlockMeta] = []
-            let genesis = makeBlockMeta(hash: "G", height: 0, childHashes: ["M1", "F1"])
+            let genesis = makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("M1"), blockCID("F1")])
             blocks.append(genesis)
 
             for i in 1...mainLen {
-                let hash = "M\(i)"
-                let prev = i == 1 ? "G" : "M\(i-1)"
-                let children = i < mainLen ? ["M\(i+1)"] : [String]()
+                let hash = blockCID("M\(i)")
+                let prev = i == 1 ? blockCID("G") : blockCID("M\(i-1)")
+                let children = i < mainLen ? [blockCID("M\(i+1)")] : [String]()
                 blocks.append(makeBlockMeta(hash: hash, previousHash: prev, height: UInt64(i), childHashes: children))
             }
             for i in 1...forkLen {
-                let hash = "F\(i)"
-                let prev = i == 1 ? "G" : "F\(i-1)"
-                let children = i < forkLen ? ["F\(i+1)"] : [String]()
+                let hash = blockCID("F\(i)")
+                let prev = i == 1 ? blockCID("G") : blockCID("F\(i-1)")
+                let children = i < forkLen ? [blockCID("F\(i+1)")] : [String]()
                 blocks.append(makeBlockMeta(hash: hash, previousHash: prev, height: UInt64(i), childHashes: children))
             }
 
-            let mainHashes = Set(["G"] + (1...mainLen).map { "M\($0)" })
+            let mainHashes = Set([blockCID("G")] + (1...mainLen).map { blockCID("M\($0)") })
             let chain = makeChain(blocks: blocks, canonicalHashes: mainHashes)
-            let forkTipHash = "F\(forkLen)"
+            let forkTipHash = blockCID("F\(forkLen)")
 
             let reorg = await chain.reevaluateForkChoice()
 
@@ -249,7 +249,7 @@ final class ForkChoiceFuzzTests: XCTestCase {
 
             var current = newTip
             var depth = 0
-            while current != "G" {
+            while current != blockCID("G") {
                 let block = await chain.getConsensusBlock(hash: current)
                 XCTAssertNotNil(block, "Block \(current) missing from chain")
                 guard let prevHash = block?.parentBlockHash else {

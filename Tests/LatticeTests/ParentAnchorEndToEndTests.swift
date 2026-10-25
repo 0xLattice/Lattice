@@ -253,11 +253,11 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         XCTAssertFalse(BlockImport.isDeterministicInvalidity(expected), "\(message): not a verdict", file: file, line: line)
         XCTAssertFalse(tree.isExcludedRoot(hash), "\(message): never excluded", file: file, line: line)
         XCTAssertFalse(tree.isExecuted(blockHash: hash), "\(message): not executed", file: file, line: line)
-        let own = tree.forkChoice.weight(of: hash)
+        let own = tree.forkChoiceWeight(of: hash)
         XCTAssertNotNil(own, "\(message): still routed", file: file, line: line)
         XCTAssertGreaterThan(own ?? .zero, .zero, "\(message): its work weighs", file: file, line: line)
         if let predecessor = block.parent?.rawCID, let own {
-            let above = tree.forkChoice.weight(of: predecessor) ?? .zero
+            let above = tree.forkChoiceWeight(of: predecessor) ?? .zero
             XCTAssertGreaterThan(above, own, "\(message): and counts in its predecessor's subtree", file: file, line: line)
         }
     }
@@ -277,9 +277,9 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         func selectable(_ hashes: [String]) -> [String] {
             hashes.filter { tree.isExecuted(blockHash: $0) && !tree.isExcludedRoot($0) }
         }
-        let roots = Array(tree.indexToBlockHash[0] ?? []).filter { tree.graph.parent(of: $0) == nil }
-        guard var current = tree.forkChoice.preferred(among: selectable(roots)) else { return nil }
-        while let next = tree.forkChoice.preferred(among: selectable(tree.graph.children(of: current))) {
+        let roots = Array(tree.indexToBlockHash[0] ?? []).filter { tree.parent(of: $0) == nil }
+        guard var current = tree.preferred(among: selectable(roots)) else { return nil }
+        while let next = tree.preferred(among: selectable(tree.children(of: current))) {
             current = next
         }
         return current
@@ -345,7 +345,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         XCTAssertEqual(validatedTip(child), try cid(onWFromS2), "W's branch is acted on while it is heavier")
 
         // The honest sibling branch: on the deposit, anchored at C3.
-        let wSubtree = try XCTUnwrap(child.forkChoice.weight(of: try cid(withdrawal)))
+        let wSubtree = try XCTUnwrap(child.forkChoiceWeight(of: try cid(withdrawal)))
         var honest: [Block] = []
         var previous = deposit
         var honestWeight = WorkSum.zero
@@ -358,7 +358,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
             try assertConnected(try await w.connect(block, on: &child), block: block, tree: child, "honest block \(honest.count)")
             honest.append(block)
             previous = block
-            honestWeight = try XCTUnwrap(child.forkChoice.weight(of: try cid(honest[0])))
+            honestWeight = try XCTUnwrap(child.forkChoiceWeight(of: try cid(honest[0])))
             if honestWeight < wSubtree {
                 XCTAssertEqual(validatedTip(child), try cid(onWFromS2), "a lighter honest branch does not take over")
             }
@@ -484,7 +484,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
 
         // Present for validation, gone when the anchor is read: count the
         // predecessor fetches of a full connect on a copy, then allow one fewer.
-        var probe = child
+        var probe = child.detached()
         let counter = GatedFetcher(backing: w.fetcher)
         try assertConnected(try await w.connect(second, on: &probe, fetcher: counter), block: second, tree: probe, "probe")
         let fetches = await counter.count(predecessor)

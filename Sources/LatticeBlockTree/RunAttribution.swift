@@ -37,79 +37,65 @@ public struct AttributedRunIdentity: Hashable, Scalar {
     }
 }
 
-/// Parent-attributed run work (§9.10) as a value: the served directories,
-/// one accumulator per run, and each settled block's nearest committer per
-/// served directory. It stores no parent or child edge — its two walks take
-/// the block graph as a parameter — so a run is exactly one accumulator cell
-/// plus a per-block pointer inherited from the parent, never a second
-/// representation of the tree.
-struct RunAttribution: Sendable {
-    /// The child directories this node keeps runs for — the child chains it
-    /// hosts. Operator choice, so the per-block run cost is bounded
-    /// by what this node asked for, not by what any block commits into.
-    private(set) var served: Set<String> = []
-    /// Run work per child directory per committing block (§9.10): the sum of
-    /// credited work — grinds and attributed runs alike — over CONNECTED
-    /// blocks whose nearest committer into that directory is the key.
-    /// Insert-only, independent of exclusion, and maintained by the one
-    /// reducer live admission and replay both use.
-    /// Read by the child (`applyParentRun`); never a fork-choice input on
-    /// THIS chain.
-    private(set) var runWork: [String: [String: WorkSum]] = [:]
-    /// The inverse of the commitments behind `runWork`: directory → child
-    /// block → the connected blocks committing it, settled with them. The
-    /// key set of each inner map's values is exactly `runWork[directory]`'s.
-    private(set) var committers: [String: [String: Set<String>]] = [:]
-    /// Block → directory → the nearest block at or above that block, by
-    /// parent pointer, that commits into that directory — the block itself
-    /// where it commits. Held only for the directories this node SERVES runs
-    /// for (the child chains it hosts — an operator choice), so it costs
-    /// O(#served) per block, never O(#directories ever committed); inherited
-    /// from the parent like `difficultyAnchor`, and absent until the block is
-    /// connected.
-    private(set) var nearestCarrier: [String: [String: String]] = [:]
-#if DEBUG
-    /// Run-bucket updates. Each connected block costs one per directory it
-    /// has a nearest committer for, so this is O(#directories) per block —
-    /// asserted by ratio, never by stopwatch.
-    private(set) var updateCount: UInt64 = 0
-#endif
+/// Parent-attributed run work (§9.10) over the graph's arrays: the served
+/// directories, one accumulator per run (`runWork`), and each settled block's
+/// nearest committer per served directory (`nearestCarrier`, by handle). It
+/// stores no parent or child edge — its two walks read the graph's — so a run
+/// is exactly one accumulator cell plus a per-block pointer inherited from
+/// the parent, never a second representation of the tree.
+///
+/// `served` is the child directories this node keeps runs for — the child
+/// chains it hosts. Operator choice, so the per-block run cost is bounded by
+/// what this node asked for, not by what any block commits into. `runWork` is
+/// the sum of credited work — grinds and attributed runs alike — over
+/// CONNECTED blocks whose nearest committer into that directory is the key:
+/// insert-only, independent of exclusion, maintained by the one reducer live
+/// admission and replay both use, and read by the child (`applyParentRun`);
+/// never a fork-choice input on THIS chain. `committers` is its inverse:
+/// directory → committed child block → the connected blocks committing it.
+extension BlockGraph {
+    /// The nearest block at or above `block`, by parent pointer, that commits
+    /// into `directory` — the block itself where it commits — or `none` when
+    /// the directory is not served, the block is not settled, or nothing
+    /// above it commits there.
+    func carrier(of block: UInt32, directory: String) -> UInt32 {
+        guard let carriers = nearestCarrier[directory], Int(block) < carriers.count else { return Self.none }
+        return carriers[Int(block)]
+    }
+
+    private func setCarrier(_ carrier: UInt32, of block: UInt32, directory: String) {
+        let count = nearestCarrier[directory]?.count ?? 0
+        if Int(block) >= count {
+            nearestCarrier[directory, default: []].append(
+                contentsOf: repeatElement(Self.none, count: Int(block) + 1 - count)
+            )
+        }
+        nearestCarrier[directory]![Int(block)] = carrier
+    }
 
     /// Start serving `directory`: settle every connected block's nearest
     /// committer and run for that one directory, parent before child, over
     /// the UNFILTERED graph. Idempotent.
-    mutating func serve(
-        _ directory: String,
-        in graph: BlockGraph,
-        isRouted: (String) -> Bool
-    ) {
+    func serve(_ directory: String) {
         guard served.insert(directory).inserted else { return }
-        var stack = graph.records
-            .filter { $0.parentBlockHash == nil && $0.blockHeight == 0 }
-            .map(\.blockHash)
-        while let hash = stack.popLast() {
-            guard isRouted(hash), graph.contains(hash) else { continue }
-            settle(hash, in: graph, directories: [directory])
-            stack.append(contentsOf: graph.children(of: hash))
+        var stack = roots
+        while let block = stack.popLast() {
+            guard isRouted(block) else { continue }
+            settle(block, directories: [directory])
+            stack.append(contentsOf: children(of: block))
         }
     }
 
     /// Settle a block that just routed and every descendant that routed with
     /// it: its nearest committers and runs for every served directory, parent
     /// before child. Nothing below a just-routed block can have been settled
-    /// before — a block never routes under an unrouted parent — so the walk
-    /// needs no record of what it has settled. Unfiltered on purpose: an
-    /// excluded descendant is still connected and still credited.
-    mutating func connect(
-        rootedAt rootHash: String,
-        in graph: BlockGraph
-    ) {
-        var stack = [rootHash]
-        var visited = Set<String>()
-        while let hash = stack.popLast() {
-            guard graph.contains(hash), visited.insert(hash).inserted else { continue }
-            settle(hash, in: graph, directories: served)
-            stack.append(contentsOf: graph.children(of: hash))
+    /// before — a block never routes under an unrouted parent. Unfiltered on
+    /// purpose: an excluded descendant is still connected and still credited.
+    func connect(rootedAt root: UInt32) {
+        var stack = [root]
+        while let block = stack.popLast() {
+            settle(block, directories: served)
+            stack.append(contentsOf: children(of: block))
         }
     }
 
@@ -117,46 +103,44 @@ struct RunAttribution: Sendable {
     /// parent is already settled: for each directory, the nearest committer is
     /// this block if it commits there, else the parent's; the block's credited
     /// work — grinds and attributed runs alike — is credited to that run.
-    /// Used both by live connection (every served directory) and by
-    /// `serve` (one directory over the whole graph), so a run has exactly one
+    /// Used both by live connection (every served directory) and by `serve`
+    /// (one directory over the whole graph), so a run has exactly one
     /// definition.
-    private mutating func settle(
-        _ hash: String,
-        in graph: BlockGraph,
-        directories: Set<String>
-    ) {
-        guard let meta = graph[hash], let work = graph.work(of: hash) else { return }
-        let inherited = meta.parentBlockHash
-            .flatMap { nearestCarrier[$0] } ?? [:]
-        var nearest = nearestCarrier[hash] ?? [:]
-        var credited: [String: String] = [:]
+    private func settle(_ block: UInt32, directories: Set<String>) {
+        let parent = self[block].parent
+        let committed = commitments[block]
+        var credited: [(directory: String, committer: UInt32)] = []
         for directory in directories {
-            if let child = meta.childCommitments[directory] {
+            let child = committed?[directory]
+            if let child {
                 committers[directory, default: [:]][
                     CIDIdentity.canonicalString(child) ?? child, default: []
-                ].insert(hash)
+                ].insert(block)
             }
-            let committer = meta.childCommitments[directory] != nil ? hash : inherited[directory]
-            guard let committer else { continue }
-            nearest[directory] = committer
-            credited[directory] = committer
+            let committer = child != nil
+                ? block
+                : parent == Self.none ? Self.none : carrier(of: parent, directory: directory)
+            guard committer != Self.none else { continue }
+            setCarrier(committer, of: block, directory: directory)
+            credited.append((directory, committer))
         }
-        nearestCarrier[hash] = nearest
-        credit(work.work, nearest: credited)
+        credit(work(of: block), to: credited)
     }
 
     /// A connected block's own work rose by `delta`: its runs rise by exactly
     /// that much.
-    mutating func credit(_ delta: WorkSum, at hash: String) {
-        credit(delta, nearest: nearestCarrier[hash] ?? [:])
+    func credit(_ delta: WorkSum, at block: UInt32) {
+        credit(delta, to: served.compactMap { directory in
+            let committer = carrier(of: block, directory: directory)
+            return committer == Self.none ? nil : (directory, committer)
+        })
     }
 
-    private mutating func credit(_ work: WorkSum, nearest: [String: String]) {
-        for (directory, committer) in nearest {
-            let current = runWork[directory]?[committer] ?? .zero
-            runWork[directory, default: [:]][committer] = current + work
+    private func credit(_ work: WorkSum, to runs: [(directory: String, committer: UInt32)]) {
+        for (directory, committer) in runs {
+            runWork[directory, default: [:]][committer, default: .zero] = (runWork[directory]?[committer] ?? .zero) + work
 #if DEBUG
-            updateCount &+= 1
+            runUpdateCount &+= 1
 #endif
         }
     }
@@ -164,7 +148,7 @@ struct RunAttribution: Sendable {
 
 extension ChainTree {
 #if DEBUG
-    var runAttributionUpdateCount: UInt64 { runs.updateCount }
+    var runAttributionUpdateCount: UInt64 { graph.runUpdateCount }
 #endif
 
     /// Start keeping runs for `directory` — the node hosts a child
@@ -178,12 +162,11 @@ extension ChainTree {
     /// directory it hosts after every restart, and it runs synchronously on
     /// the actor — one whole-graph walk per directory.
     public mutating func serveRuns(for directory: String) {
-        let forkChoice = self.forkChoice
-        runs.serve(directory, in: graph, isRouted: { forkChoice.isRouted($0) })
+        mutableGraph.serve(directory)
     }
 
-    mutating func connectForRunAttribution(rootedAt rootHash: String) {
-        runs.connect(rootedAt: rootHash, in: graph)
+    mutating func connectForRunAttribution(rootedAt root: UInt32) {
+        mutableGraph.connect(rootedAt: root)
     }
 
     /// The nearest block at or above `blockHash`, by parent pointer, that
@@ -192,8 +175,20 @@ extension ChainTree {
     /// (`serveRuns(for:)`) and a connected block; nil otherwise, never "none".
     /// The hash is looked up as given, not canonicalized.
     public func nearestCarrier(of blockHash: String, directory: String) -> String? {
-        guard runs.served.contains(directory) else { return nil }
-        return runs.nearestCarrier[blockHash]?[directory]
+        guard graph.served.contains(directory), let block = graph.handle(blockHash) else { return nil }
+        let carrier = graph.carrier(of: block, directory: directory)
+        return carrier == BlockGraph.none ? nil : graph.hash(carrier)
+    }
+
+    /// The run of `committer` into `directory`: the credited work of the
+    /// connected blocks whose nearest committer it is. Nil when it has none.
+    func runWork(of committer: String, directory: String) -> WorkSum? {
+        graph.handle(committer).flatMap { graph.runWork[directory]?[$0] }
+    }
+
+    /// The credited work of a held block's own grinds alone.
+    func grindWork(of blockHash: String) -> WorkSum? {
+        graph.handle(blockHash).map(graph.grindWork(of:))
     }
 
     /// Credit this chain with its parent's attributed runs into `directory`
@@ -230,29 +225,31 @@ extension ChainTree {
         parentBlocks: Set<String>? = nil,
         held: Set<String> = []
     ) -> (raised: [String], commit: ChainCommit?) {
-        guard let parentRuns = parent.runs.runWork[directory] else { return ([], nil) }
+        let source = parent.graph
+        guard let parentRuns = source.runWork[directory] else { return ([], nil) }
         var scope = Set(parentRuns.keys)
         if let parentBlocks {
-            let carriers = parentBlocks.compactMap { parent.runs.nearestCarrier[$0]?[directory] }
-            let committersOfHeld = held.flatMap { parent.runs.committers[directory]?[$0] ?? [] }
+            let carriers = parentBlocks.compactMap(source.handle).map {
+                source.carrier(of: $0, directory: directory)
+            }.filter { $0 != BlockGraph.none }
+            let committersOfHeld = held.flatMap { source.committers[directory]?[$0] ?? [] }
             scope = Set(carriers).union(committersOfHeld)
         }
         let deferred = deferProjectionForReplay
         deferProjectionForReplay = true
         var raised: [String] = []
-        for committer in scope.sorted() {
+        for (committerHash, committer) in scope.map({ (source.hash($0), $0) }).sorted(by: { $0.0 < $1.0 }) {
             guard let run = parentRuns[committer],
-                  let childBlock = parent.graph[committer]?.childCommitments[directory],
+                  let childBlock = source.commitments[committer]?[directory],
                   let hash = CIDIdentity.canonicalString(childBlock),
-                  graph.contains(hash),
-                  let own = parent.graph.work(of: committer)?.grindWork,
-                  let value = run.subtracting(own)?.uint256Value,
+                  let block = graph.handle(hash),
+                  let value = run.subtracting(source.grindWork(of: committer))?.uint256Value,
                   let id = AttributedRunIdentity(
-                      carrierBlockHash: committer, directory: directory
+                      carrierBlockHash: committerHash, directory: directory
                   ).contributionID,
                   value > (workContribution(id: id, at: hash)?.work ?? .zero) else { continue }
             let submission = addWorkContribution(
-                VerifiedWorkContribution(id: id, work: value), to: hash, attributed: true
+                VerifiedWorkContribution(id: id, work: value), to: block, attributed: true
             )
             // A strict increase at a held block, at the one location its ID
             // can have, is refused only when revisions are exhausted: never
@@ -266,17 +263,14 @@ extension ChainTree {
         deferProjectionForReplay = deferred
         guard !deferred, !raised.isEmpty else { return (raised, nil) }
         let change = projectCanonicalChain(
-            monotoneIncreaseAt: raised.count == 1 ? raised[0] : nil
+            increasedAt: raised.count == 1 ? graph.handle(raised[0]) : nil
         )
-        if change != nil {
-            frontier.refreshTipSnapshot()
-        }
         return (raised, change?.atRevision(mutationGeneration))
     }
 
     /// The commitments recorded for a held block (§9.10), or nil when the
     /// block is unknown.
     public func recordedChildCommitments(of blockHash: String) -> [String: String]? {
-        CIDIdentity.canonicalString(blockHash).flatMap { graph[$0]?.childCommitments }
+        CIDIdentity.canonicalString(blockHash).flatMap(graph.handle).map { graph.commitments[$0] ?? [:] }
     }
 }

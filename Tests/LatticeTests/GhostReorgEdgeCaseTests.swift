@@ -22,60 +22,60 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         // main: G→M1→M2→M3 (subtree at M1 = 3).
         // fork: G→F1, F1 has two children F2a, F2b (subtree at F1 = 3: F1,F2a,F2b).
         // Add F3a under F2a → fork subtree 4 > 3.
-        let g  = makeBlockMeta(hash: "G",  height: 0, childHashes: ["M1", "F1"])
-        let m1 = makeBlockMeta(hash: "M1", previousHash: "G",  height: 1, childHashes: ["M2"])
-        let m2 = makeBlockMeta(hash: "M2", previousHash: "M1", height: 2, childHashes: ["M3"])
-        let m3 = makeBlockMeta(hash: "M3", previousHash: "M2", height: 3)
-        let f1  = makeBlockMeta(hash: "F1",  previousHash: "G",  height: 1, childHashes: ["F2a", "F2b"])
-        let f2a = makeBlockMeta(hash: "F2a", previousHash: "F1", height: 2, childHashes: ["F3a"])
-        let f2b = makeBlockMeta(hash: "F2b", previousHash: "F1", height: 2)
-        let f3a = makeBlockMeta(hash: "F3a", previousHash: "F2a", height: 3)
+        let g  = makeBlockMeta(hash: blockCID("G"),  height: 0, childHashes: [blockCID("M1"), blockCID("F1")])
+        let m1 = makeBlockMeta(hash: blockCID("M1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("M2")])
+        let m2 = makeBlockMeta(hash: blockCID("M2"), previousHash: blockCID("M1"), height: 2, childHashes: [blockCID("M3")])
+        let m3 = makeBlockMeta(hash: blockCID("M3"), previousHash: blockCID("M2"), height: 3)
+        let f1  = makeBlockMeta(hash: blockCID("F1"),  previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("F2a"), blockCID("F2b")])
+        let f2a = makeBlockMeta(hash: blockCID("F2a"), previousHash: blockCID("F1"), height: 2, childHashes: [blockCID("F3a")])
+        let f2b = makeBlockMeta(hash: blockCID("F2b"), previousHash: blockCID("F1"), height: 2)
+        let f3a = makeBlockMeta(hash: blockCID("F3a"), previousHash: blockCID("F2a"), height: 3)
 
         let chain = makeChain(
             blocks: [g, m1, m2, m3, f1, f2a, f2b, f3a],
-            canonicalHashes: Set(["G", "M1", "M2", "M3"])
+            canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2"), blockCID("M3")])
         )
         // subtreeWeight(F1) = {F1,F2a,F2b,F3a} = 4 > subtreeWeight(M1) = {M1,M2,M3} = 3.
         let reorg = await chain.reevaluateForkChoice()
         XCTAssertNotNil(reorg, "fork's branching subtree (4) outweighs main's single path (3)")
         // GHOST descent picks the heaviest leaf under F1 — the F2a→F3a branch.
         let tip = await chain.canonicalTip
-        XCTAssertEqual(tip, "F3a", "descent rides the heavier branch to its leaf")
+        XCTAssertEqual(tip, blockCID("F3a"), "descent rides the heavier branch to its leaf")
     }
 
     // Equal subtree weights fall through to stable segment-base preference.
     func testEqualSubtreeUsesStableSegmentBase() async {
-        let g  = makeBlockMeta(hash: "G",  height: 0, childHashes: ["M1", "F1"])
-        let m1 = makeBlockMeta(hash: "M1", previousHash: "G",  height: 1, childHashes: ["M2"])
-        let m2 = makeBlockMeta(hash: "M2", previousHash: "M1", height: 2)
-        let f1 = makeBlockMeta(hash: "F1", previousHash: "G",  height: 1, childHashes: ["F2"])
-        let f2 = makeBlockMeta(hash: "F2", previousHash: "F1", height: 2)
+        let g  = makeBlockMeta(hash: blockCID("G"),  height: 0, childHashes: [blockCID("M1"), blockCID("F1")])
+        let m1 = makeBlockMeta(hash: blockCID("M1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("M2")])
+        let m2 = makeBlockMeta(hash: blockCID("M2"), previousHash: blockCID("M1"), height: 2)
+        let f1 = makeBlockMeta(hash: blockCID("F1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("F2")])
+        let f2 = makeBlockMeta(hash: blockCID("F2"), previousHash: blockCID("F1"), height: 2)
 
-        let chain = makeChain(blocks: [g, m1, m2, f1, f2], canonicalHashes: Set(["G", "M1", "M2"]))
+        let chain = makeChain(blocks: [g, m1, m2, f1, f2], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
         let reorg = await chain.reevaluateForkChoice()
         XCTAssertNotNil(reorg, "equal work and target choose the smaller segment-base hash")
         let tip = await chain.canonicalTip
-        XCTAssertEqual(tip, "F2")
+        XCTAssertEqual(tip, blockCID("F2"))
     }
 
     // A reorg's GHOST descent must rebuild the FULL winning subtree's main-chain
     // path and drop the entire old suffix, including across a multi-block fork.
     func testReorgRemovesFullOldSuffixAndInstallsWinningPath() async {
-        let g  = makeBlockMeta(hash: "G",  height: 0, childHashes: ["M1", "F1"])
-        let m1 = makeBlockMeta(hash: "M1", previousHash: "G",  height: 1, childHashes: ["M2"])
-        let m2 = makeBlockMeta(hash: "M2", previousHash: "M1", height: 2)
-        let f1 = makeBlockMeta(hash: "F1", previousHash: "G",  height: 1, childHashes: ["F2"])
-        let f2 = makeBlockMeta(hash: "F2", previousHash: "F1", height: 2, childHashes: ["F3"])
-        let f3 = makeBlockMeta(hash: "F3", previousHash: "F2", height: 3)
+        let g  = makeBlockMeta(hash: blockCID("G"),  height: 0, childHashes: [blockCID("M1"), blockCID("F1")])
+        let m1 = makeBlockMeta(hash: blockCID("M1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("M2")])
+        let m2 = makeBlockMeta(hash: blockCID("M2"), previousHash: blockCID("M1"), height: 2)
+        let f1 = makeBlockMeta(hash: blockCID("F1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("F2")])
+        let f2 = makeBlockMeta(hash: blockCID("F2"), previousHash: blockCID("F1"), height: 2, childHashes: [blockCID("F3")])
+        let f3 = makeBlockMeta(hash: blockCID("F3"), previousHash: blockCID("F2"), height: 3)
 
-        let chain = makeChain(blocks: [g, m1, m2, f1, f2, f3], canonicalHashes: Set(["G", "M1", "M2"]))
+        let chain = makeChain(blocks: [g, m1, m2, f1, f2, f3], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
         let reorg = await chain.reevaluateForkChoice()
         XCTAssertNotNil(reorg)
-        XCTAssertEqual(reorg?.canonicalBlocksRemoved, Set(["M1", "M2"]), "entire old suffix removed")
-        XCTAssertEqual(Set(reorg!.canonicalBlocksAdded.keys), Set(["F1", "F2", "F3"]), "winning path installed")
-        let tip = await chain.canonicalTip; XCTAssertEqual(tip, "F3")
+        XCTAssertEqual(reorg?.canonicalBlocksRemoved, Set([blockCID("M1"), blockCID("M2")]), "entire old suffix removed")
+        XCTAssertEqual(Set(reorg!.canonicalBlocksAdded.keys), Set([blockCID("F1"), blockCID("F2"), blockCID("F3")]), "winning path installed")
+        let tip = await chain.canonicalTip; XCTAssertEqual(tip, blockCID("F3"))
         // Old main blocks are no longer on the main chain.
-        let m1OnMain = await chain.isCanonical(hash: "M1")
+        let m1OnMain = await chain.isCanonical(hash: blockCID("M1"))
         XCTAssertFalse(m1OnMain)
     }
 

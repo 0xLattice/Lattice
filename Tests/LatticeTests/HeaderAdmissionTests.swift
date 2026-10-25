@@ -446,7 +446,7 @@ final class HeaderAdmissionTests: XCTestCase {
             let inserted = try await TreeDriver.insert(block, into: &parent, fetcher: fetcher)
             XCTAssertNotNil(inserted.update)
             parent.serveRuns(for: "Child")
-            let runWork = try XCTUnwrap(parent.runs.runWork["Child"]?[committerCID])
+            let runWork = try XCTUnwrap(parent.runWork(of: committerCID, directory: "Child"))
             XCTAssertGreaterThanOrEqual(runWork, last, "run work never falls")
             last = runWork
         }

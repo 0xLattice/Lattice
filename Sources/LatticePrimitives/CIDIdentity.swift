@@ -69,7 +69,7 @@ public enum CIDIdentity {
     /// `CID.toBaseEncodedString` gives every v1 CID. Encoded here because the
     /// library's generic encoder was most of the identity check's cost; a test
     /// pins this to the library's output.
-    static func base32Multibase(_ bytes: [UInt8]) -> String {
+    package static func base32Multibase(_ bytes: [UInt8]) -> String {
         var text = [UInt8(ascii: "b")]
         text.reserveCapacity(1 + (bytes.count * 8 + 4) / 5)
         var buffer: UInt32 = 0

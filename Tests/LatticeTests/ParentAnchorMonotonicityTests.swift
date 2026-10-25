@@ -139,7 +139,7 @@ final class ParentAnchorMonotonicityTests: XCTestCase {
             seed = seed &* 6364136223846793005 &+ 1442695040888963407
             return Int((seed >> 33) % UInt64(bound))
         }
-        var index = EulerWorkIndex.empty
+        var index = NamedEulerIndex.empty
         var parent: [String: String] = [:]
         var blocks: [String] = []
         for root in 0..<2 {

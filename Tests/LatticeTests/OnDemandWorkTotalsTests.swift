@@ -113,8 +113,8 @@ final class OnDemandWorkTotalsTests: XCTestCase {
             XCTAssertEqual(tip, rebuiltTip)
         }
         // The tie: equal work under the two siblings, the smaller CID wins.
-        let leftWeight = await fork.chain.forkChoice.weight(of: fork.left[0])
-        let rightWeight = await fork.chain.forkChoice.weight(of: fork.right[0])
+        let leftWeight = await fork.chain.forkChoiceWeight(of: fork.left[0])
+        let rightWeight = await fork.chain.forkChoiceWeight(of: fork.right[0])
         XCTAssertEqual(leftWeight, rightWeight)
         let winner = forkChoicePrefersBlock(fork.left[0], over: fork.right[0]) ? fork.left : fork.right
         let tip = await fork.chain.canonicalTip
@@ -122,7 +122,7 @@ final class OnDemandWorkTotalsTests: XCTestCase {
 
         // Fork choice's weights are the full recompute's, block by block.
         for hash in [fork.root] + fork.left + fork.right {
-            let weight = await fork.chain.forkChoice.weight(of: hash)
+            let weight = await fork.chain.forkChoiceWeight(of: hash)
             let recomputed = await fork.chain.subtreeWeight(forHash: hash)
             XCTAssertEqual(weight, recomputed)
             // The public read is the snapshot's weight, without the descent.

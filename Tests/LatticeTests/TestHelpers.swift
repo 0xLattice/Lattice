@@ -1,4 +1,5 @@
 import XCTest
+@testable import LatticeSimulation
 import Foundation
 #if canImport(os)
 import os
@@ -59,6 +60,12 @@ final class StorableFetcher: Fetcher, Storer, VolumeStorer, Sendable {
         }
         return data
     }
+}
+
+/// A fixture block named `name`: a canonical CID whose digest is the name's
+/// bytes, so equal-work tie-breaks (CID byte order) follow name order.
+func blockCID(_ name: String) -> String {
+    LatticeConsensusSimulator.simCID(name)
 }
 
 func testCID(_ seed: String) -> String {

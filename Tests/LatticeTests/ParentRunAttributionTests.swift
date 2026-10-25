@@ -122,12 +122,12 @@ final class ParentRunAttributionTests: XCTestCase {
     }
 
     private func run(_ chain: ChainState, at hash: String, in directory: String? = nil) async -> WorkSum? {
-        await chain.runs.runWork[directory ?? d]?[h(hash)]
+        await chain.runWork(of: h(hash), directory: directory ?? d)
     }
 
     /// The credited work of a block's own grinds — what a child subtracts.
     private func own(_ chain: ChainState, at hash: String) async -> WorkSum? {
-        await chain.graph.work(of: h(hash))?.grindWork
+        await chain.grindWork(of: h(hash))
     }
 
     private func credited(_ chain: ChainState) async -> UInt256? {
@@ -811,7 +811,7 @@ final class ParentRunAttributionTests: XCTestCase {
         var weights: [WorkSum?] = []
         for (label, tree) in [("eager", eager), ("actor eager", actor), ("weighed first", weighed)] {
             XCTAssertEqual(tree.recordedChildCommitments(of: genesisCID), [directoryB: grandchildCID], label)
-            var level = tree
+            var level = tree.detached()
             _ = try level.replay(below)
             level.serveRuns(for: directoryB)
             var lower = try ChainTree.restoreWithoutContext(replaying: [try testAdmissionBatch(for: grandchild)])
@@ -914,7 +914,7 @@ final class ParentRunAttributionTests: XCTestCase {
         let levels = try restoreLevels(hierarchy())
         XCTAssertEqual(attributedRun(levels.a, committer: "n1", directory: directoryA, at: "a1"), UInt256(100),
                        "n2 reaches a1 through n1's run; n1's own grind G is A's already")
-        XCTAssertEqual(levels.a.runs.runWork[directoryB]?[h("a1")], sum(5, 100, 3),
+        XCTAssertEqual(levels.a.runWork(of: h("a1"), directory: directoryB), sum(5, 100, 3),
                        "a1's run holds what Nexus attributed to it")
         XCTAssertEqual(attributedRun(levels.b, committer: "a1", directory: directoryB, at: "b1"), UInt256(103),
                        "n2 + a2: two levels down, G subtracted at a1")
@@ -1027,10 +1027,10 @@ final class ParentRunAttributionTests: XCTestCase {
     /// slow-but-constant implementation cannot pass.
     func testEulerSubtreeQueryVisitsAreLogarithmic() {
         func visits(n: Int) -> Int {
-            var events: [EulerWorkIndex.Event] = []
+            var events: [NamedEulerIndex.Event] = []
             for i in 0..<n { events.append(.open("b\(i)", WorkSum(UInt256(1)))) }
             for i in (0..<n).reversed() { events.append(.close("b\(i)")) }
-            let index = EulerWorkIndex.build(events: events)
+            let index = NamedEulerIndex.build(events: events)
             let query = index.subtreeWorkVisiting("b0")
             XCTAssertEqual(query?.work, WorkSum(UInt256(UInt64(n))))
             return query?.visits ?? .max

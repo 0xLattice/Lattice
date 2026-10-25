@@ -1,303 +1,95 @@
-import CID
 import UInt256
 import LatticePrimitives
 import LatticePoW
 
-/// A block's recorded header fields as held: a `TipBlockSnapshot` with its
-/// two targets inline rather than in `UInt256`'s heap arrays.
-struct HeldSnapshot: Sendable, Equatable {
-    let postStateCID: String
-    let prevStateCID: String
-    let specCID: String
-    let target: Fixed256
-    let nextTarget: Fixed256
-    let tipHeight: UInt64
-    let timestamp: Int64
+/// The canonical projection and the execution frontier over the graph's
+/// arrays: the selected path (`canonical`, root to tip), which blocks were
+/// executed (`validated`) and which are executed all the way from genesis
+/// (`anchored`), and the state-transition index behind continuity (each
+/// state's producers).
+///
+/// `validated` grows only: execution is a fact about immutable bytes, so it
+/// is never retracted, and a re-delivered weighed fact must never downgrade
+/// an executed block. `anchored` marks the blocks reachable from this chain's
+/// genesis through an unbroken run of EXECUTED blocks — every state on the
+/// path produced, not merely declared — so "the chain produced this state" is
+/// O(1) instead of a walk whose length grows with chain height. Block 1 of a
+/// child chain anchors against `emptyHeader`, which is reachable only at the
+/// parent's genesis, so without it the anchor cost would grow without bound.
+/// Monotone too: an ancestor never stops having been executed.
+extension BlockGraph {
+    // MARK: Canonical path
 
-    init(_ snapshot: TipBlockSnapshot) {
-        postStateCID = snapshot.postStateCID
-        prevStateCID = snapshot.prevStateCID
-        specCID = snapshot.specCID
-        target = Fixed256(snapshot.target)
-        nextTarget = Fixed256(snapshot.nextTarget)
-        tipHeight = snapshot.tipHeight
-        timestamp = snapshot.timestamp
+    /// The index in `canonical` of the canonical block at `height`. The path
+    /// holds one block per height in height order, so this is direct while
+    /// the path is contiguous from height 0, and a binary search otherwise.
+    func canonicalIndex(ofHeight height: UInt64) -> Int? {
+        if height < UInt64(canonical.count), self[canonical[Int(height)]].height == height {
+            return Int(height)
+        }
+        var low = 0, high = canonical.count
+        while low < high {
+            let middle = (low + high) / 2
+            if self[canonical[middle]].height < height { low = middle + 1 } else { high = middle }
+        }
+        return low < canonical.count && self[canonical[low]].height == height ? low : nil
     }
 
-    var snapshot: TipBlockSnapshot {
-        TipBlockSnapshot(
-            postStateCID: postStateCID,
-            prevStateCID: prevStateCID,
-            specCID: specCID,
-            target: target.uint256,
-            nextTarget: nextTarget.uint256,
-            tipHeight: tipHeight,
-            timestamp: timestamp
-        )
-    }
-}
-
-/// The canonical projection and the execution frontier as a value: the
-/// selected path, which blocks were executed and which are executed all the
-/// way from genesis, and the state-transition index behind continuity. It
-/// stores no parent or child edge — every walk takes the block graph as a
-/// parameter, and selection reads the fork choice it is handed — so it is
-/// never a second representation of the tree, only facts over it.
-struct ExecutionFrontier: Sendable {
-    // MARK: Canonical projection (the selection result)
-
-    private(set) var canonicalTip: String
-    /// The canonical path, one block per height: membership is a height
-    /// lookup (`isCanonical`), so no second set of the same blocks is kept.
-    private(set) var canonicalHashByHeight: [UInt64: String]
-    private(set) var tipSnapshot: TipBlockSnapshot?
-    /// Generation at which the canonical projection was last brought current
-    /// BY AN ACTUAL PROJECTION. Every graph/weight mutation flows through
-    /// submitBlock or addWorkContribution, both of which advance
-    /// `mutationGeneration`, so equality proves the projection is exact and
-    /// re-projection is a no-op. `nil` = never verified: the package
-    /// initializer can construct a deliberately stale projection (simulation
-    /// and tests do), so currency is only ever established by projecting.
-    private(set) var projectedGeneration: UInt64?
-
-    // MARK: Execution facts
-
-    /// Blocks whose transition this chain EXECUTED, so their `postState` is a
-    /// reproduced result rather than a declared claim. Grows only: execution is
-    /// a fact about immutable bytes, so it is never retracted, and a re-
-    /// delivered weighed fact must never downgrade an executed block.
-    ///
-    /// Kept beside `snapshots` rather than inside it because snapshot
-    /// equality is used as a corruption predicate: a block whose committed
-    /// fields changed means a corrupt graph, whereas a block that has since
-    /// been executed is ordinary progress.
-    private(set) var validated: Set<String>
-
-    /// Blocks reachable from this chain's genesis through an unbroken run of
-    /// EXECUTED blocks — i.e. every state on the path was produced, not merely
-    /// declared.
-    ///
-    /// This is what "the chain produced this state" means, and keeping it as an
-    /// index makes answering it O(1) instead of a walk whose length grows with
-    /// chain height. Block 1 of a child chain anchors against `emptyHeader`,
-    /// which is reachable only at the parent's genesis, so without this the
-    /// anchor cost would grow without bound and a deployment would eventually
-    /// become unanswerable.
-    ///
-    /// Monotone, like `validated`: execution is a fact about immutable
-    /// bytes and an ancestor never stops having been executed.
-    private(set) var anchored: Set<String>
-
-    // MARK: State-continuity index
-
-    private(set) var snapshots: [String: HeldSnapshot]
-    /// Blocks by declared post-state, for every block whose transition
-    /// changes state. A transition between two distinct states is one of
-    /// these filtered by its pre-state, so no index by transition is kept.
-    private var byPostState: [String: Set<String>]
-
-#if DEBUG
-    /// Test-visible diagnostic for a whole-block canonical materialization.
-    private(set) var fullCanonicalProjectionCount: UInt64 = 0
-    /// Projections that re-descended from the divergence point instead of the
-    /// root. A truncation that silently never fired would still be CORRECT, so
-    /// the cost tests assert this rises rather than only that the answers match.
-    private(set) var truncatedCanonicalProjectionCount: UInt64 = 0
-    /// Blocks materialized by canonical projections, and segments walked to
-    /// select the canonical spine. The projection COUNT cannot show the cost
-    /// PER projection, which is what live-sync admission actually pays.
-    private(set) var canonicalProjectionBlockVisitCount: UInt64 = 0
-    private(set) var canonicalProjectionSegmentVisitCount: UInt64 = 0
-    private(set) var stateContinuityBlockVisitCount: UInt64 = 0
-#endif
-
-    /// Build from a restored graph: the snapshot index over the blocks held,
-    /// the by-height canonical index, and the anchored frontier seeded once.
-    init(
-        canonicalTip: String,
-        canonicalHashes: Set<String>,
-        tipSnapshot: TipBlockSnapshot?,
-        snapshots: [String: TipBlockSnapshot],
-        validated: Set<String>,
-        in blocks: BlockGraph,
-        excluded: Set<String>
-    ) throws {
-        self.canonicalTip = canonicalTip
-        self.tipSnapshot = tipSnapshot
-        self.snapshots = snapshots.mapValues(HeldSnapshot.init)
-        if let tipSnapshot {
-            self.snapshots[canonicalTip] = HeldSnapshot(tipSnapshot)
-        }
-        self.validated = validated
-        self.byPostState = [:]
-        for (blockHash, snapshot) in self.snapshots
-        where blocks.contains(blockHash) {
-            if snapshot.prevStateCID != snapshot.postStateCID {
-                self.byPostState[
-                    snapshot.postStateCID,
-                    default: []
-                ].insert(blockHash)
-            }
-        }
-        self.canonicalHashByHeight = [:]
-        for hash in canonicalHashes {
-            guard let height = blocks.height(of: hash),
-                  self.canonicalHashByHeight[height] == nil else {
-                throw ChainStateRestoreError.corruptConsensusGraph
-            }
-            self.canonicalHashByHeight[height] = hash
-        }
-        self.anchored = Self.seedAnchored(
-            in: blocks,
-            validated: validated,
-            excluded: excluded
-        )
+    func canonicalBlock(atHeight height: UInt64) -> UInt32? {
+        canonicalIndex(ofHeight: height).map { canonical[$0] }
     }
 
-    /// Blocks reachable from a genesis through an unbroken run of executed
-    /// blocks. Computed downward so each block is settled once.
-    static func seedAnchored(
-        in graph: BlockGraph,
-        validated: Set<String>,
-        excluded: Set<String>
-    ) -> Set<String> {
-        var anchored: Set<String> = []
-        // Roots keyed on the parent pointer, matching `propagateAnchored` and
-        // the weight-index builder: the graph invariant ties it to height 0, and
-        // three spellings of one predicate is how they drift apart.
-        var pending = graph.records
-            .filter { $0.parentBlockHash == nil && validated.contains($0.blockHash) }
-            .map(\.blockHash)
-        while let hash = pending.popLast() {
-            guard graph.contains(hash),
-                  validated.contains(hash),
-                  !excluded.contains(hash),
-                  anchored.insert(hash).inserted else { continue }
-            pending.append(contentsOf: graph.children(of: hash))
-        }
-        return anchored
-    }
-
-    // MARK: Queries
-
-    func snapshot(of blockHash: String) -> TipBlockSnapshot? {
-        snapshots[blockHash]?.snapshot
+    func isCanonical(_ block: UInt32) -> Bool {
+        isHeld(block) && canonicalBlock(atHeight: self[block].height) == block
     }
 
     /// The difficulty anchor a height-1 block sets: its own timestamp and
     /// target, read from its held header.
-    func anchor(setBy anchorBlock: String) -> DifficultyAnchor? {
-        snapshots[anchorBlock].map {
-            DifficultyAnchor(blockHeight: 1, timestamp: $0.timestamp, target: $0.target.uint256)
+    func anchor(setBy block: UInt32) -> DifficultyAnchor? {
+        let entry = self[block]
+        guard entry.flags.contains(.hasSnapshot) else { return nil }
+        return DifficultyAnchor(blockHeight: 1, timestamp: entry.timestamp, target: entry.target.uint256)
+    }
+
+    // MARK: Execution facts
+
+    func isAnchored(_ block: UInt32) -> Bool {
+        self[block].flags.contains(.anchored)
+    }
+
+    func isValidated(_ block: UInt32) -> Bool {
+        self[block].flags.contains(.validated)
+    }
+
+    /// The executed-from-genesis blocks whose post-state is `state`.
+    func anchoredProducers(of state: UInt32) -> [UInt32] {
+        producers(of: state).filter(isAnchored)
+    }
+
+    /// Whether this chain produced `state`: some block declaring it as
+    /// post-state is on the executed-from-genesis frontier. The frontier is
+    /// the one authority — executed from genesis and not under an excluded
+    /// root; the weight index says nothing about validity (work weighs, §9.9).
+    func chainProduced(_ state: UInt32) -> Bool {
+        producers(of: state).contains(where: isAnchored)
+    }
+
+    /// Mark every block reachable from a genesis through an unbroken run of
+    /// executed blocks. Computed downward so each block is settled once.
+    func seedAnchored() {
+        var pending = roots.filter(isValidated)
+        while let block = pending.popLast() {
+            guard isValidated(block), !isExcludedRoot(block), !isAnchored(block) else { continue }
+            self[block].flags.insert(.anchored)
+            pending.append(contentsOf: children(of: block))
         }
     }
 
-    func isAnchored(_ blockHash: String) -> Bool {
-        anchored.contains(blockHash)
-    }
-
-    func isCanonical(_ blockHash: String, in graph: BlockGraph) -> Bool {
-        guard let height = graph.height(of: blockHash) else { return false }
-        return canonicalHashByHeight[height] == blockHash
-    }
-
-    /// Whether this chain produced `stateCID` — i.e. some block whose declared
-    /// post-state is `stateCID` was executed, and so was every block between it
-    /// and the genesis.
-    ///
-    /// O(1): the equivalent walk grows with chain height, and it is the shape a
-    /// child's block 1 asks for every time it anchors.
-    /// The executed-from-genesis blocks whose post-state is `stateCID`.
-    func anchoredProducers(of stateCID: String) -> [String] {
-        (byPostState[stateCID] ?? []).filter { anchored.contains($0) }
-    }
-
-    func chainProduced(stateCID: String) -> Bool {
-        guard let candidates = byPostState[stateCID] else { return false }
-        // The frontier is the one authority: executed from genesis and not
-        // under an excluded root. The weight index used to be a second defence
-        // here, but it no longer says anything about validity (work weighs,
-        // §9.9), so it is not consulted — a vacuous conjunct would only read as
-        // a defence it is not.
-        return candidates.contains { anchored.contains($0) }
-    }
-
-    /// The graph search behind `ChainState.stateContinuityPath`, for
-    /// canonical, distinct state CIDs — so a block whose transition is
-    /// `from → to` changes state and is indexed under `to`. `mutating` only
-    /// for its DEBUG visit counter.
-    mutating func continuityPath(
-        from: String,
-        to: String,
-        in graph: BlockGraph
-    ) -> [String]? {
-        // Only a transition on the executed-from-genesis frontier may be
-        // attested: executed, every ancestor executed, and not under an
-        // excluded root. The weighed tier records a block's declared
-        // post-state without running it, so an unverified claim would
-        // otherwise stay attestable forever; and the weight index says nothing
-        // about validity any more (work weighs, §9.9), so it is not a gate. A
-        // child chain settles cross-chain withdrawals against an attested
-        // parent state, so attesting a state the parent never produced lets a
-        // forged `receiptState` settle a withdrawal that was never paid.
-        let anchored = self.anchored
-        func isAttestable(_ blockHash: String) -> Bool {
-            anchored.contains(blockHash)
-        }
-        let targetCandidates = byPostState[to] ?? []
-        let snapshots = self.snapshots
-        if let direct = targetCandidates.lazy.filter({
-            snapshots[$0]?.prevStateCID == from && isAttestable($0)
-        }).min() {
-            return [direct]
-        }
-
-        var pending = Array(targetCandidates)
-            .filter { isAttestable($0) }
-            .sorted(by: >)
-        var visited = Set<String>()
-        var childTowardTarget: [String: String] = [:]
-        while let blockHash = pending.popLast() {
-            guard visited.insert(blockHash).inserted,
-                  let block = graph[blockHash],
-                  let snapshot = snapshots[blockHash] else {
-                continue
-            }
-#if DEBUG
-            stateContinuityBlockVisitCount &+= 1
-#endif
-            if snapshot.prevStateCID == from {
-                var path = [blockHash]
-                while let child = childTowardTarget[path.last!] {
-                    path.append(child)
-                }
-                return path
-            }
-            guard let parentHash = block.parentBlockHash,
-                  isAttestable(parentHash),
-                  let parent = graph[parentHash],
-                  let parentSnapshot = snapshots[parentHash],
-                  parentSnapshot.postStateCID == snapshot.prevStateCID
-            else { continue }
-            childTowardTarget[parentHash] = blockHash
-            pending.append(parent.blockHash)
-        }
-        return nil
-    }
-
-    // MARK: Execution-fact mutations
-
-    /// Record that a possessed block's transition was executed. Monotone: the
-    /// marker is a fact about immutable bytes, so it is never retracted, and a
-    /// re-delivered weighed fact must never downgrade it. The caller holds
-    /// `blockHash`.
-    mutating func markValidated(
-        _ blockHash: String,
-        in graph: BlockGraph,
-        excluded: Set<String>
-    ) {
-        validated.insert(blockHash)
-        propagateAnchored(from: blockHash, in: graph, excluded: excluded)
+    /// Record that a held block's transition was executed. Monotone: the
+    /// marker is a fact about immutable bytes, so it is never retracted.
+    func markValidated(_ block: UInt32) {
+        self[block].flags.insert(.validated)
+        propagateAnchored(from: block)
     }
 
     /// Extend the executed-from-genesis frontier.
@@ -308,67 +100,56 @@ struct ExecutionFrontier: Sendable {
     /// pushed down until it stops moving. Each block is anchored at most once
     /// for the life of the chain, so the total work is linear overall and the
     /// amortized cost per admission is constant.
-    private mutating func propagateAnchored(
-        from blockHash: String,
-        in graph: BlockGraph,
-        excluded: Set<String>
-    ) {
-        var pending = [blockHash]
-        while let hash = pending.popLast() {
-            guard let meta = graph[hash],
-                  !anchored.contains(hash),
-                  validated.contains(hash) else { continue }
-            let parentAnchored = meta.parentBlockHash.map {
-                anchored.contains($0)
-            } ?? true
+    private func propagateAnchored(from block: UInt32) {
+        var pending = [block]
+        while let next = pending.popLast() {
+            let entry = self[next]
+            guard entry.flags.contains(.held), !entry.flags.contains(.anchored),
+                  entry.flags.contains(.validated) else { continue }
+            let parentAnchored = entry.parent == Self.none
+                ? foreignParents[next] == nil
+                : isAnchored(entry.parent)
             // A proven-invalid block extends nothing: its subtree left fork
             // choice, and the states it declared are not states this chain
             // stands behind.
-            guard parentAnchored, !excluded.contains(hash) else { continue }
-            anchored.insert(hash)
-            pending.append(contentsOf: graph.children(of: hash))
+            guard parentAnchored, !entry.flags.contains(.excludedRoot) else { continue }
+            self[next].flags.insert(.anchored)
+            pending.append(contentsOf: children(of: next))
         }
     }
 
-    mutating func indexTransition(
-        _ tipSnapshot: TipBlockSnapshot,
-        blockHash: String
-    ) {
-        let snapshot = HeldSnapshot(tipSnapshot)
-        if let previous = snapshots[blockHash],
-           previous != snapshot {
-            if previous.prevStateCID != previous.postStateCID {
-                byPostState[
-                    previous.postStateCID
-                ]?.remove(blockHash)
-            }
+    /// Whether a run of executed-from-genesis blocks carries state `from` to
+    /// state `to`, for distinct states: a block whose transition is
+    /// `from → …` and, through anchored parents whose post-state is each
+    /// block's pre-state, a block producing `to`. Only a transition on the
+    /// executed-from-genesis frontier may be attested: the weighed tier records
+    /// a block's declared post-state without running it, so an unverified
+    /// claim would otherwise stay attestable forever; and a child chain
+    /// settles cross-chain withdrawals against an attested parent state.
+    func continuity(from: UInt32, to: UInt32) -> Bool {
+        let candidates = anchoredProducers(of: to)
+        if candidates.contains(where: { self[$0].prevState == from }) {
+            return true
         }
-        snapshots[blockHash] = snapshot
-        if snapshot.prevStateCID != snapshot.postStateCID {
-            byPostState[
-                snapshot.postStateCID,
-                default: []
-            ].insert(blockHash)
+        var pending = candidates
+        var visited = Set<UInt32>()
+        while let block = pending.popLast() {
+            guard visited.insert(block).inserted else { continue }
+            let entry = self[block]
+#if DEBUG
+            stateContinuityBlockVisitCount &+= 1
+#endif
+            if entry.prevState == from { return true }
+            let parent = entry.parent
+            guard parent != Self.none, isAnchored(parent),
+                  self[parent].flags.contains(.hasSnapshot),
+                  self[parent].postState == entry.prevState else { continue }
+            pending.append(parent)
         }
+        return false
     }
 
     // MARK: Selection
-
-    /// Re-read the tip's snapshot after the tip or its snapshot changed.
-    mutating func refreshTipSnapshot() {
-        tipSnapshot = snapshots[canonicalTip]?.snapshot
-    }
-
-    /// A bump that carries no graph mutation keeps the projection exact.
-    mutating func noteProjected(at generation: UInt64) {
-        projectedGeneration = generation
-    }
-
-#if DEBUG
-    mutating func resetFullCanonicalProjectionCount() {
-        fullCanonicalProjectionCount = 0
-    }
-#endif
 
     /// Project the canonical path after one fork-choice mutation.
     ///
@@ -386,80 +167,38 @@ struct ExecutionFrontier: Sendable {
     /// Exclusion removes no weight but changes which child is selectable, so a
     /// canonical exclusion forces a whole-chain projection, as do restore-replay
     /// and a never-projected state.
-    ///
-    /// `heightZero` is the by-height index at height 0; the parentless blocks
-    /// in it are the roots.
-    mutating func project(
-        forkChoice: ForkChoice,
-        in graph: BlockGraph,
-        heightZero: Set<String>,
+    func project(
         generation: UInt64,
         forceFull: Bool = false,
-        monotoneIncreaseAt mutatedAt: String? = nil
+        monotoneIncreaseAt mutatedAt: UInt32? = nil
     ) -> ChainCommit? {
         defer { projectedGeneration = generation }
         // A never-projected state has no trustworthy canonical path to truncate
         // against, and `forceFull` means the caller knows it cannot be trusted.
         if !forceFull, projectedGeneration != nil, let mutatedAt,
-           let outcome = truncatedProjection(
-               forkChoice: forkChoice,
-               in: graph,
-               heightZero: heightZero,
-               monotoneIncreaseAt: mutatedAt
-           ) {
+           let outcome = truncatedProjection(monotoneIncreaseAt: mutatedAt) {
             return outcome.commit
         }
 
         // Whole-chain fallback. Weights are pure work, so ONE projection path
-        // serves the exclusion-free and exclusion-present cases alike;
-        // the excluded set is empty in the common case (zero cost) and otherwise
-        // only steers the descent past excluded roots — no parallel path.
-        let roots = Array(heightZero).filter {
-            graph.parent(of: $0) == nil
-        }
-        guard let root = forkChoice.selectableRoot(among: roots)
-        else { return nil }
+        // serves the exclusion-free and exclusion-present cases alike.
+        guard let root = selectableRoot() else { return nil }
 #if DEBUG
         fullCanonicalProjectionCount += 1
 #endif
-        let descent = forkChoice.descend(from: root, in: graph)
+        let path = descend(from: root)
 #if DEBUG
-        // Descent steps ARE blocks now: with no quotient there is no hop to
-        // take, so this column and the block column converge by construction.
-        // The name is kept unchanged so one test measures both sides of the
-        // deletion; what it counts is a block step, not a segment step.
-        canonicalProjectionSegmentVisitCount += UInt64(descent.blocks.count)
-        canonicalProjectionBlockVisitCount += UInt64(descent.blocks.count)
+        // Descent steps ARE blocks: with no quotient there is no hop to take,
+        // so this column and the block column converge by construction.
+        canonicalProjectionSegmentVisitCount += UInt64(path.count)
+        canonicalProjectionBlockVisitCount += UInt64(path.count)
 #endif
-        let projection = (
-            canonicalTip: descent.tipHash,
-            canonicalHashes: descent.blocks
-        )
-        let newHashes = projection.canonicalHashes
-        let newTip = projection.canonicalTip
-        let oldHashes = Set(canonicalHashByHeight.values)
-        guard newTip != canonicalTip || newHashes != oldHashes else { return nil }
-
-        let removed = oldHashes.subtracting(newHashes)
-        let added = newHashes.subtracting(oldHashes).reduce(
-            into: [String: UInt64]()
-        ) { result, hash in
-            if let height = graph.height(of: hash) { result[hash] = height }
-        }
-
-        canonicalTip = newTip
-        canonicalHashByHeight = [:]
-        for hash in newHashes {
-            if let height = graph.height(of: hash) {
-                canonicalHashByHeight[height] = hash
-            }
-        }
-        tipSnapshot = snapshots[newTip]?.snapshot
-        return ChainCommit(
-            tipHash: newTip,
-            canonicalBlocksAdded: added,
-            canonicalBlocksRemoved: removed
-        )
+        let tip = path.last!
+        guard tip != canonicalTip || path != canonical else { return nil }
+        let commit = canonicalDelta(tip: tip, blocks: path, replacing: canonical)
+        canonicalTip = tip
+        canonical = path
+        return commit
     }
 
     /// Outcome of a mutation-point projection. A nil OUTCOME means truncation's
@@ -470,91 +209,67 @@ struct ExecutionFrontier: Sendable {
         let commit: ChainCommit?
     }
 
-    /// The deepest canonical block on the ancestor line of `mutatedAt`;
-    /// `.otherRoot` when that line ends at a root without meeting the
-    /// canonical path (a mutation under a different root), and `.malformed`
-    /// at a missing parent or a non-descending height.
-    ///
-    /// This walk is UNCAPPED deliberately. A step budget here is a cliff, not a
-    /// budget: past it the caller falls through to the whole-chain projection,
-    /// which pays a spine walk AND a descent from the root before it can
-    /// discover that nothing moved. So a cap does not bound the cost of a deep
-    /// divergence, it relocates it to O(n) per admission — reintroducing the
-    /// quadratic this change exists to remove, on precisely the shape it exists
-    /// to make cheap, and skipping the O(1) winner-unchanged check below, which
-    /// only runs once a divergence point has been found.
-    ///
-    /// Uncapped, the walk is bounded by the length of the branch below the
-    /// mutated block, which the node has already paid to admit, and every step
-    /// is an O(1) set membership test. Termination does not rest on a budget:
-    /// each step moves to a strictly lower height, and a parent that does not is
-    /// a malformed route that fails closed like every other guard here.
-    private func canonicalDivergencePoint(
-        from mutatedAt: String,
-        in graph: BlockGraph
-    ) -> Divergence {
-        var current = mutatedAt
-        var below = mutatedAt
-        while !isCanonical(current, in: graph) {
-            guard let meta = graph[current] else { return .malformed }
-            guard let parentHash = meta.parentBlockHash else {
-                return meta.blockHeight == 0 ? .otherRoot : .malformed
-            }
-            guard let parent = graph[parentHash],
-                  parent.blockHeight < meta.blockHeight else { return .malformed }
-            below = current
-            current = parentHash
-        }
-        return .canonical(current, child: below)
-    }
-
     /// Where the ancestor line of a mutated block meets the canonical path.
     private enum Divergence {
         /// The canonical block the line meets, and its child on the line.
-        case canonical(String, child: String)
+        case canonical(UInt32, child: UInt32)
         /// The line ends at a genesis root that is not the canonical one.
         case otherRoot
         case malformed
     }
 
+    /// The deepest canonical block on the ancestor line of `mutatedAt`.
+    ///
+    /// This walk is UNCAPPED deliberately. A step budget here is a cliff, not a
+    /// budget: past it the caller falls through to the whole-chain projection,
+    /// which pays a spine walk AND a descent from the root before it can
+    /// discover that nothing moved — reintroducing the quadratic this exists to
+    /// remove. Uncapped, the walk is bounded by the length of the branch below
+    /// the mutated block, which the node has already paid to admit. Each step
+    /// moves to a strictly lower height, and a parent that does not is a
+    /// malformed route that fails closed.
+    private func canonicalDivergencePoint(from mutatedAt: UInt32) -> Divergence {
+        var current = mutatedAt
+        var below = mutatedAt
+        while !isCanonical(current) {
+            let entry = self[current]
+            guard entry.parent != Self.none else {
+                return entry.height == 0 && foreignParents[current] == nil ? .otherRoot : .malformed
+            }
+            guard isHeld(entry.parent), self[entry.parent].height < entry.height else { return .malformed }
+            below = current
+            current = entry.parent
+        }
+        return .canonical(current, child: below)
+    }
+
     /// Re-descend from the divergence point instead of the root. Every guard
     /// here fails closed: the caller re-materializes whole rather than act on a
     /// partial answer.
-    private mutating func truncatedProjection(
-        forkChoice: ForkChoice,
-        in graph: BlockGraph,
-        heightZero: Set<String>,
-        monotoneIncreaseAt mutatedAt: String
-    ) -> TruncatedProjectionOutcome? {
-        // A block that never routed into the quotient contributed no work and no
-        // fork-choice edge — a routed parent always routes its child, so an
-        // unrouted block's parent is unrouted or absent and no routed block's
-        // visible children changed either. Nothing can have moved.
-        guard forkChoice.isRouted(mutatedAt) else {
+    private func truncatedProjection(monotoneIncreaseAt mutatedAt: UInt32) -> TruncatedProjectionOutcome? {
+        // A block that never routed contributed no work and no fork-choice
+        // edge, so nothing can have moved.
+        guard isRouted(mutatedAt) else {
             return TruncatedProjectionOutcome(commit: nil)
         }
         // The increase landed inside the subtree that already wins at every one
         // of its ancestors, so every canonical decision is reinforced and none
-        // flips. This is the ordinary "stronger observation on a canonical
-        // block" event, and it is now O(1) instead of a walk from the root.
-        guard !isCanonical(mutatedAt, in: graph) else {
+        // flips: O(1).
+        guard !isCanonical(mutatedAt) else {
             return TruncatedProjectionOutcome(commit: nil)
         }
-        let divergence: String
-        let contender: String
-        switch canonicalDivergencePoint(from: mutatedAt, in: graph) {
-        case .canonical(let hash, let child):
-            divergence = hash
+        let divergence: UInt32
+        let contender: UInt32
+        switch canonicalDivergencePoint(from: mutatedAt) {
+        case .canonical(let block, let child):
+            divergence = block
             contender = child
         case .otherRoot:
             // The increase landed under another genesis root, so nothing in
             // the canonical root's tree moved: if that root still wins among
             // the roots, the whole canonical path stands. O(#roots).
-            guard let canonicalRoot = canonicalHashByHeight[0] else { return nil }
-            let roots = Array(heightZero).filter { graph.parent(of: $0) == nil }
-            guard forkChoice.selectableRoot(among: roots) == canonicalRoot else {
-                return nil
-            }
+            guard let canonicalRoot = canonicalBlock(atHeight: 0),
+                  selectableRoot() == canonicalRoot else { return nil }
 #if DEBUG
             truncatedCanonicalProjectionCount += 1
 #endif
@@ -562,155 +277,124 @@ struct ExecutionFrontier: Sendable {
         case .malformed:
             return nil
         }
-        guard let divergenceHeight = graph.height(of: divergence) else { return nil }
-        let (suffixHeight, overflow) = divergenceHeight.addingReportingOverflow(1)
+        let (suffixHeight, overflow) = self[divergence].height.addingReportingOverflow(1)
         guard !overflow else { return nil }
         // The increase is confined to the subtree of `contender`, the
         // divergence point's child on the mutated line. Before it, the
         // canonical child already won against every sibling, and no other
         // sibling moved, so the winner now is one of those two: two weight
-        // reads, however many siblings there are. Comparing every child made a
-        // flood of siblings quadratic.
-        let incumbent = canonicalHashByHeight[suffixHeight]
+        // reads, however many siblings there are.
+        let incumbent = canonicalBlock(atHeight: suffixHeight)
         // The canonical child must sit where the path says, and without one
         // the divergence point must be the tip; otherwise the index is not
         // what this step assumes, and the caller re-materializes.
         if let incumbent {
-            guard graph.parent(of: incumbent) == divergence else { return nil }
+            guard self[incumbent].parent == divergence else { return nil }
         } else {
             guard divergence == canonicalTip else { return nil }
         }
-        let chosen: String?
-        if forkChoice.excludedRoots.contains(contender) {
+        let chosen: UInt32?
+        if isExcludedRoot(contender) {
             // The descent never steps into an excluded root.
             chosen = incumbent
         } else if let incumbent {
-            chosen = forkChoice.preferred(among: [incumbent, contender])
+            chosen = preferred(among: [incumbent, contender])
         } else {
             // The divergence point is the tip: it had no selectable child, so
             // the contender is the only one.
             chosen = contender
         }
-        // Every child of the divergence point is unselectable: the mutation
-        // landed under an excluded root that is the only child of a canonical
-        // block. The descent from the root provably ends at that block, so it
-        // already is the tip and nothing moved. Decided in O(1) — this is the
-        // steady state right after a canonical exclusion, when miners that have
-        // not yet executed the block keep extending it, and it must not cost a
-        // whole-chain projection per such block.
+        // Every child of the divergence point is unselectable: the descent
+        // from the root provably ends at it, so it already is the tip.
         guard let chosen else { return TruncatedProjectionOutcome(commit: nil) }
         // The COMMON admission on a merged-mining child is a losing sibling, and
-        // it must cost nothing. This point is the deepest canonical ancestor of
-        // the mutated block, so the child leading to that block is never the
-        // canonical one, and the increase is confined to its subtree. If the
-        // winner here is therefore still the block already on the canonical
-        // path, no decision changed anywhere — not here, not below it, not above
-        // it — and there is nothing to materialize.
-        //
-        // This is decided in O(1), before reading the path above and before any
-        // descent. Without it a losing sibling deep in the chain would
-        // re-materialize everything from the fork point to the tip only to
-        // conclude nothing moved, which is worse than the whole-chain early-out
-        // this change removes.
-        if isCanonical(chosen, in: graph) {
+        // it must cost nothing: if the winner here is still the block already
+        // on the canonical path, no decision changed anywhere. O(1), before
+        // reading the path above and before any descent.
+        if isCanonical(chosen) {
 #if DEBUG
             truncatedCanonicalProjectionCount += 1
 #endif
             return TruncatedProjectionOutcome(commit: nil)
         }
-        guard let replaced = canonicalPathAbove(suffixHeight, in: graph) else { return nil }
-        // The suffix begins at a block taken straight from the divergence
-        // point's own children, so the boundary below it holds by construction
-        // rather than by assumption.
-        let descent = forkChoice.descend(from: chosen, in: graph)
+        guard let replaced = canonicalPath(from: suffixHeight) else { return nil }
+        let descent = descend(from: chosen)
 #if DEBUG
-        canonicalProjectionSegmentVisitCount += UInt64(descent.blocks.count)
-        canonicalProjectionBlockVisitCount += UInt64(descent.blocks.count)
+        canonicalProjectionSegmentVisitCount += UInt64(descent.count)
+        canonicalProjectionBlockVisitCount += UInt64(descent.count)
         truncatedCanonicalProjectionCount += 1
 #endif
-        return TruncatedProjectionOutcome(commit: applyCanonicalDelta(
-            tipHash: descent.tipHash,
-            blocks: descent.blocks,
-            replacing: replaced,
-            in: graph
-        ))
+        let tip = descent.last!
+        let commit = canonicalDelta(tip: tip, blocks: descent, replacing: replaced.blocks)
+        guard commit != nil else { return TruncatedProjectionOutcome(commit: nil) }
+        canonicalTip = tip
+        canonical.removeSubrange(replaced.start...)
+        canonical.append(contentsOf: descent)
+        return TruncatedProjectionOutcome(commit: commit)
     }
 
-    /// The canonical blocks at and above `height`. Returns nil when the
-    /// by-height index is not contiguous to the tip, so the caller
-    /// re-materializes instead of trusting a partial removal set.
-    private func canonicalPathAbove(
-        _ height: UInt64,
-        in graph: BlockGraph
-    ) -> Set<String>? {
-        guard let tipHeight = graph.height(of: canonicalTip) else {
-            return nil
-        }
-        var replaced = Set<String>()
-        var current = height
-        while current <= tipHeight {
-            guard let hash = canonicalHashByHeight[current] else { return nil }
-            replaced.insert(hash)
-            current += 1
-        }
-        return replaced
+    /// The canonical blocks at and above `height`, and where they start in
+    /// the path. Nil when the path is not contiguous from `height` to the
+    /// tip, so the caller re-materializes instead of trusting a partial
+    /// removal set.
+    private func canonicalPath(from height: UInt64) -> (start: Int, blocks: ArraySlice<UInt32>)? {
+        guard canonicalTip != Self.none else { return nil }
+        let tipHeight = self[canonicalTip].height
+        guard height <= tipHeight else { return (canonical.count, []) }
+        guard let start = canonicalIndex(ofHeight: height),
+              let end = canonicalIndex(ofHeight: tipHeight),
+              UInt64(end - start) == tipHeight - height else { return nil }
+        return (start, canonical[start...end])
     }
 
-    /// Swap the canonical path `replaced` for the freshly materialized suffix.
-    /// The prefix below it is unchanged, so membership and the by-height index
-    /// are updated in place instead of rebuilt over the whole chain.
-    private mutating func applyCanonicalDelta(
-        tipHash: String,
-        blocks: Set<String>,
-        replacing replaced: Set<String>,
-        in graph: BlockGraph
+    /// The commit swapping the canonical blocks `replaced` for `blocks`
+    /// ending at `tip`, or nil when nothing moves.
+    private func canonicalDelta(
+        tip: UInt32,
+        blocks: some Collection<UInt32>,
+        replacing replaced: some Collection<UInt32>
     ) -> ChainCommit? {
         // Both differences are unconditional, so they are correct whether or
-        // not the replaced and suffix block sets overlap.
-        let removed = replaced.subtracting(blocks)
-        let added = blocks.subtracting(replaced).reduce(
-            into: [String: UInt64]()
-        ) { result, hash in
-            if let height = graph.height(of: hash) { result[hash] = height }
-        }
-        guard tipHash != canonicalTip || !removed.isEmpty || !added.isEmpty else {
-            return nil
-        }
-
-        canonicalTip = tipHash
-        for hash in removed {
-            guard let height = graph.height(of: hash),
-                  canonicalHashByHeight[height] == hash else { continue }
-            canonicalHashByHeight.removeValue(forKey: height)
-        }
-        for (hash, height) in added {
-            canonicalHashByHeight[height] = hash
-        }
-        tipSnapshot = snapshots[tipHash]?.snapshot
+        // not the replaced and new block sets overlap.
+        let new = Set(blocks), old = Set(replaced)
+        let removed = old.subtracting(new)
+        let added = new.subtracting(old)
+        guard tip != canonicalTip || !removed.isEmpty || !added.isEmpty else { return nil }
         return ChainCommit(
-            tipHash: tipHash,
-            canonicalBlocksAdded: added,
-            canonicalBlocksRemoved: removed
+            tipHash: hash(tip),
+            canonicalBlocksAdded: Dictionary(uniqueKeysWithValues: added.map { (hash($0), self[$0].height) }),
+            canonicalBlocksRemoved: Set(removed.map(hash))
         )
     }
 }
 
 extension ChainTree {
-    // Forwarders onto `frontier`, kept so callers and tests read the actor
-    // exactly as before.
+    // Forwarders onto the graph's frontier, kept so callers and tests read
+    // the actor exactly as before.
 
-    public var canonicalTip: String { frontier.canonicalTip }
+    public var canonicalTip: String {
+        graph.canonicalTip == BlockGraph.none ? "" : graph.hash(graph.canonicalTip)
+    }
+
     /// The canonical path as a set. O(path): tests only.
-    var canonicalHashes: Set<String> { Set(frontier.canonicalHashByHeight.values) }
-    var canonicalHashByHeight: [UInt64: String] { frontier.canonicalHashByHeight }
-    public var tipSnapshot: TipBlockSnapshot? { frontier.tipSnapshot }
+    var canonicalHashes: Set<String> { Set(graph.canonical.map(graph.hash)) }
+
+    /// The canonical path by height. O(path): tests only.
+    var canonicalHashByHeight: [UInt64: String] {
+        Dictionary(uniqueKeysWithValues: graph.canonical.map { (graph[$0].height, graph.hash($0)) })
+    }
+
+    /// The canonical tip's recorded header fields.
+    public var tipSnapshot: TipBlockSnapshot? {
+        graph.canonicalTip == BlockGraph.none ? nil : graph.snapshot(of: graph.canonicalTip)
+    }
 
 #if DEBUG
-    var fullCanonicalProjectionCount: UInt64 { frontier.fullCanonicalProjectionCount }
-    var truncatedCanonicalProjectionCount: UInt64 { frontier.truncatedCanonicalProjectionCount }
-    var canonicalProjectionBlockVisitCount: UInt64 { frontier.canonicalProjectionBlockVisitCount }
-    var canonicalProjectionSegmentVisitCount: UInt64 { frontier.canonicalProjectionSegmentVisitCount }
-    var stateContinuityBlockVisitCount: UInt64 { frontier.stateContinuityBlockVisitCount }
+    var fullCanonicalProjectionCount: UInt64 { graph.fullCanonicalProjectionCount }
+    var truncatedCanonicalProjectionCount: UInt64 { graph.truncatedCanonicalProjectionCount }
+    var canonicalProjectionBlockVisitCount: UInt64 { graph.canonicalProjectionBlockVisitCount }
+    var canonicalProjectionSegmentVisitCount: UInt64 { graph.canonicalProjectionSegmentVisitCount }
+    var stateContinuityBlockVisitCount: UInt64 { graph.stateContinuityBlockVisitCount }
 #endif
 
     /// Recompute canonical projection after local simulation/test mutation.
@@ -720,13 +404,13 @@ extension ChainTree {
         // No graph or weight fact has changed since the projection was last
         // brought current, so re-projection is provably a no-op: a duplicate
         // delivery that added nothing cannot promote anything.
-        guard mutationGeneration != frontier.projectedGeneration else { return nil }
+        guard mutationGeneration != graph.projectedGeneration else { return nil }
         let canonicalChange = projectCanonicalChain()
         guard canonicalChange != nil else { return nil }
         // This bump carries no graph mutation, so the projection just computed
         // stays exact for the new generation.
         mutationGeneration += 1
-        frontier.noteProjected(at: mutationGeneration)
+        mutableGraph.projectedGeneration = mutationGeneration
         return (canonicalChange ?? ChainCommit(tipHash: canonicalTip))
             .atRevision(mutationGeneration)
     }
@@ -741,54 +425,52 @@ extension ChainTree {
         at blockHash: String? = nil
     ) -> (cid: String, snapshot: TipBlockSnapshot?) {
         let cid = blockHash ?? canonicalTip
-        guard frontier.isAnchored(cid) else { return (cid, nil) }
-        return (cid, frontier.snapshot(of: cid))
+        guard let block = graph.handle(cid), graph.isAnchored(block) else { return (cid, nil) }
+        return (cid, graph.snapshot(of: block))
     }
 
     public func isCanonical(hash: String) -> Bool {
-        frontier.isCanonical(hash, in: graph)
+        graph.handle(hash).map(graph.isCanonical) ?? false
     }
 
     public func canonicalBlockHash(atHeight height: UInt64) -> String? {
-        canonicalHashByHeight[height]
+        graph.canonicalBlock(atHeight: height).map(graph.hash)
     }
 
 #if DEBUG
     /// Test-only seam for asserting that a no-reorg update did not materialize
     /// the unchanged unary canonical path.
     mutating func resetFullCanonicalProjectionCount() {
-        frontier.resetFullCanonicalProjectionCount()
+        mutableGraph.fullCanonicalProjectionCount = 0
     }
 
     /// Read-only whole-chain projection over the LIVE index, with no counter and
     /// no state effects. Differential tests use it to separate a wrong
-    /// truncation from a wrong index: a truncated projection must agree with
-    /// this at every step, and when it does not, this says which half is at
-    /// fault — something comparing only against the reference oracle cannot.
+    /// truncation from a wrong index.
     func debugFullCanonicalProjection() -> (
         canonicalTip: String,
         canonicalHashes: Set<String>
     )? {
-        let roots = Array(indexToBlockHash[0] ?? []).filter {
-            graph.parent(of: $0) == nil
-        }
-        guard let root = forkChoice.selectableRoot(among: roots)
-        else { return nil }
-        let descent = forkChoice.descend(from: root, in: graph)
-        return (descent.tipHash, descent.blocks)
+        guard let root = graph.selectableRoot() else { return nil }
+        let path = graph.descend(from: root)
+        return (graph.hash(path.last!), Set(path.map(graph.hash)))
     }
 #endif
 
     /// Project the canonical path after one fork-choice mutation; see
-    /// `ExecutionFrontier.project`.
+    /// `BlockGraph.project`.
     mutating func projectCanonicalChain(
         forceFull: Bool = false,
         monotoneIncreaseAt mutatedAt: String? = nil
     ) -> ChainCommit? {
-        frontier.project(
-            forkChoice: forkChoice,
-            in: graph,
-            heightZero: indexToBlockHash[0] ?? [],
+        projectCanonicalChain(forceFull: forceFull, increasedAt: mutatedAt.flatMap(graph.handle))
+    }
+
+    mutating func projectCanonicalChain(
+        forceFull: Bool = false,
+        increasedAt mutatedAt: UInt32?
+    ) -> ChainCommit? {
+        mutableGraph.project(
             generation: mutationGeneration,
             forceFull: forceFull,
             monotoneIncreaseAt: mutatedAt
@@ -804,7 +486,7 @@ extension ChainTree {
     /// cross-chain fact for one hands a child a commitment this chain has not
     /// verified and may yet prove invalid.
     public func hasExecutedAncestry(blockHash: String) -> Bool {
-        frontier.isAnchored(blockHash)
+        graph.handle(blockHash).map(graph.isAnchored) ?? false
     }
 
     /// The tip a node acts on: the heaviest executed tip, or empty while the
@@ -821,48 +503,49 @@ extension ChainTree {
     /// heaviest executed step at each fork that is not avoided. The act-on
     /// tip when none of them is on its chain, or the deepest is a root.
     public func heaviestExecutedTip(avoiding avoided: Set<String> = []) -> String {
-        func descend(from start: String, skipping skipped: Set<String>) -> String {
+        let graph = self.graph
+        let skipped = Set(avoided.compactMap(graph.handle))
+        func descend(from start: UInt32, skipping skipped: Set<UInt32>) -> UInt32 {
             var tip = start
-            while let next = forkChoice.preferred(among: graph.children(of: tip).filter {
-                isExecuted(blockHash: $0) && !skipped.contains($0)
+            while let next = graph.preferred(among: graph.children(of: tip).filter {
+                graph.isValidated($0) && !skipped.contains($0)
             }) {
                 tip = next
             }
             return tip
         }
-        let prefix = executedPrefix()
-        guard !prefix.isEmpty else { return prefix }
+        guard let prefix = executedPrefix() else { return "" }
         let tip = descend(from: prefix, skipping: [])
-        guard let floor = avoided.compactMap({ graph.height(of: $0) }).min() else { return tip }
-        var deepest: String?
-        var cid: String? = tip
-        while let block = cid, let height = graph.height(of: block), height >= floor {
-            if avoided.contains(block) { deepest = block }
-            cid = graph.parent(of: block)
+        guard let floor = skipped.map({ graph[$0].height }).min() else { return graph.hash(tip) }
+        var deepest: UInt32?
+        var block = tip
+        while graph.isHeld(block), graph[block].height >= floor {
+            if skipped.contains(block) { deepest = block }
+            block = graph[block].parent
+            guard block != BlockGraph.none else { break }
         }
-        guard let deepest, let base = graph.parent(of: deepest) else { return tip }
-        return descend(from: base, skipping: avoided)
+        guard let deepest, graph[deepest].parent != BlockGraph.none else { return graph.hash(tip) }
+        return graph.hash(descend(from: graph[deepest].parent, skipping: skipped))
     }
 
     /// The deepest block on the canonical chain whose ancestry is executed
-    /// from genesis; empty while the canonical genesis root is not executed.
+    /// from genesis; nil while the canonical genesis root is not executed.
     /// The executed blocks on one path are a prefix of it, so this is a
     /// binary search over heights.
-    private func executedPrefix() -> String {
-        guard let genesis = canonicalBlockHash(atHeight: 0),
-              isExecuted(blockHash: genesis) else { return "" }
+    private func executedPrefix() -> UInt32? {
+        guard let genesis = graph.canonicalBlock(atHeight: 0),
+              graph.isValidated(genesis) else { return nil }
         var low: UInt64 = 0
         var high = highestBlockHeight
         while low < high {
             let middle = low + (high - low + 1) / 2
-            if let hash = canonicalBlockHash(atHeight: middle),
-               hasExecutedAncestry(blockHash: hash) {
+            if let block = graph.canonicalBlock(atHeight: middle), graph.isAnchored(block) {
                 low = middle
             } else {
                 high = middle - 1
             }
         }
-        return canonicalBlockHash(atHeight: low) ?? canonicalTip
+        return graph.canonicalBlock(atHeight: low) ?? genesis
     }
 
     /// Whether `toStateCID` is reachable from `fromStateCID` through the
@@ -885,54 +568,36 @@ extension ChainTree {
         // A child's block 1 anchors against `emptyHeader`, which is reachable
         // only at this chain's genesis — so the question is exactly "did this
         // chain produce that state", which the executed-from-genesis frontier
-        // answers outright. The equivalent walk costs one visit per block of
-        // chain height, which is the shape that used to need a budget.
+        // answers outright.
         if from == LatticeState.emptyHeader.rawCID {
-            return frontier.chainProduced(stateCID: to)
+            return graph.stateHandle(to).map(graph.chainProduced) ?? false
         }
-        return stateContinuityPath(from: from, to: to) != nil
+        // A state no block declares produces nothing; one no block declares
+        // as pre-state matches none (`none` is no block's state).
+        guard let toState = graph.stateHandle(to) else { return false }
+        // A query: the search only counts its visits (DEBUG), never edits.
+        return graph.continuity(from: graph.stateHandle(from) ?? BlockGraph.none, to: toState)
     }
 
-    /// One deterministic accepted-block path proving forward state continuity.
-    /// The returned CIDs are hints for acquiring ordinary block Volumes; a
-    /// receiver must still validate those blocks before trusting the path.
-    public mutating func stateContinuityPath(
-        from fromStateCID: String,
-        to toStateCID: String
-    ) -> [String]? {
-        guard let from = CIDIdentity.canonicalString(fromStateCID),
-              let to = CIDIdentity.canonicalString(toStateCID) else {
-            return nil
-        }
-        if from == to { return [] }
-        return frontier.continuityPath(from: from, to: to, in: graph)
-    }
-
-    /// Record that a possessed block's transition was executed.
+    /// Record that a held block's transition was executed.
     mutating func markValidated(blockHash: String) {
-        guard graph.contains(blockHash) else { return }
-        frontier.markValidated(
-            blockHash,
-            in: graph,
-            excluded: forkChoice.excludedRoots
-        )
+        guard let block = graph.handle(blockHash) else { return }
+        mutableGraph.markValidated(block)
     }
 
     /// Whether some OTHER genesis root of this chain is on the executed
     /// frontier — "is there a chain to stand on", the test a producer runs
     /// before it may exclude a root (§9.9).
     package func hasExecutedRoot(besides blockHash: String) -> Bool {
-        (indexToBlockHash[0] ?? []).contains {
-            $0 != blockHash
-                && graph.parent(of: $0) == nil
-                && frontier.isAnchored($0)
-        }
+        let besides = graph.handle(blockHash)
+        return graph.roots.contains { $0 != besides && graph.isAnchored($0) }
     }
+}
 
-    mutating func indexStateTransition(
-        _ snapshot: TipBlockSnapshot,
-        blockHash: String
-    ) {
-        frontier.indexTransition(snapshot, blockHash: blockHash)
+extension ChainTree {
+    /// The executed-from-genesis blocks whose post-state is `stateCID`.
+    func anchoredProducers(of stateCID: String) -> [String] {
+        guard let state = CIDIdentity.canonicalString(stateCID).flatMap(graph.stateHandle) else { return [] }
+        return graph.anchoredProducers(of: state).map(graph.hash)
     }
 }

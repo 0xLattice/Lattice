@@ -136,7 +136,13 @@ final class OracleRun {
         self.seed = seed
         rng = SplitMix64(seed: seed)
         observationRNG = SplitMix64(seed: seed ^ 0x0B5E_4FA7_10A5_0B5E)
-        states = (0..<6).map { oracleCID("oracle-state-\($0)") }
+        let canonicalStates = (0..<6).map { oracleCID("oracle-state-\($0)") }
+        // Header-chosen states need not be canonical: a twin of a canonical
+        // state under another codec, and a CIDv0, are other states.
+        states = canonicalStates + [
+            oracleCID(digest: oracleDigest(canonicalStates[0]), codec: 0x55),
+            oracleCID(digest: oracleDigest(canonicalStates[1]), codec: nil),
+        ]
         specs = [oracleSpec(targetBlockTime: 1_000), oracleSpec(targetBlockTime: 2_000)]
         specCIDs = specs.map(specCID)
         foreignHash = oracleCID("oracle-\(seed)-foreign")
@@ -152,14 +158,16 @@ final class OracleRun {
     func chance(_ percent: Int) -> Bool { int(100) < percent }
     func element<T>(_ values: [T]) -> T? { values.isEmpty ? nil : values[int(values.count)] }
 
-    /// A new identity. Mostly a dag-cbor CIDv1; sometimes another codec or a
-    /// CIDv0, often reusing an earlier digest, so identities that differ only
-    /// outside the digest meet in one graph (and in one tie-break).
-    func freshCID(_ tag: String) -> String {
+    /// A new identity: a dag-cbor sha2-256 CIDv1, the only shape a block hash
+    /// or grind ID takes (both are computed locally). With `shaped`, an
+    /// identity a header names: sometimes another codec or a CIDv0, often
+    /// reusing an earlier digest, so identities that differ only outside the
+    /// digest meet in one graph.
+    func freshCID(_ tag: String, shaped: Bool = false) -> String {
         counter += 1
         let base = oracleCID("oracle-\(seed)-\(tag)-\(counter)")
         var minted = base
-        if chance(20) {
+        if shaped, chance(20) {
             let digest = chance(50) ? element(digests) ?? oracleDigest(base) : oracleDigest(base)
             let codec: UInt8? = [0x55, 0x70, nil][int(3)]  // raw, dag-pb, CIDv0
             let shaped = oracleCID(digest: digest, codec: codec)
@@ -231,7 +239,7 @@ final class OracleRun {
                     ? "not-a-cid-\(counter)" : element(childPlan.order) ?? foreignHash]
             }
             if chance(5) {
-                commitments = (commitments ?? [:]).merging([otherDirectory: freshCID("other-child")]) { a, _ in a }
+                commitments = (commitments ?? [:]).merging([otherDirectory: freshCID("other-child", shaped: true)]) { a, _ in a }
             }
         }
         let timestamp = (parent?.timestamp ?? 1_000_000) + Int64(int(2_000)) - 100
@@ -310,14 +318,13 @@ final class OracleRun {
                   let amount = plan.grindWork[grind.id] else { return .idle }
             var block = makeBlock(side, under: parent)
             if chance(35) {
-                // The sibling's own digest under another shape: two blocks a
-                // digest-only key would merge.
-                let codec: UInt8? = [0x71, 0x55, 0x70, nil][int(4)]
-                let twin = oracleCID(digest: oracleDigest(siblingHash), codec: codec)
-                if !mintedCIDs.contains(twin) {
-                    mintedCIDs.insert(twin)
-                    block.hash = twin
-                }
+                // A block naming its parent under another shape of the same
+                // digest: a different identity, so it never connects to the
+                // parent a digest-only key would hand it.
+                let codec: UInt8? = [0x55, 0x70, nil][int(3)]
+                block.parent = oracleCID(digest: oracleDigest(parent.hash), codec: codec)
+                plan.register(block, bad: true)
+                return send(side, newBlockBatch(side, block: block, amount: amount))
             } else if chance(60) {
                 // A sibling whose CID text sorts against the other's the
                 // opposite way to its bytes (about one pair in twenty-five):
