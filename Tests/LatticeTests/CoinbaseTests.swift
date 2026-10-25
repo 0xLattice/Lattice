@@ -633,11 +633,13 @@ final class CoinbaseRecipientAdmissionTests: XCTestCase {
             guard case .failure(let failure) = verified else {
                 return XCTFail("a malformed-recipient root must not derive work")
             }
-            XCTAssertEqual(failure, .malformedEvidence)
+            // The twin's bytes are what its CID names: a malformed recipient
+            // is structural, dropped without blame (spec §9.9).
+            XCTAssertEqual(failure, .protocolInvalid)
             let result = try await childLevel().admit(
                 candidate, fetcher: fetcher, childPackage: ChildValidationPackage(proof: proof)
             )
-            XCTAssertEqual(result.failure, .providerMalformedEvidence, "recipient \"\(recipient)\"")
+            XCTAssertEqual(result.failure, .protocolInvalid, "recipient \"\(recipient)\"")
         }
         let honestProof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher

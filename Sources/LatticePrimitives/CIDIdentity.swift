@@ -1,3 +1,5 @@
+import Foundation
+import Crypto
 import CID
 import Synchronization
 
@@ -98,5 +100,10 @@ public enum CIDIdentity {
     /// be one; a header with any other link is malformed (spec §3.1).
     public static func isStandard(_ value: String) -> Bool {
         CIDDigest(value) != nil
+    }
+
+    /// The standard CID naming `data`, whatever `data` decodes as.
+    package static func standardCID(of data: Data) -> String {
+        base32Multibase([0x01, 0x71, 0x12, 0x20] + Array(SHA256.hash(data: data)))
     }
 }

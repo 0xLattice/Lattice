@@ -213,6 +213,54 @@ final class StandardHeaderCIDTests: XCTestCase {
         }
     }
 
+    /// A child proof's carrier whose bytes are the content its CID names but
+    /// not a Lattice block (here a CIDv0 `postState`) is dropped without
+    /// blame: a peer that has not upgraded relays it honestly. Bytes that
+    /// are not what their CID names still blame the sender.
+    func testAChildProofCarrierThatDoesNotDecodeIsDroppedWithoutBlame() async throws {
+        let fetcher = StorableFetcher()
+        let parentGenesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
+        let childGenesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000, nonce: 1)
+        let child = try await AdmissionFixture.makeChild(
+            of: childGenesis, fetcher: fetcher, timestamp: 2_000, nonce: 2,
+            parentChainBlock: parentGenesis
+        )
+        let carrier = try await buildAndStoreBlock(
+            previous: parentGenesis, children: ["Child": child],
+            timestamp: 3_000, target: AdmissionFixture.easy, nonce: 3, fetcher: fetcher
+        )
+        let chainPath = [DEFAULT_ROOT_DIRECTORY, "Child"]
+        let honest = try await ChildBlockProof.generate(
+            rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
+        )
+        guard case .success = await honest.verifySecuringWork(child: child, chainPath: chainPath) else {
+            return XCTFail("the honest proof verifies")
+        }
+        func proof(root: String, data: Data) -> ChildBlockProof {
+            ChildBlockProof(
+                rootCID: root, directoryPath: honest.directoryPath,
+                entries: honest.entries.map { $0.cid == honest.rootCID ? (root, data) : $0 }
+            )
+        }
+
+        let cidV0 = try XCTUnwrap(nonStandardShapes.first { $0.name == "CIDv0" }).cid
+        let malformedData = try XCTUnwrap(replacing("postState", of: carrier, with: cidV0).toData())
+        XCTAssertNil(Block(data: malformedData))
+        let malformed = proof(root: CIDIdentity.standardCID(of: malformedData), data: malformedData)
+        guard case .failure(let undecodable) = await malformed.verifySecuringWork(
+            child: child, chainPath: chainPath
+        ) else { return XCTFail("a carrier that is not a block verified") }
+        XCTAssertEqual(undecodable, .protocolInvalid)
+        XCTAssertEqual(ChainTree.headerFailure(undecodable), .protocolInvalid, "dropped without blame")
+
+        let otherData = try XCTUnwrap(replacing("postState", of: carrier, with: testCID("other")).toData())
+        let mismatched = proof(root: honest.rootCID, data: otherData)
+        guard case .failure(let mismatch) = await mismatched.verifySecuringWork(
+            child: child, chainPath: chainPath
+        ) else { return XCTFail("bytes not matching their CID verified") }
+        XCTAssertEqual(ChainTree.headerFailure(mismatch), .proofOfWorkInvalid, "a byte mismatch blames")
+    }
+
     func testAChildProofThroughANonStandardChildIndexIsRefused() async throws {
         let fetcher = StorableFetcher()
         let carrierTemplate = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 500)

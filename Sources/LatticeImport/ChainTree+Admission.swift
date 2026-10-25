@@ -226,10 +226,11 @@ extension ChainTree {
         )
     }
 
-    /// How header admission treats a failed `verifySecuringWork`: a CID or
-    /// byte mismatch, or an undecodable path, is a proof-of-work failure
-    /// (blame); a child `parentState` that is not its carrier's `prevState`
-    /// is structural (drop, no blame).
+    /// How header admission treats a failed `verifySecuringWork`: bytes that
+    /// do not match their CID are a proof-of-work failure (blame); a carrier
+    /// whose bytes match but are not a well-formed block (a non-standard
+    /// link included), or a child `parentState` that is not its carrier's
+    /// `prevState`, is structural (drop, no blame; spec §9.9).
     public static func headerFailure(
         _ failure: ChildProofVerificationFailure
     ) -> BlockImportError {
