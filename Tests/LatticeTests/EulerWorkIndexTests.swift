@@ -289,6 +289,75 @@ final class EulerWorkIndexTests: XCTestCase {
         assertMatchesModel(index, model, "after refused splices")
     }
 
+    /// Sums held inline at 320 bits spill to an exact `WorkSum` when they
+    /// outgrow them, and stay exact: values and aggregates past 2^320 — far
+    /// past anything 2^64 contributions of 2^256 could reach, so the spill is
+    /// driven at this seam — answer every subtree as the naive sum does,
+    /// through inserts, rotations and splices.
+    func testSumsPast320BitsSpillAndStayExact() {
+        // Values of 2^318..2^322: a couple of these on one path leave 320 bits.
+        func huge(_ random: inout Random) -> WorkSum {
+            WorkSum(limbs: [UInt64(random.next(1 << 30)), 0, 0, 0, 1 << 62, UInt64(random.next(4))])
+        }
+        for seed: UInt64 in [7, 8, 0xD1CE] {
+            var random = Random(seed: seed)
+            var index = EulerWorkIndex.empty
+            var model = Model()
+            XCTAssertTrue(index.insertRoot("root"))
+            model.add("root", parent: nil)
+            var spilled = false
+            for step in 0..<80 {
+                switch random.next(100) {
+                case 0..<55:
+                    let parent = model.blocks[random.next(model.blocks.count)]
+                    let hash = "s-\(seed)-\(step)"
+                    XCTAssertNotNil(index.insertLeaf(hash, under: parent))
+                    model.add(hash, parent: parent)
+                case 55..<70:
+                    // A small component, one huge value inside, spliced in.
+                    let parent = model.blocks[random.next(model.blocks.count)]
+                    let top = "c-\(seed)-\(step)", leaf = "c-\(seed)-\(step)-leaf"
+                    let topWork = huge(&random), leafWork = work(UInt64(random.next(9) + 1))
+                    XCTAssertNotNil(index.splice([
+                        .open(top, topWork), .open(leaf, leafWork), .close(leaf), .close(top),
+                    ], under: parent))
+                    model.add(top, parent: parent)
+                    model.addWork(topWork, to: top)
+                    model.add(leaf, parent: top)
+                    model.addWork(leafWork, to: leaf)
+                default:
+                    let target = model.blocks[random.next(model.blocks.count)]
+                    let delta = random.next(2) == 0 ? huge(&random) : work(UInt64(random.next(9) + 1))
+                    XCTAssertNotNil(index.add(delta, at: target))
+                    model.addWork(delta, to: target)
+                }
+                spilled = spilled || index.debugSpilledCount > 0
+                assertMatchesModel(index, model, "seed \(seed): step \(step)")
+            }
+            XCTAssertTrue(spilled, "seed \(seed): no sum ever left 320 bits")
+        }
+    }
+
+    /// A rebuild from a tour whose values outgrow 320 bits answers exactly.
+    func testBulkBuildPast320BitsIsExact() {
+        let big = WorkSum(limbs: [3, 0, 0, 0, UInt64.max])
+        var model = Model()
+        var events: [EulerWorkIndex.Event] = []
+        model.add("root", parent: nil)
+        model.addWork(big, to: "root")
+        events.append(.open("root", big))
+        for step in 0..<20 {
+            let hash = "b-\(step)"
+            model.add(hash, parent: "root")
+            model.addWork(big, to: hash)
+            events += [.open(hash, big), .close(hash)]
+        }
+        events.append(.close("root"))
+        let index = EulerWorkIndex.build(events: events)
+        XCTAssertGreaterThan(index.debugSpilledCount, 0)
+        assertMatchesModel(index, model, "rebuilt past 320 bits")
+    }
+
     /// The point of the whole structure: the cost of recording work does NOT
     /// grow with how deep in the block tree it lands, because no ancestor total
     /// exists to update. A per-ancestor structure would grow linearly here.

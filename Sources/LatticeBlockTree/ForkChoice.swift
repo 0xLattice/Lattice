@@ -152,11 +152,12 @@ struct ForkChoice: Sendable {
     }
 
     func location(of grindID: String) -> WorkContributionRecord? {
-        locations[grindID].map {
-            WorkContributionRecord(
-                blockHash: $0.blockHash,
-                contribution: VerifiedWorkContribution(id: grindID, work: $0.work.uint256),
-                isRouted: $0.isRouted
+        locations.index(forKey: grindID).map {
+            let (id, location) = locations[$0]
+            return WorkContributionRecord(
+                blockHash: location.blockHash,
+                contribution: VerifiedWorkContribution(heldID: id, work: location.work.uint256),
+                isRouted: location.isRouted
             )
         }
     }

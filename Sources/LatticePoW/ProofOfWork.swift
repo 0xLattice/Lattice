@@ -73,6 +73,13 @@ public struct VerifiedWorkContribution: Codable, Sendable, Equatable {
         self.work = work
     }
 
+    /// A contribution rebuilt from what a tree holds: `heldID` was
+    /// normalized when it was first held, so it is not normalized again.
+    package init(heldID: String, work: UInt256) {
+        self.id = heldID
+        self.work = work
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedID = try container.decode(String.self, forKey: .id)

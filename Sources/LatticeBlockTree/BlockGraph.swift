@@ -34,12 +34,16 @@ struct BlockWork: Sendable {
     /// Every contribution, by ID.
     var contributions: [String: VerifiedWorkContribution] {
         Dictionary(uniqueKeysWithValues: workByID.map {
-            ($0.key, VerifiedWorkContribution(id: $0.key, work: $0.value.uint256))
+            ($0.key, VerifiedWorkContribution(heldID: $0.key, work: $0.value.uint256))
         })
     }
 
     func contribution(id: String) -> VerifiedWorkContribution? {
-        workByID[id].map { VerifiedWorkContribution(id: id, work: $0.uint256) }
+        // The held key, not `id`: `String` equality is canonical
+        // equivalence, so the two can differ in bytes.
+        workByID.index(forKey: id).map {
+            VerifiedWorkContribution(heldID: workByID[$0].key, work: workByID[$0].value.uint256)
+        }
     }
 
     /// The block's credited work: every contribution, exactly.

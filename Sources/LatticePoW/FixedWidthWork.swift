@@ -19,12 +19,17 @@ package struct Fixed256: Sendable, Hashable, Comparable {
     }
 
     package init(_ value: UInt256) {
-        var limbs: [UInt64] = [0, 0, 0, 0]
+        self = .zero
         let wordsPerLimb = UInt64.bitWidth / UInt.bitWidth
         for (index, word) in value.words.enumerated() {
-            limbs[index / wordsPerLimb] |= UInt64(word) << ((index % wordsPerLimb) * UInt.bitWidth)
+            let shifted = UInt64(word) << ((index % wordsPerLimb) * UInt.bitWidth)
+            switch index / wordsPerLimb {
+            case 0: w0 |= shifted
+            case 1: w1 |= shifted
+            case 2: w2 |= shifted
+            default: w3 |= shifted
+            }
         }
-        self.init(w0: limbs[0], w1: limbs[1], w2: limbs[2], w3: limbs[3])
     }
 
     package var uint256: UInt256 {
