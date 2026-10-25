@@ -763,6 +763,64 @@ extension ChainTree {
         frontier.isAnchored(blockHash)
     }
 
+    /// The tip a node acts on: the heaviest executed tip, or empty while the
+    /// canonical genesis root is not executed. From genesis, at each fork the
+    /// heaviest child that is executed is the step taken — fork choice's own
+    /// weight and tie-break — and the descent stops where no child is
+    /// executed. A block with no verdict is never stepped into: it weighs,
+    /// and is taken once it executes. Up to the executed prefix of the
+    /// canonical chain this is fork choice's own descent, so the walk starts
+    /// there.
+    ///
+    /// With `avoided` blocks, they and all they lead to are left out: from
+    /// the parent of the deepest avoided block on the act-on chain, the
+    /// heaviest executed step at each fork that is not avoided. The act-on
+    /// tip when none of them is on its chain, or the deepest is a root.
+    public func heaviestExecutedTip(avoiding avoided: Set<String> = []) -> String {
+        func descend(from start: String, skipping skipped: Set<String>) -> String {
+            var tip = start
+            while let next = forkChoice.preferred(among: graph.children(of: tip).filter {
+                isExecuted(blockHash: $0) && !skipped.contains($0)
+            }) {
+                tip = next
+            }
+            return tip
+        }
+        let prefix = executedPrefix()
+        guard !prefix.isEmpty else { return prefix }
+        let tip = descend(from: prefix, skipping: [])
+        guard let floor = avoided.compactMap({ graph.height(of: $0) }).min() else { return tip }
+        var deepest: String?
+        var cid: String? = tip
+        while let block = cid, let height = graph.height(of: block), height >= floor {
+            if avoided.contains(block) { deepest = block }
+            cid = graph.parent(of: block)
+        }
+        guard let deepest, let base = graph.parent(of: deepest) else { return tip }
+        return descend(from: base, skipping: avoided)
+    }
+
+    /// The deepest block on the canonical chain whose ancestry is executed
+    /// from genesis; empty while the canonical genesis root is not executed.
+    /// The executed blocks on one path are a prefix of it, so this is a
+    /// binary search over heights.
+    private func executedPrefix() -> String {
+        guard let genesis = canonicalBlockHash(atHeight: 0),
+              isExecuted(blockHash: genesis) else { return "" }
+        var low: UInt64 = 0
+        var high = highestBlockHeight
+        while low < high {
+            let middle = low + (high - low + 1) / 2
+            if let hash = canonicalBlockHash(atHeight: middle),
+               hasExecutedAncestry(blockHash: hash) {
+                low = middle
+            } else {
+                high = middle - 1
+            }
+        }
+        return canonicalBlockHash(atHeight: low) ?? canonicalTip
+    }
+
     /// Whether `toStateCID` is reachable from `fromStateCID` through the
     /// connected accepted state-transition graph. Fork choice is irrelevant.
     /// Continuity is a property of the graph, not of how hard a node is willing

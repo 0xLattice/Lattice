@@ -8,6 +8,7 @@ import LatticePoW
 // over the frozen 50.0.1 module: keep the two identical apart from the import
 // and the type name, so every difference the oracle reports is a difference
 // in the block tree, never in how the harness drives or reads it.
+// The one exception is `observeGraphQueries`, for queries 50.0.1 did not have.
 
 struct LiveSubject: OracleSubject {
     var tree: ChainTree
@@ -189,6 +190,7 @@ struct LiveSubject: OracleSubject {
                 "\($0)=\(tree.nearestCarrier(of: hash, directory: $0) ?? "nil")"
             }.joined(separator: " ")
         }
+        seen.merge(observeGraphQueries(probe)) { _, new in new }
 
         let other = probe.hashes.first ?? ""
         for grind in probe.grinds {
@@ -233,5 +235,33 @@ struct LiveSubject: OracleSubject {
 
     static func describe(_ preflight: (cid: String, snapshot: TipBlockSnapshot?)) -> String {
         "\(preflight.cid) \(describe(preflight.snapshot))"
+    }
+}
+
+// MARK: - Graph queries added after 50.0.1
+
+extension LiveSubject {
+    /// The graph queries 50.0.1 did not have, asked directly. The reference
+    /// twin answers the same keys from the 50.0.1 API and the node's own
+    /// act-on algorithm, so these are the one place the twins differ.
+    mutating func observeGraphQueries(_ probe: OracleProbe) -> [String: String] {
+        var seen: [String: String] = [:]
+        // The node's retry loop: each tip refused is avoided in turn.
+        var avoided: Set<String> = []
+        var tips: [String] = []
+        for _ in 0..<4 {
+            let tip = tree.heaviestExecutedTip(avoiding: avoided)
+            tips.append(tip)
+            guard avoided.insert(tip).inserted else { break }
+        }
+        seen["heaviestExecutedTip"] = tips.joined(separator: ",")
+        for hash in probe.hashes {
+            let key = "block \(hash)"
+            seen["\(key) graph"] = "parent=\(tree.parent(of: hash) ?? "nil")"
+                + " height=\(tree.height(of: hash).map { "\($0)" } ?? "nil")"
+                + " children=\(tree.children(of: hash).sorted().joined(separator: ","))"
+            seen["\(key) heaviestExecutedTip avoiding"] = tree.heaviestExecutedTip(avoiding: [hash])
+        }
+        return seen
     }
 }

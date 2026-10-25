@@ -761,6 +761,23 @@ public struct ChainTree: Sendable {
         graph.contains(blockHash)
     }
 
+    /// The parent CID a held block names, held or not; nil for a root or an
+    /// unknown block.
+    public func parent(of blockHash: String) -> String? {
+        graph.parent(of: blockHash)
+    }
+
+    /// A held block's height; nil for an unknown block.
+    public func height(of blockHash: String) -> UInt64? {
+        graph.height(of: blockHash)
+    }
+
+    /// A held block's held children, in the order they were recorded. Empty
+    /// for an unknown block or a leaf.
+    public func children(of blockHash: String) -> [String] {
+        graph.children(of: blockHash)
+    }
+
     public func currentRevision() -> UInt64 {
         mutationGeneration
     }

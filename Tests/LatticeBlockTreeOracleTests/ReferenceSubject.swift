@@ -8,6 +8,7 @@ import LatticePoW
 // live module: keep the two identical apart from the import and the type name,
 // so every difference the oracle reports is a difference in the block tree,
 // never in how the harness drives or reads it.
+// The one exception is `observeGraphQueries`, for queries 50.0.1 did not have.
 
 struct ReferenceSubject: OracleSubject {
     var tree: ChainTree
@@ -189,6 +190,7 @@ struct ReferenceSubject: OracleSubject {
                 "\($0)=\(tree.nearestCarrier(of: hash, directory: $0) ?? "nil")"
             }.joined(separator: " ")
         }
+        seen.merge(observeGraphQueries(probe)) { _, new in new }
 
         let other = probe.hashes.first ?? ""
         for grind in probe.grinds {
@@ -233,5 +235,109 @@ struct ReferenceSubject: OracleSubject {
 
     static func describe(_ preflight: (cid: String, snapshot: TipBlockSnapshot?)) -> String {
         "\(preflight.cid) \(describe(preflight.snapshot))"
+    }
+}
+
+// MARK: - Graph queries added after 50.0.1
+
+extension ReferenceSubject {
+    /// The graph queries 50.0.1 did not have, answered from its API: the
+    /// held block's parent, height and children, and the act-on tip by the
+    /// node's own algorithm (lattice-node `ChainSelection.actOnTip`) over the
+    /// index its boot walk builds. The live twin asks the new API directly.
+    mutating func observeGraphQueries(_ probe: OracleProbe) -> [String: String] {
+        var seen: [String: String] = [:]
+        let index = NodeIndex(tree: &tree)
+        var avoided: Set<String> = []
+        var tips: [String] = []
+        for _ in 0..<4 {
+            let tip = index.actOnTip(avoiding: avoided, in: tree)
+            tips.append(tip)
+            guard avoided.insert(tip).inserted else { break }
+        }
+        seen["heaviestExecutedTip"] = tips.joined(separator: ",")
+        for hash in probe.hashes {
+            let key = "block \(hash)"
+            let meta = tree.getConsensusBlock(hash: hash)
+            seen["\(key) graph"] = "parent=\(tree.parentHash(of: hash) ?? "nil")"
+                + " height=\(meta.map { "\($0.blockHeight)" } ?? "nil")"
+                + " children=\((meta?.childHashes ?? []).sorted().joined(separator: ","))"
+            seen["\(key) heaviestExecutedTip avoiding"] = index.actOnTip(avoiding: [hash], in: tree)
+        }
+        return seen
+    }
+}
+
+/// The node's `WeighedIndex` as `ChainCore.init` builds it — the best
+/// chain's genesis root and everything under it — and its act-on descent,
+/// transcribed from lattice-node `ChainSelection.swift`.
+private struct NodeIndex {
+    var parent: [String: String] = [:]
+    var height: [String: UInt64] = [:]
+    var children: [String: [String]] = [:]
+
+    init(tree: inout ChainTree) {
+        var stack = tree.canonicalBlockHash(atHeight: 0).map { [$0] } ?? []
+        while let hash = stack.popLast() {
+            guard let meta = tree.getConsensusBlock(hash: hash) else { continue }
+            if height.updateValue(meta.blockHeight, forKey: hash) == nil, let parent = meta.parentBlockHash {
+                self.parent[hash] = parent
+                children[parent, default: []].append(hash)
+            }
+            stack += meta.childHashes
+        }
+    }
+
+    func actOnTip(of tree: ChainTree) -> String {
+        var tip = executedPrefix(of: tree)
+        guard !tip.isEmpty else { return tip }
+        while let next = byWeight((children[tip] ?? []).filter(tree.isExecuted(blockHash:)), in: tree).first {
+            tip = next
+        }
+        return tip
+    }
+
+    func actOnTip(avoiding avoided: Set<String>, in tree: ChainTree) -> String {
+        var tip = actOnTip(of: tree)
+        guard let floor = avoided.compactMap({ height[$0] }).min() else { return tip }
+        var deepest: String?
+        var cid: String? = tip
+        while let block = cid, let blockHeight = self.height[block], blockHeight >= floor {
+            if avoided.contains(block) { deepest = block }
+            cid = parent[block]
+        }
+        guard let deepest, let base = parent[deepest] else { return tip }
+        tip = base
+        while let next = byWeight((children[tip] ?? []).filter {
+            tree.isExecuted(blockHash: $0) && !avoided.contains($0)
+        }, in: tree).first {
+            tip = next
+        }
+        return tip
+    }
+
+    func byWeight(_ siblings: [String], in tree: ChainTree) -> [String] {
+        guard siblings.count > 1 else { return siblings }
+        return siblings
+            .map { (hash: $0, work: tree.forkChoiceWeight(of: $0) ?? .zero) }
+            .sorted { $0.work != $1.work ? $0.work > $1.work : forkChoicePrefersBlock($0.hash, over: $1.hash) }
+            .map(\.hash)
+    }
+
+    func executedPrefix(of tree: ChainTree) -> String {
+        guard let genesis = tree.canonicalBlockHash(atHeight: 0), tree.isExecuted(blockHash: genesis) else { return "" }
+        let tipHeight = tree.headerSnapshot(of: tree.canonicalTip)?.tipHeight ?? 0
+        var low: UInt64 = 0
+        var high = tipHeight
+        while low < high {
+            let middle = low + (high - low + 1) / 2
+            if let hash = tree.canonicalBlockHash(atHeight: middle),
+               tree.hasExecutedAncestry(blockHash: hash) {
+                low = middle
+            } else {
+                high = middle - 1
+            }
+        }
+        return tree.canonicalBlockHash(atHeight: low) ?? tree.canonicalTip
     }
 }
