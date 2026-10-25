@@ -94,6 +94,10 @@ final class BlockGraph: @unchecked Sendable {
     /// Parents named by something other than a canonical CID, by the block
     /// naming them: such a parent is never held, so the block never connects.
     var foreignParents: [UInt32: String] = [:]
+    /// Blocks naming a held parent at the wrong height: never its children,
+    /// but their anchor is still read through it, so `propagateAnchor`
+    /// reaches them from here.
+    var unlinkedChildren: [UInt32: [UInt32]] = [:]
     var grindIDs: OrderedSet<GrindID> = []
     var grinds: ContiguousArray<Grind> = []
     /// Direct work past 320 bits, for blocks flagged `spilledWork`.
@@ -158,6 +162,7 @@ final class BlockGraph: @unchecked Sendable {
         copy.ids = ids
         copy.blocks = blocks
         copy.foreignParents = foreignParents
+        copy.unlinkedChildren = unlinkedChildren
         copy.grindIDs = grindIDs
         copy.grinds = grinds
         copy.spilledDirectWork = spilledDirectWork
@@ -490,6 +495,7 @@ final class BlockGraph: @unchecked Sendable {
                 children.append(waiting)
             } else {
                 self[waiting].flags.insert(.unlinked)
+                unlinkedChildren[block, default: []].append(waiting)
             }
             waiting = self[waiting].nextSibling
         }
@@ -519,21 +525,27 @@ final class BlockGraph: @unchecked Sendable {
     }
 
     /// Hand `block`'s anchor down to the descendants it just connected that
-    /// have none yet. Each block's anchor is written once, so over a chain's
-    /// life this is O(blocks).
+    /// have none yet — its children and the blocks naming it at the wrong
+    /// height alike, since the anchor walk (`ChainTree.difficultyAnchor`)
+    /// reads through a held parent either way. Each block's anchor is written
+    /// once, so over a chain's life this is O(blocks), and every read is O(1).
     func propagateAnchor(from block: UInt32) {
         let anchor = self[block].anchor
         guard anchor != Self.none else { return }
         var pending = [block]
+        func reach(_ child: UInt32) {
+            if self[child].anchor == Self.none, self[child].height > 1 {
+                self[child].anchor = anchor
+                pending.append(child)
+            }
+        }
         while let next = pending.popLast() {
             var child = self[next].firstChild
             while child != Self.none {
-                if self[child].anchor == Self.none, self[child].height > 1 {
-                    self[child].anchor = anchor
-                    pending.append(child)
-                }
+                reach(child)
                 child = self[child].nextSibling
             }
+            for child in unlinkedChildren[next] ?? [] { reach(child) }
         }
     }
 

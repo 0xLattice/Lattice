@@ -39,9 +39,11 @@ protocol DirectWorkSource {
 ///
 /// Blocks are named by handle. Block `h`'s OPEN is node `2h` and its CLOSE is
 /// node `2h + 1`, so no map from block to node is kept; a node of height 0 is
-/// not in the tree. Node indices are computed in `Int`; the one representation
-/// limit is that node links are UInt32, which covers block handles below
-/// 2^31 (`reserve` refuses past that). Block handles themselves are UInt32.
+/// not in the tree. The one representation limit is that node indices and
+/// links are UInt32 with `none` = UInt32.max: `reserve` requires
+/// `2h + 2 <= UInt32.max`, so block handles run up to 2^31 - 2. Every other
+/// `2h`/`2h + 1` here is checked UInt32 arithmetic on a handle `reserve`
+/// already admitted, so it cannot overflow.
 struct EulerWorkIndex: Sendable {
     /// One step of an Euler tour, by block handle.
     enum Event: Sendable, Equatable {

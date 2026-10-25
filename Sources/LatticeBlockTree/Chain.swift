@@ -956,12 +956,10 @@ public struct ChainTree: Sendable {
     ///
     /// Admission sets every anchor eagerly: height 1 is its own anchor, a
     /// block under an anchored parent inherits it, and a block that connects
-    /// a waiting component hands its anchor down that component
-    /// (`propagateAnchor`). So the first cached entry is almost always the
-    /// block's own. A block never linked to its parent's entry (one naming
-    /// it at the wrong height) is the exception, and this walks up to the
-    /// nearest ancestor holding one, writing nothing. Height 1 always has an
-    /// anchor from its own admission, so the walk always terminates.
+    /// waiting blocks hands its anchor down to them — its children and any
+    /// block naming it at the wrong height (`propagateAnchor`). So the block's
+    /// own entry answers; the walk below is the definition the cached value
+    /// equals, read up through held parents to height 1, writing nothing.
     ///
     /// What is held is the height-1 block the anchor is read from, never a
     /// copy.

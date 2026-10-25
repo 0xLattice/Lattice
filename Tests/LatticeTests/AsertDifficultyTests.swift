@@ -681,3 +681,49 @@ final class AsertDifficultyTests: XCTestCase {
         XCTAssertLessThanOrEqual(larger - smaller, slack, message, file: file, line: line)
     }
 }
+
+/// A block naming its parent at the wrong height is never that parent's
+/// child, yet its anchor is read through it. Blocks admitted beneath it
+/// must still carry their anchor, so no read walks the chain below it.
+final class UnlinkedAnchorTests: XCTestCase {
+    private func admission(_ name: String, parent: String?, height: UInt64) -> BlockImportBatch {
+        BlockImportBatch(facts: [
+            .block(ChainBlockFact(
+                blockHash: blockCID(name), parentBlockHash: parent.map(blockCID), blockHeight: height,
+                postStateCID: testCID("unlinked:post:\(name)"), prevStateCID: testCID("unlinked:prev:\(name)"),
+                specCID: testCID("unlinked:spec"), target: "1", nextTarget: "1",
+                timestamp: Int64(height), stateDiff: .empty
+            )),
+            .work(ChainWorkFact(
+                blockHash: blockCID(name),
+                contribution: VerifiedWorkContribution(id: testCID("unlinked:work:\(name)"), work: UInt256(1))
+            )),
+        ])
+    }
+
+    func testAChainUnderAWrongHeightBlockCarriesItsAnchor() throws {
+        // G(0) ← A(1) ← P(2); X names P at height 4 (P's children are at 3),
+        // and Y1…Yn hang under X. X and the Ys arrive first, then before P.
+        let length = 200
+        var tree = try ChainTree.restoreWithoutContext(replaying: [admission("G", parent: nil, height: 0)])
+        _ = try tree.apply(admission("X", parent: "P", height: 4))
+        for i in 1...length / 2 {
+            _ = try tree.apply(admission("Y\(i)", parent: i == 1 ? "X" : "Y\(i - 1)", height: UInt64(4 + i)))
+        }
+        _ = try tree.apply(admission("A", parent: "G", height: 1))
+        _ = try tree.apply(admission("P", parent: "A", height: 2))
+        // And blocks arriving after the connection inherit it on the way in.
+        for i in (length / 2 + 1)...length {
+            _ = try tree.apply(admission("Y\(i)", parent: "Y\(i - 1)", height: UInt64(4 + i)))
+        }
+
+        let a = try XCTUnwrap(tree.graph.handle(blockCID("A")))
+        let expected = try XCTUnwrap(tree.difficultyAnchor(forBlockHash: blockCID("A")))
+        for name in ["P", "X"] + (1...length).map({ "Y\($0)" }) {
+            let block = try XCTUnwrap(tree.graph.handle(blockCID(name)), name)
+            XCTAssertEqual(tree.graph[block].anchor, a, "\(name) holds its anchor: no read walks")
+            XCTAssertEqual(tree.difficultyAnchor(forBlockHash: blockCID(name)), expected, name)
+        }
+        XCTAssertTrue(tree.graph[try XCTUnwrap(tree.graph.handle(blockCID("X")))].flags.contains(.unlinked))
+    }
+}
