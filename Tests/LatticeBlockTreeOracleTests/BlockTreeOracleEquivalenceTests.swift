@@ -609,7 +609,19 @@ final class OracleRun {
             let liveSeen = full ? observe(&live) : observeTip(&live)
             let referenceSeen = full ? observe(&reference) : observeTip(&reference)
             for side in [OracleSide.parent, .child] {
-                let live = liveSeen[side] ?? [:], reference = referenceSeen[side] ?? [:]
+                var live = liveSeen[side] ?? [:], reference = referenceSeen[side] ?? [:]
+                // `cumulativeWork` is compared only for connected blocks. One
+                // that can never connect (it arrived before a parent that
+                // cannot have it as a child) got a cache-timing-dependent
+                // value in 50.0.1: zero, or whatever it held when last read
+                // as a root. The live walk answers it deterministically.
+                for key in live.keys where key.hasSuffix(" cumulativeWork") {
+                    let hash = key.dropFirst("block ".count).dropLast(" cumulativeWork".count)
+                    if live["block \(hash) connected"] == "false" {
+                        live[key] = nil
+                        reference[key] = nil
+                    }
+                }
                 if (live["tipCumulativeWork"]?.count ?? 0) > 64 {
                     coverage["steps with a \(side.rawValue) sum past 256 bits", default: 0] += 1
                 }

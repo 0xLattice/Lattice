@@ -9,7 +9,7 @@ import UInt256
 @testable import LatticeImport
 
 @MainActor
-final class LazyLocalWorkCacheTests: XCTestCase {
+final class OnDemandWorkTotalsTests: XCTestCase {
     /// The diagnostic totals are derived on demand: no block carries them.
     func testLinearAdmissionsAnswerLocalTotalsOnDemand() async throws {
         let (chain, hashes) = try await lazyCacheLinearChain(count: 6)
