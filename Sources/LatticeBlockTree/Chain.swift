@@ -936,7 +936,7 @@ public struct ChainTree: Sendable {
             canonicalChange = projectCanonicalChain(monotoneIncreaseAt: blockHash)
         }
         let extendsCanonical = input.parentBlockHash == oldTip
-            && canonicalHashes.contains(blockHash)
+            && isCanonical(hash: blockHash)
         return SubmissionResult(
             addedBlock: true,
             addedContribution: result.addedContribution,
@@ -1289,7 +1289,7 @@ public struct ChainTree: Sendable {
         // rebuilt. Selection moves only if the excluded block was on the
         // canonical path; otherwise the descent never reached it and every
         // decision stands.
-        let wasCanonical = canonicalHashes.contains(blockHash)
+        let wasCanonical = isCanonical(hash: blockHash)
         mutationGeneration += 1
         let canonicalChange = (deferProjectionForReplay || !wasCanonical)
             ? nil
