@@ -39,6 +39,34 @@ public extension ChainLevel {
         validationContext: ValidationContext = .current
     ) async -> TransactionPreflightResult {
         let tip = await chain.transactionPreflightTip(at: tipCID)
+        return await TransactionPreflight.classify(
+            transaction,
+            tipCID: tip.cid,
+            snapshot: tip.snapshot,
+            chainPath: context.path,
+            parentState: parentState,
+            fetcher: fetcher,
+            validationContext: validationContext
+        )
+    }
+}
+
+public enum TransactionPreflight {
+    /// `ChainLevel.preflightTransaction` from its basis alone: the block to
+    /// build on and its snapshot, as `ChainTree.transactionPreflightTip`
+    /// reads them (a nil snapshot is `.unavailable`), and the chain's path.
+    /// A host job that holds only these classifies exactly as the level
+    /// would, without holding the chain's tree.
+    public static func classify(
+        _ transaction: Transaction,
+        tipCID: String,
+        snapshot: TipBlockSnapshot?,
+        chainPath: [String],
+        parentState: LatticeStateHeader? = nil,
+        fetcher: any Fetcher,
+        validationContext: ValidationContext = .current
+    ) async -> TransactionPreflightResult {
+        let tip = (cid: tipCID, snapshot: snapshot)
         guard let snapshot = tip.snapshot else {
             return TransactionPreflightResult(
                 tipCID: tip.cid,
@@ -59,8 +87,8 @@ public extension ChainLevel {
             // be carried alone under the fee rule, so it is refused here.
             guard try await resolved.validateTransactionForNexus(fetcher: fetcher),
                   body.minerSurplus() != nil,
-                  body.chainPath == context.path,
-                  context.path.count > 1
+                  body.chainPath == chainPath,
+                  chainPath.count > 1
                     || (body.depositActions.isEmpty
                         && body.withdrawalActions.isEmpty) else {
                 return result(.invalid, tipCID: tip.cid)
@@ -82,7 +110,7 @@ public extension ChainLevel {
                   try await TransactionBody.batchVerifyPolicies(
                     bodies: [body],
                     spec: spec,
-                    chainPath: context.path,
+                    chainPath: chainPath,
                     height: snapshot.tipHeight + 1,
                     timestamp: nextTimestamp,
                     fetcher: fetcher
@@ -111,7 +139,7 @@ public extension ChainLevel {
 
             if !body.withdrawalActions.isEmpty {
                 guard let parentState,
-                      let directory = context.path.last,
+                      let directory = chainPath.last,
                       let parent = try await parentState.resolve(fetcher: fetcher).node
                 else {
                     return result(.unavailable, tipCID: tip.cid)
@@ -146,7 +174,7 @@ public extension ChainLevel {
         }
     }
 
-    private func result(
+    private static func result(
         _ disposition: TransactionPreflightDisposition,
         tipCID: String
     ) -> TransactionPreflightResult {
