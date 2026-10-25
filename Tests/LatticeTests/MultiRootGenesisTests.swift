@@ -120,7 +120,7 @@ final class MultiRootGenesisTests: XCTestCase {
             genesis: try BlockHeader(node: genesis), evidence: firstEvidence,
             fetcher: fetcher, context: childContext, parentFacts: parentFacts
         ).get()
-        var tree = bootstrapped.tree
+        var tree = (consume bootstrapped).tree
         XCTAssertTrue(tree.hasExecutedAncestry(blockHash: try cid(genesis)))
         XCTAssertEqual(tree.canonicalTip, try cid(genesis))
 

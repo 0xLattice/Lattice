@@ -58,7 +58,7 @@ final class EulerWorkIndexTests: XCTestCase {
     }
 
     private func assertMatchesModel(
-        _ index: EulerWorkIndex,
+        _ index: NamedEulerIndex,
         _ model: Model,
         _ event: String,
         file: StaticString = #filePath,
@@ -83,7 +83,7 @@ final class EulerWorkIndexTests: XCTestCase {
     /// Every block opens once, closes once, and closes in the reverse order it
     /// opened — the property that makes a subtree a contiguous range at all.
     private func assertValidEulerTour(
-        _ index: EulerWorkIndex,
+        _ index: NamedEulerIndex,
         _ model: Model,
         _ event: String,
         file: StaticString = #filePath,
@@ -120,7 +120,7 @@ final class EulerWorkIndexTests: XCTestCase {
     func testRandomGrowthAndWorkMatchBruteForce() {
         for seed: UInt64 in [1, 2, 3, 0xBEEF, 0xC0FFEE] {
             var random = Random(seed: seed)
-            var index = EulerWorkIndex.empty
+            var index = NamedEulerIndex.empty
             var model = Model()
 
             XCTAssertTrue(index.insertRoot("root"))
@@ -151,7 +151,7 @@ final class EulerWorkIndexTests: XCTestCase {
     }
 
     func testSplicedComponentMatchesBruteForce() {
-        var index = EulerWorkIndex.empty
+        var index = NamedEulerIndex.empty
         var model = Model()
         XCTAssertTrue(index.insertRoot("root"))
         model.add("root", parent: nil)
@@ -166,7 +166,7 @@ final class EulerWorkIndexTests: XCTestCase {
 
         // A component of its own: root c0 with two children, spliced under a
         // block in the middle of the existing chain.
-        let events: [EulerWorkIndex.Event] = [
+        let events: [NamedEulerIndex.Event] = [
             .open("c0", work(5)),
             .open("c1", work(7)),
             .close("c1"),
@@ -192,7 +192,7 @@ final class EulerWorkIndexTests: XCTestCase {
     }
 
     func testBulkBuildAgreesWithIncrementalOnAnswers() {
-        var incremental = EulerWorkIndex.empty
+        var incremental = NamedEulerIndex.empty
         var model = Model()
         XCTAssertTrue(incremental.insertRoot("root"))
         model.add("root", parent: nil)
@@ -211,14 +211,14 @@ final class EulerWorkIndexTests: XCTestCase {
         // incremental one, which appends each new child last. Subtree sums are
         // order-independent, so the ANSWERS must agree even though the
         // sequences need not — and that is the only property fork choice reads.
-        var events: [EulerWorkIndex.Event] = []
+        var events: [NamedEulerIndex.Event] = []
         func walk(_ hash: String) {
             events.append(.open(hash, model.work[hash] ?? .zero))
             for child in (model.childrenOf[hash] ?? []).sorted() { walk(child) }
             events.append(.close(hash))
         }
         walk("root")
-        let rebuilt = EulerWorkIndex.build(events: events)
+        let rebuilt = NamedEulerIndex.build(events: events)
 
         XCTAssertTrue(rebuilt.debugInvariantsHold, "rebuild invariants")
         for hash in model.blocks {
@@ -243,7 +243,7 @@ final class EulerWorkIndexTests: XCTestCase {
     /// Every case below passed the first version of the pre-validation, which
     /// tested independent conditions instead of simulating the nesting.
     func testMalformedSpliceLeavesTheIndexUntouched() {
-        var index = EulerWorkIndex.empty
+        var index = NamedEulerIndex.empty
         var model = Model()
         XCTAssertTrue(index.insertRoot("root"))
         model.add("root", parent: nil)
@@ -255,12 +255,12 @@ final class EulerWorkIndexTests: XCTestCase {
             XCTAssertNotNil(index.add(work(3), at: hash))
             model.addWork(work(3), to: hash)
         }
-        func snapshot(_ index: EulerWorkIndex) -> [String] {
+        func snapshot(_ index: NamedEulerIndex) -> [String] {
             index.debugSequence.map { "\($0.hash)|\($0.isOpen)|\($0.value)" }
         }
         let before = snapshot(index)
 
-        let malformed: [(name: String, events: [EulerWorkIndex.Event])] = [
+        let malformed: [(name: String, events: [NamedEulerIndex.Event])] = [
             ("duplicate close", [
                 .open("x", work(1)), .close("x"), .close("x"),
             ]),
@@ -301,7 +301,7 @@ final class EulerWorkIndexTests: XCTestCase {
         }
         for seed: UInt64 in [7, 8, 0xD1CE] {
             var random = Random(seed: seed)
-            var index = EulerWorkIndex.empty
+            var index = NamedEulerIndex.empty
             var model = Model()
             XCTAssertTrue(index.insertRoot("root"))
             model.add("root", parent: nil)
@@ -342,7 +342,7 @@ final class EulerWorkIndexTests: XCTestCase {
     func testBulkBuildPast320BitsIsExact() {
         let big = WorkSum(limbs: [3, 0, 0, 0, UInt64.max])
         var model = Model()
-        var events: [EulerWorkIndex.Event] = []
+        var events: [NamedEulerIndex.Event] = []
         model.add("root", parent: nil)
         model.addWork(big, to: "root")
         events.append(.open("root", big))
@@ -353,7 +353,7 @@ final class EulerWorkIndexTests: XCTestCase {
             events += [.open(hash, big), .close(hash)]
         }
         events.append(.close("root"))
-        let index = EulerWorkIndex.build(events: events)
+        let index = NamedEulerIndex.build(events: events)
         XCTAssertGreaterThan(index.debugSpilledCount, 0)
         assertMatchesModel(index, model, "rebuilt past 320 bits")
     }
@@ -364,7 +364,7 @@ final class EulerWorkIndexTests: XCTestCase {
     func testCostDoesNotGrowWithBlockDepth() {
         var touchedByDepth: [Int: Int] = [:]
         for depth in [200, 400, 800] {
-            var index = EulerWorkIndex.empty
+            var index = NamedEulerIndex.empty
             XCTAssertTrue(index.insertRoot("root"))
             var previous = "root"
             for step in 0..<depth {

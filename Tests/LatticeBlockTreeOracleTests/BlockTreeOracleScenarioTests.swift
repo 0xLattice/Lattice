@@ -52,6 +52,71 @@ final class BlockTreeOracleScenarioTests: XCTestCase {
         script.check(self, tip: first)
     }
 
+    /// A header naming its parent under another codec (or as a CIDv0) names a
+    /// different block, even with the parent's digest: it never connects.
+    func testParentNamedUnderAnotherShapeNeverConnects() {
+        for codec: UInt8? in [0x55, 0x70, nil] {
+            var script = Script("twin-parent-\(codec.map(String.init) ?? "v0")")
+            let genesis = script.genesis()
+            let held = script.block("held", under: genesis)
+            let twin = oracleCID(digest: oracleDigest(held.hash), codec: codec)
+            let orphan = script.block("orphan", under: held, naming: twin)
+            let below = script.block("below", under: orphan)
+            script.add(held, work: 2)
+            script.add(orphan, work: 50)
+            script.add(below, work: 50)
+            script.check(self, tip: held)
+        }
+    }
+
+    /// Post- and prev-states under another codec, or as a CIDv0, are other
+    /// states: continuity and the executed set never confuse them with the
+    /// canonical state of the same digest.
+    func testStatesUnderAnotherShapeAreOtherStates() {
+        var script = Script("twin-state")
+        let genesis = script.genesis()
+        let rawTwin = oracleCID(digest: oracleDigest(genesis.postState), codec: 0x55)
+        let v0Twin = oracleCID(digest: oracleDigest(genesis.postState), codec: nil)
+        let a = script.block("a", under: genesis, post: rawTwin)
+        let b = script.block("b", under: a, post: v0Twin)
+        let c = script.block("c", under: b)
+        script.add(a, work: 1)
+        script.add(b, work: 1)
+        script.add(c, work: 1)
+        script.validate(genesis)
+        script.validate(a)
+        script.validate(b)
+        script.restart(shuffled: true)
+        script.check(self, tip: c)
+    }
+
+    /// A block hash and a grind ID are computed locally, so the live tree
+    /// refuses a fact naming either in another shape (the reference, which
+    /// keys by text, has no such rule: this is the one place they differ).
+    func testANonCanonicalBlockHashOrGrindIsRefusedAtEntry() throws {
+        var script = Script("refused")
+        let genesis = script.genesis()
+        guard let genesisBatch = script.genesisBatch else { return XCTFail("no genesis") }
+        var live = try LiveSubject.restoreRoot([genesisBatch], specs: [script.spec]).get()
+        var block = script.block("block", under: genesis)
+        let canonicalHash = block.hash
+        let grind = oracleCID("scenario-refused-grind")
+        for codec: UInt8? in [0x55, 0x70, nil] {
+            block.hash = oracleCID(digest: oracleDigest(canonicalHash), codec: codec)
+            let outcome = live.apply(OracleBatch(facts: [
+                .block(block), .work(blockHash: block.hash, grindID: grind, work: 5),
+            ]), reserved: false)
+            XCTAssertTrue(outcome.threw, "block hash \(block.hash): \(outcome.rendered)")
+        }
+        block.hash = canonicalHash
+        let twinGrind = oracleCID(digest: oracleDigest(grind), codec: 0x55)
+        let outcome = live.apply(OracleBatch(facts: [
+            .block(block), .work(blockHash: block.hash, grindID: twinGrind, work: 5),
+        ]), reserved: false)
+        XCTAssertTrue(outcome.threw, "grind \(twinGrind): \(outcome.rendered)")
+        XCTAssertEqual(live.observeTip()["tip"], genesis.hash)
+    }
+
     func testOrphanComponentsGraftedLater() {
         var script = Script("graft")
         let genesis = script.genesis()
@@ -203,9 +268,13 @@ private struct Script {
         return block
     }
 
-    mutating func block(_ label: String, under parent: OracleBlockFact, post: String? = nil) -> OracleBlockFact {
+    /// A block under `parent`, its header naming the parent as `naming` when
+    /// given (the parent's hash otherwise).
+    mutating func block(
+        _ label: String, under parent: OracleBlockFact, post: String? = nil, naming: String? = nil
+    ) -> OracleBlockFact {
         let block = OracleBlockFact(
-            hash: oracleCID("scenario-\(name)-\(label)"), parent: parent.hash, height: parent.height + 1,
+            hash: oracleCID("scenario-\(name)-\(label)"), parent: naming ?? parent.hash, height: parent.height + 1,
             postState: post ?? oracleCID("scenario-\(name)-post-\(label)"), prevState: parent.postState,
             spec: parent.spec, target: "ffff", nextTarget: "ffff",
             timestamp: parent.timestamp + 1_000, childCommitments: nil

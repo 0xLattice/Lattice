@@ -251,7 +251,7 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
         XCTAssertEqual(genesisHex, try Self.hex(new.facts), "child genesis bootstrap facts")
         let steps = [Golden.Step(name: "child/genesis/bootstrap", facts: genesisHex)]
 
-        let child = Pair(level: accepted.level, tree: new.tree, fetcher: fetcher)
+        let child = Pair(level: accepted.level, tree: (consume new).tree, fetcher: fetcher)
         func childBlock(parentChainBlock: Block, nonce: UInt64) async throws -> Block {
             let onParent = try await AdmissionFixture.makeChild(
                 of: parentChainBlock, fetcher: fetcher, timestamp: parentChainBlock.timestamp + 500, nonce: 100 + nonce

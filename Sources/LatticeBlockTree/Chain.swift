@@ -70,20 +70,22 @@ public struct BlockMeta: Sendable {
     }
 
     /// The read view of one block the graph holds, assembled from its tables.
-    init(
-        record: BlockRecord,
-        childHashes: [String],
-        work: BlockWork,
-        difficultyAnchor: DifficultyAnchor?
-    ) {
-        self.blockHash = record.blockHash
-        self.parentBlockHash = record.parentBlockHash
-        self.blockHeight = record.blockHeight
-        self.childCommitments = record.childCommitments
-        self.childHashes = childHashes
-        self.workContributions = work.contributions
-        self.attributedRuns = work.attributedRuns
-        self.work = work.work
+    init(graph: BlockGraph, block: UInt32, difficultyAnchor: DifficultyAnchor?) {
+        var contributions: [String: VerifiedWorkContribution] = [:]
+        var attributedRuns: Set<String> = []
+        for grind in graph.grinds(at: block) {
+            let contribution = graph.contribution(grind)
+            contributions[contribution.id] = contribution
+            if graph.grinds[Int(grind)].isAttributed { attributedRuns.insert(contribution.id) }
+        }
+        self.blockHash = graph.hash(block)
+        self.parentBlockHash = graph.parentHash(of: block)
+        self.blockHeight = graph[block].height
+        self.childCommitments = graph.commitments[block] ?? [:]
+        self.childHashes = graph.children(of: block).map(graph.hash)
+        self.workContributions = contributions
+        self.attributedRuns = attributedRuns
+        self.work = graph.work(of: block)
         self.difficultyAnchor = difficultyAnchor
     }
 }
@@ -206,7 +208,11 @@ private struct ConsensusBlockInput: Sendable {
     }
 
     init?(fact: ChainBlockFact) {
+        // The block hash is computed from the block's own bytes, so it is a
+        // canonical CID; a parent, states and spec are the author's choice
+        // and keep whatever CID shape the author named.
         guard let blockHash = CIDIdentity.canonicalString(fact.blockHash),
+              BlockID(blockHash) != nil,
               let postStateCID = CIDIdentity.canonicalString(fact.postStateCID),
               let prevStateCID = CIDIdentity.canonicalString(fact.prevStateCID),
               let specCID = CIDIdentity.canonicalString(fact.specCID),
@@ -264,7 +270,10 @@ private struct TrustedImportBatch {
               let work = workFacts.first,
               work.contribution.work > .zero,
               let workBlockHash = CIDIdentity.canonicalString(work.blockHash),
-              let contributionID = CIDIdentity.canonicalString(work.contribution.id) else {
+              let contributionID = CIDIdentity.canonicalString(work.contribution.id),
+              // Both are computed from content this node holds, so both are
+              // canonical CIDs: any other shape is corrupt.
+              BlockID(workBlockHash) != nil, GrindID(contributionID) != nil else {
             return nil
         }
         let contribution = VerifiedWorkContribution(
@@ -307,16 +316,21 @@ private struct TrustedImportBatch {
     }
 }
 
-/// One chain's block tree as a synchronous value: the weighed graph
-/// (`BlockGraph`), GHOST weights and excluded roots (`ForkChoice`), the
-/// canonical projection and executed set (`ExecutionFrontier`), and parent
-/// run attribution (`RunAttribution`).
+/// One chain's block tree as a synchronous value: one `BlockGraph` holding
+/// the weighed graph, the GHOST weights and excluded roots (ForkChoice.swift),
+/// the canonical projection and executed set (ExecutionFrontier.swift), and
+/// parent run attribution (RunAttribution.swift), in arrays sharing one
+/// handle space.
 ///
 /// Every consensus mutation of a chain is a method on this value; the
 /// `ChainState` actor only wraps one, so there is one implementation. The
 /// four fact kinds are its durable form: `replay` rebuilds it from them, and
 /// the admission operations (`insertHeader`, `addWork`, `applyConnect`) emit
 /// exactly the facts they apply.
+///
+/// The graph is a class held by reference, and the runtime owns one live
+/// tree: a copy shares it, and a mutation through a copy that is not the
+/// only holder is a bug (`mutableGraph`).
 public struct ChainTree: Sendable {
     /// The chain this tree is, fixed when the tree is made: its path decides
     /// whether work is a root grind or a child proof and which parent facts
@@ -329,29 +343,16 @@ public struct ChainTree: Sendable {
     /// spec (`scheduleSpec(underParent:)`). Empty for a tree made without
     /// one, which admits no header.
     public private(set) var specs: [String: ChainSpec] = [:]
-    /// Blocks whose declared spec CID is not their root's, mapped to their
-    /// root's spec CID. Only a block weighed under a `spec != parent.spec`
-    /// exclusion, or a descendant of one, lands here, so the map stays as
-    /// small as those subtrees and every other block reads its root's spec
-    /// from its own snapshot in O(1).
-    private var offRootSpecCID: [String: String] = [:]
-    var indexToBlockHash: [UInt64: Set<String>]
-    /// The block tree: records, child edges, work facts and anchors
-    /// (BlockGraph.swift).
-    var graph: BlockGraph
-    /// GHOST weights, grind locations and excluded roots (ForkChoice.swift).
-    var forkChoice: ForkChoice
-    /// The canonical projection, the executed-from-genesis frontier and the
-    /// state-transition index (ExecutionFrontier.swift).
-    var frontier: ExecutionFrontier
-    /// Parent-attributed run work (§9.10) for the served child directories
-    /// (RunAttribution.swift).
-    var runs: RunAttribution
+    private var storage: BlockGraph
     /// Restore-replay defers the derived canonical projection: batches are
     /// durable, already-admitted facts, their commits are discarded, and no
     /// replay step reads the projection — so it is computed exactly once at
     /// the end of replay instead of per event.
     var deferProjectionForReplay = false
+#if DEBUG
+    /// Blocks read by `hasStateContinuity` searches on this tree.
+    internal(set) var stateContinuityBlockVisitCount: UInt64 = 0
+#endif
     /// Advances for every successful consensus mutation.
     var mutationGeneration: UInt64
     /// Capacity held across the node's asynchronous stage boundary. These
@@ -359,20 +360,63 @@ public struct ChainTree: Sendable {
     /// against the same pre-stage revision floor.
     var reservedImportRevisions: UInt64
 
+    /// The block tree (BlockGraph.swift), to read.
+    var graph: BlockGraph { storage }
+
+    /// The block tree, to mutate: the one reference this tree holds. A copy
+    /// of a tree that is still held elsewhere must never be mutated — the
+    /// runtime owns one live tree — so in DEBUG that traps; a release build
+    /// copies the graph instead, so no other holder sees the mutation.
+    var mutableGraph: BlockGraph {
+        mutating get {
+            if !isKnownUniquelyReferenced(&storage) {
+#if DEBUG
+                preconditionFailure("a shared ChainTree was mutated")
+#else
+                storage = storage.copy()
+#endif
+            }
+            return storage
+        }
+    }
+
+    /// An independent tree with this one's contents, to mutate while this
+    /// one stays held: the explicit form of the copy that `mutableGraph`
+    /// refuses to make implicitly. O(blocks).
+    public func detached() -> ChainTree {
+        var copy = self
+        copy.storage = storage.copy()
+        return copy
+    }
+
     // Restore validates this invariant; optional access keeps query paths fail-closed.
-    var highestBlockHeight: UInt64 { graph.height(of: canonicalTip) ?? 0 }
+    var highestBlockHeight: UInt64 {
+        graph.canonicalTip == BlockGraph.none ? 0 : graph[graph.canonicalTip].height
+    }
 
     /// Every held block's public read view, keyed by hash. Test-facing and
     /// O(N) — assembled on read; production reads `graph`.
     var hashToBlock: [String: BlockMeta] {
         var result: [String: BlockMeta] = [:]
-        result.reserveCapacity(graph.records.count)
-        for record in graph.records {
-            result[record.blockHash] = getConsensusBlock(hash: record.blockHash)
+        result.reserveCapacity(graph.count)
+        for block in graph.held {
+            result[graph.hash(block)] = getConsensusBlock(block)
         }
         return result
     }
 
+    /// Every held block by height. Test-facing and O(N).
+    var indexToBlockHash: [UInt64: Set<String>] {
+        var result: [UInt64: Set<String>] = [:]
+        for block in graph.held {
+            result[graph[block].height, default: []].insert(graph.hash(block))
+        }
+        return result
+    }
+
+    /// `indexToBlockHash` is accepted for the fixtures that pass one and
+    /// otherwise ignored: the blocks are indexed from `hashToBlock`. Every
+    /// block, parent and contribution ID must be a canonical CID.
     package init(
         canonicalTip: String,
         canonicalHashes: Set<String>,
@@ -408,46 +452,78 @@ public struct ChainTree: Sendable {
             throw ChainStateRestoreError.corruptConsensusGraph
         }
         self.context = nil
-        self.graph = BlockGraph(hashToBlock)
-        self.forkChoice = ForkChoice()
-        var allByHeight = indexToBlockHash
-        for meta in hashToBlock.values {
-            allByHeight[meta.blockHeight, default: []].insert(meta.blockHash)
-        }
-        self.indexToBlockHash = allByHeight
         self.mutationGeneration = mutationGeneration
         self.reservedImportRevisions = 0
-        for meta in hashToBlock.values {
+        let graph = BlockGraph()
+        // Height order, so handles follow the tree; children link to their
+        // parent whichever arrives first.
+        let metas = hashToBlock.values.sorted {
+            ($0.blockHeight, $0.blockHash) < ($1.blockHeight, $1.blockHash)
+        }
+        for meta in metas {
+            guard let id = BlockID(meta.blockHash) else {
+                throw ChainStateRestoreError.corruptConsensusGraph
+            }
+            _ = graph.insert(
+                id, parent: meta.parentBlockHash, height: meta.blockHeight,
+                childCommitments: meta.childCommitments
+            )
+        }
+        for meta in metas {
+            let block = graph.handle(meta.blockHash)!
             let contributions = meta.workContributions.values
-            // Every block, genesis included, carries positive work.
+            // Every block, genesis included, carries positive work, and a
+            // grind has one location in a chain.
             guard !contributions.isEmpty else {
                 throw ChainStateRestoreError.corruptConsensusGraph
             }
-            guard contributions.allSatisfy({ $0.work > .zero }) else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+            for contribution in contributions {
+                guard contribution.work > .zero,
+                      let id = GrindID(contribution.id),
+                      graph.acceptsLocation(of: id, at: block) else {
+                    throw ChainStateRestoreError.corruptConsensusGraph
+                }
+                graph.setWork(
+                    id, Fixed256(contribution.work),
+                    attributed: meta.attributedRuns.contains(contribution.id), at: block
+                )
             }
         }
-        guard Self.hasUniqueWorkLocations(in: self.graph) else {
+        // The tip's own snapshot first: a block's fields are recorded once.
+        if let tipSnapshot, let tip = graph.handle(canonicalTip) {
+            graph.recordSnapshot(tipSnapshot, at: tip)
+        }
+        for (hash, snapshot) in tipSnapshotsByHash {
+            if let block = graph.handle(hash) { graph.recordSnapshot(snapshot, at: block) }
+        }
+        for hash in validatedBlocks {
+            if let block = graph.handle(hash) { graph[block].flags.insert(.validated) }
+        }
+        graph.buildWeights()
+        var canonical: [UInt32] = []
+        for hash in canonicalHashes {
+            guard let block = graph.handle(hash) else {
+                throw ChainStateRestoreError.corruptConsensusGraph
+            }
+            canonical.append(block)
+        }
+        canonical.sort { graph[$0].height < graph[$1].height }
+        guard zip(canonical, canonical.dropFirst()).allSatisfy({ graph[$0].height < graph[$1].height }) else {
             throw ChainStateRestoreError.corruptConsensusGraph
         }
-        self.forkChoice = ForkChoice.build(from: self.graph)
+        graph.canonical = canonical
+        if !canonicalTip.isEmpty {
+            guard let tip = graph.handle(canonicalTip) else {
+                throw ChainStateRestoreError.corruptConsensusGraph
+            }
+            graph.canonicalTip = tip
+        }
         // Seed the executed-from-genesis frontier. Replay hands validations to
         // `markValidated` one at a time, but a graph restored wholesale needs
-        // it computed once, downward from every genesis it holds.
-        self.frontier = try ExecutionFrontier(
-            canonicalTip: canonicalTip,
-            canonicalHashes: canonicalHashes,
-            tipSnapshot: tipSnapshot,
-            snapshots: tipSnapshotsByHash,
-            validated: validatedBlocks,
-            in: self.graph,
-            excluded: self.forkChoice.excludedRoots
-        )
-        // Runs (§9.10) are settled by `serveRuns(for:)`, one directory at a
-        // time, through the same per-block step live admission uses — one
-        // algorithm, not a rebuild twin. Connectivity IS the weight index:
-        // every connected block routes, excluded or not (§9.9).
-        self.runs = RunAttribution()
+        // it computed once, downward from every genesis it holds. Runs
+        // (§9.10) are settled by `serveRuns(for:)`, one directory at a time.
+        graph.seedAnchored()
+        self.storage = graph
     }
 
     /// A tree made without a chain: it admits no header and executes nothing.
@@ -505,23 +581,26 @@ public struct ChainTree: Sendable {
     }
 
     /// The spec CID of `blockHash`'s root: its own declared spec unless it
-    /// sits under a spec mismatch (`offRootSpecCID`).
+    /// sits under a spec mismatch (`BlockGraph.offRootSpec`).
     private func rootSpecCID(of blockHash: String) -> String? {
-        offRootSpecCID[blockHash] ?? frontier.snapshot(of: blockHash)?.specCID
+        graph.handle(blockHash).flatMap(graph.rootSpec(of:)).map(graph.specString)
     }
 
-    /// Derive `offRootSpecCID` for a grafted component: its blocks arrived
+
+    /// Derive `offRootSpec` for a grafted component: its blocks arrived
     /// before this one, with no root to read a spec from. O(component), the
     /// graft's own cost.
-    private mutating func settleRootSpecs(below rootHash: String) {
-        var pending = [rootHash]
-        while let hash = pending.popLast() {
-            guard let rootSpec = rootSpecCID(of: hash) else { continue }
-            for child in graph.children(of: hash) {
-                if frontier.snapshot(of: child)?.specCID == rootSpec {
-                    offRootSpecCID.removeValue(forKey: child)
+    private mutating func settleRootSpecs(below root: UInt32) {
+        let graph = mutableGraph
+        var pending = [root]
+        while let block = pending.popLast() {
+            guard let rootSpec = graph.rootSpec(of: block) else { continue }
+            for child in graph.children(of: block) {
+                let entry = graph[child]
+                if entry.flags.contains(.hasSnapshot), entry.spec == rootSpec {
+                    graph.offRootSpec.removeValue(forKey: child)
                 } else {
-                    offRootSpecCID[child] = rootSpec
+                    graph.offRootSpec[child] = rootSpec
                 }
                 pending.append(child)
             }
@@ -654,7 +733,6 @@ public struct ChainTree: Sendable {
     private mutating func completeReplayProjectionDeferral() {
         deferProjectionForReplay = false
         _ = projectCanonicalChain(forceFull: true)
-        frontier.refreshTipSnapshot()
     }
 
     private static func replay(
@@ -765,25 +843,28 @@ public struct ChainTree: Sendable {
     // MARK: - Queries
 
     public func contains(blockHash: String) -> Bool {
-        graph.contains(blockHash)
+        graph.handle(blockHash) != nil
     }
 
     /// The parent CID a held block names, held or not; nil for a root or an
     /// unknown block.
     public func parent(of blockHash: String) -> String? {
-        graph.parent(of: blockHash)
+        graph.handle(blockHash).flatMap(graph.parentHash(of:))
     }
 
     /// A held block's height; nil for an unknown block.
     public func height(of blockHash: String) -> UInt64? {
-        graph.height(of: blockHash)
+        graph.handle(blockHash).map { graph[$0].height }
     }
 
-    /// A held block's held children, in the order they were recorded. Empty
-    /// for an unknown block or a leaf.
+    /// A held block's held children, newest first. Empty for an unknown
+    /// block or a leaf.
     public func children(of blockHash: String) -> [String] {
-        graph.children(of: blockHash)
+        graph.handle(blockHash).map { graph.children(of: $0).map(graph.hash) } ?? []
     }
+
+    /// How many blocks the tree holds.
+    var blockCount: Int { graph.count }
 
     public func currentRevision() -> UInt64 {
         mutationGeneration
@@ -794,37 +875,33 @@ public struct ChainTree: Sendable {
     /// Height order makes this linear after the deterministic sort, rather
     /// than walking the same orphan suffix once per descendant.
     public func unresolvedSameChainPredecessors() -> [SameChainPredecessorRequirement] {
-        let ordered = graph.records.sorted {
-            if $0.blockHeight != $1.blockHeight {
-                return $0.blockHeight < $1.blockHeight
-            }
-            return $0.blockHash < $1.blockHash
-        }
-        var connected = Set<String>()
+        let graph = self.graph
+        let ordered = graph.held.sorted { graph[$0].height < graph[$1].height }
+        var connected = Set<UInt32>()
         connected.reserveCapacity(ordered.count)
         for block in ordered {
-            let key = block.blockHash
-            guard let predecessor = block.parentBlockHash else {
-                if block.blockHeight == 0 {
-                    connected.insert(key)
+            let entry = graph[block]
+            guard entry.parent != BlockGraph.none else {
+                if entry.height == 0, graph.foreignParents[block] == nil {
+                    connected.insert(block)
                 }
                 continue
             }
-            guard let parent = graph[predecessor] else { continue }
-            let (expectedHeight, overflow) = parent.blockHeight
+            guard graph.isHeld(entry.parent) else { continue }
+            let (expectedHeight, overflow) = graph[entry.parent].height
                 .addingReportingOverflow(1)
             if !overflow,
-               expectedHeight == block.blockHeight,
-               connected.contains(predecessor)
+               expectedHeight == entry.height,
+               connected.contains(entry.parent)
             {
-                connected.insert(key)
+                connected.insert(block)
             }
         }
-        return graph.records.compactMap { block in
-            guard let predecessor = block.parentBlockHash,
-                  !connected.contains(predecessor) else { return nil }
+        return graph.held.compactMap { block in
+            guard let predecessor = graph.parentHash(of: block),
+                  !connected.contains(graph[block].parent) else { return nil }
             return SameChainPredecessorRequirement(
-                descendantCID: block.blockHash,
+                descendantCID: graph.hash(block),
                 predecessorCID: predecessor
             )
         }.sorted {
@@ -838,16 +915,11 @@ public struct ChainTree: Sendable {
     package func sameChainPredecessorRequirement(
         for descendantCID: String
     ) -> SameChainPredecessorRequirement? {
-        graph[descendantCID].flatMap(sameChainPredecessorRequirement(for:))
-    }
-
-    private func sameChainPredecessorRequirement(
-        for block: BlockRecord
-    ) -> SameChainPredecessorRequirement? {
-        guard let parent = block.parentBlockHash,
+        guard let block = graph.handle(descendantCID),
+              let parent = graph.parentHash(of: block),
               !hasConnectedAncestry(blockHash: parent) else { return nil }
         return SameChainPredecessorRequirement(
-            descendantCID: block.blockHash,
+            descendantCID: descendantCID,
             predecessorCID: parent
         )
     }
@@ -856,10 +928,11 @@ public struct ChainTree: Sendable {
     /// weight are derived on demand (`getCumulativeWork(forHash:)`,
     /// `subtreeWeight(forHash:)`).
     public func getConsensusBlock(hash: String) -> BlockMeta? {
-        graph.meta(
-            of: hash,
-            difficultyAnchor: graph.anchorBlock(of: hash).flatMap(frontier.anchor(setBy:))
-        )
+        graph.handle(hash).map(getConsensusBlock)
+    }
+
+    private func getConsensusBlock(_ block: UInt32) -> BlockMeta {
+        BlockMeta(graph: graph, block: block, difficultyAnchor: difficultyAnchor(of: block))
     }
 
     public func getHighestBlockHeight() -> UInt64 {
@@ -870,41 +943,41 @@ public struct ChainTree: Sendable {
     /// Test-only view of the excluded roots so a differential test can drive
     /// the reference oracle with the same unselectable set.
     var excludedRootsForTesting: Set<String> {
-        forkChoice.excludedRoots
+        Set(graph.held.filter(graph.isExcludedRoot).map(graph.hash))
+    }
+
+    /// Test-only view of the executed-from-genesis blocks.
+    var anchoredForTesting: Set<String> {
+        Set(graph.held.filter(graph.isAnchored).map(graph.hash))
     }
 #endif
 
-    /// The difficulty anchor for a block, filling any gap and caching the
-    /// result along the way.
+    /// The difficulty anchor for a block: a read, never a write.
     ///
-    /// Admission normally inherits the anchor from the parent, which is O(1).
-    /// A block can arrive before its parent though, and it has no anchor to
-    /// inherit at that moment — so rather than leave a hole its descendants
-    /// would inherit, this walks up to the nearest ancestor that does have one
-    /// and writes it back down the path it walked. Height 1 always has an
-    /// anchor from its own admission, so the walk always terminates.
+    /// Admission sets every anchor eagerly: height 1 is its own anchor, a
+    /// block under an anchored parent inherits it, and a block that connects
+    /// waiting blocks hands its anchor down to them — its children and any
+    /// block naming it at the wrong height (`propagateAnchor`). So the block's
+    /// own entry answers; the walk below is the definition the cached value
+    /// equals, read up through held parents to height 1, writing nothing.
     ///
-    /// The result is a pure function of the block's ancestry either way; the
-    /// cache only decides how much of that ancestry has to be re-read. What is
-    /// cached is the height-1 block the anchor is read from, never a copy.
-    public mutating func difficultyAnchor(forBlockHash hash: String) -> DifficultyAnchor? {
-        var unresolved: [String] = []
-        var current: String? = hash
-        var resolved: String?
-        while let step = current, let meta = graph[step] {
-            if let anchorBlock = graph.anchorBlock(of: step) {
-                resolved = anchorBlock
-                break
+    /// What is held is the height-1 block the anchor is read from, never a
+    /// copy.
+    public func difficultyAnchor(forBlockHash hash: String) -> DifficultyAnchor? {
+        graph.handle(hash).flatMap(difficultyAnchor(of:))
+    }
+
+    private func difficultyAnchor(of block: UInt32) -> DifficultyAnchor? {
+        var current = block
+        while true {
+            let entry = graph[current]
+            if entry.anchor != BlockGraph.none {
+                return graph.anchor(setBy: entry.anchor)
             }
-            unresolved.append(step)
-            guard meta.blockHeight > 1 else { break }
-            current = meta.parentBlockHash
+            guard entry.height > 1, entry.parent != BlockGraph.none,
+                  graph.isHeld(entry.parent) else { return nil }
+            current = entry.parent
         }
-        guard let anchorBlock = resolved else { return nil }
-        for step in unresolved {
-            graph.adoptAnchorBlock(anchorBlock, at: step)
-        }
-        return frontier.anchor(setBy: anchorBlock)
     }
 
     // MARK: - Block Submission
@@ -924,32 +997,37 @@ public struct ChainTree: Sendable {
         input: ConsensusBlockInput,
         contribution: VerifiedWorkContribution
     ) -> SubmissionResult {
-        let blockHash = input.blockHash
         let isRoot = input.parentBlockHash == nil
-        let oldTip = canonicalTip
+        let oldTip = graph.canonicalTip
 
         if contribution.work == .zero || (isRoot && input.blockHeight != 0) {
             return .discarded()
         }
-
-        guard forkChoice.acceptsLocation(of: contribution.id, at: blockHash) else {
+        // Both are computed from content this node holds, so both are
+        // canonical CIDs: any other shape is refused here.
+        guard let id = BlockID(input.blockHash), let grindID = GrindID(contribution.id) else {
             return .discarded()
         }
-
-        if graph.contains(blockHash) {
-            return addWorkContribution(contribution, to: blockHash)
+        let held = graph.handle(input.blockHash)
+        // A grind has one location: a new block takes only a new grind.
+        if let grind = graph.grindIDs.firstIndex(of: grindID),
+           graph.grinds[grind].block != held {
+            return .discarded()
+        }
+        if let held {
+            return addWorkContribution(contribution, to: held)
         }
 
         guard hasUnreservedMutationCapacity else { return .discarded() }
-        let graftsExistingComponent = connectsExistingSubtree(input)
+        let graftsExistingComponent = connectsExistingSubtree(input, id: id)
 
-        let result = insertBlock(
+        guard let (block, result) = insertBlock(
             input: input,
+            id: id,
             contributions: [contribution],
             addedContribution: true,
             graftsExistingComponent: graftsExistingComponent
-        )
-        if !result.addedBlock { return result }
+        ) else { return .discarded() }
         mutationGeneration += 1
 
         let canonicalChange: ChainCommit?
@@ -961,10 +1039,11 @@ public struct ChainTree: Sendable {
             // work: a positive increase confined to one point of the graph.
             // The canonical tip append is not a special case any more — it is
             // the cheapest instance of this one, a descent of a single step.
-            canonicalChange = projectCanonicalChain(monotoneIncreaseAt: blockHash)
+            canonicalChange = projectCanonicalChain(increasedAt: block)
         }
-        let extendsCanonical = input.parentBlockHash == oldTip
-            && isCanonical(hash: blockHash)
+        let extendsCanonical = oldTip != BlockGraph.none
+            && graph[block].parent == oldTip
+            && graph.isCanonical(block)
         return SubmissionResult(
             addedBlock: true,
             addedContribution: result.addedContribution,
@@ -979,63 +1058,26 @@ public struct ChainTree: Sendable {
 
     private mutating func insertBlock(
         input: ConsensusBlockInput,
+        id: BlockID,
         contributions: [VerifiedWorkContribution],
         addedContribution: Bool,
         graftsExistingComponent: Bool
-    ) -> SubmissionResult {
-        let blockHash = input.blockHash
+    ) -> (UInt32, SubmissionResult)? {
         // Every block, genesis included, carries positive work.
         guard !contributions.isEmpty,
               Set(contributions.map(\.id)).count == contributions.count,
               contributions.allSatisfy({ $0.work > .zero }),
               !(input.parentBlockHash == nil && input.blockHeight != 0)
         else {
-            return .discarded()
+            return nil
         }
-        addToBlockIndex(hash: blockHash, blockHeight: input.blockHeight)
-
-        let childHashes = findChildren(hash: blockHash, blockHeight: input.blockHeight)
-        // Height 1 is its own anchor; everything above inherits its parent's.
-        // Following the PARENT rather than the canonical chain is what makes
-        // this reorg-safe: a block admitted onto a competing branch takes that
-        // branch's anchor, so two branches forking at height 1 never borrow each
-        // other's schedule. A block whose parent is not yet known carries none
-        // and acquires one when it connects.
-        // The anchor is held as the height-1 block it is read from.
-        let anchorBlock: String?
-        if input.blockHeight == 1 {
-            anchorBlock = blockHash
-        } else if let parentHash = input.parentBlockHash {
-            anchorBlock = graph.anchorBlock(of: parentHash)
-        } else {
-            anchorBlock = nil
-        }
-        graph.insert(
-            BlockRecord(
-                blockHash: blockHash,
-                parentBlockHash: input.parentBlockHash,
-                blockHeight: input.blockHeight,
-                childCommitments: input.childCommitments
-            ),
-            children: childHashes,
-            anchorBlock: anchorBlock
-        )
-        indexStateTransition(input.snapshot, blockHash: blockHash)
-        if let prevHash = input.parentBlockHash {
-            graph.appendChild(blockHash, to: prevHash)
-            // A block declaring a spec other than its root's (a `spec !=
-            // parent.spec` exclusion, or below one) keeps its root's spec for
-            // the schedule of its own children. Header admission always holds
-            // the parent, so every header-admitted block is settled here.
-            if let rootSpec = rootSpecCID(of: prevHash),
-               rootSpec != input.snapshot.specCID {
-                offRootSpecCID[blockHash] = rootSpec
-            }
-        }
+        // A local reference to the graph is a second holder, so it is scoped
+        // to the steps that call nothing that mutates the tree.
+        let block = Self.record(input, id: id, in: mutableGraph)
         for contribution in contributions {
             // A block arrives with its grinds; attributed runs are derived
             // later (`applyParentRun`).
-            applyLocalContribution(contribution, to: blockHash, attributed: false)
+            applyLocalContribution(contribution, to: block, attributed: false)
         }
         // Every connected block routes, a descendant of an excluded root
         // included: work weighs unconditionally, and validity is applied by the
@@ -1045,13 +1087,13 @@ public struct ChainTree: Sendable {
             // this private reducer. Never continue with a partial consensus
             // index if an internal invariant is broken.
             precondition(
-                graftConnectedComponent(rootedAt: blockHash),
+                mutableGraph.graftComponent(rootedAt: block),
                 "validated orphan component could not be routed"
             )
-            settleRootSpecs(below: blockHash)
-        } else if childHashes.isEmpty {
+            settleRootSpecs(below: block)
+        } else if graph.children(of: block).isEmpty {
             precondition(
-                routeBlock(for: blockHash),
+                routeBlock(block),
                 "validated leaf could not be routed"
             )
         }
@@ -1059,44 +1101,57 @@ public struct ChainTree: Sendable {
         // grafted orphan component — is connected, and so is every descendant
         // it grafted in. Unfiltered: an excluded descendant routes and is
         // credited like any other. An orphan is not routed and is settled the
-        // moment its component grafts.
-        // Nothing to settle while no directory is served: skip the walk, which
-        // on a graft would otherwise be a third pass over the component.
-        if !runs.served.isEmpty, forkChoice.isRouted(blockHash) {
-            connectForRunAttribution(rootedAt: blockHash)
+        // moment its component grafts. Nothing to settle while no directory
+        // is served.
+        let routed = graph.isRouted(block)
+        if !graph.served.isEmpty, routed {
+            connectForRunAttribution(rootedAt: block)
         }
 
-        for contribution in contributions {
-            forkChoice.applyContribution(contribution, at: blockHash)
-        }
-
-        return SubmissionResult(
+        return (block, SubmissionResult(
             addedBlock: true,
             addedContribution: addedContribution,
             extendsCanonical: false,
-            weighed: forkChoice.isRouted(blockHash) ? graph.subtree(of: blockHash) : [blockHash]
-        )
+            weighed: routed ? graph.subtree(of: block).map(graph.hash) : [input.blockHash]
+        ))
     }
 
-    private static func hasUniqueWorkLocations(
-        in blocks: BlockGraph
-    ) -> Bool {
-        var locationByGrind: [String: String] = [:]
-        func observe(_ grindID: String, at blockHash: String) -> Bool {
-            guard locationByGrind[grindID].map({ $0 == blockHash }) ?? true else {
-                return false
-            }
-            locationByGrind[grindID] = blockHash
-            return true
+    /// Hold a new block's record, anchor, snapshot and root spec.
+    private static func record(
+        _ input: ConsensusBlockInput,
+        id: BlockID,
+        in graph: BlockGraph
+    ) -> UInt32 {
+        let block = graph.insert(
+            id,
+            parent: input.parentBlockHash,
+            height: input.blockHeight,
+            childCommitments: input.childCommitments
+        )
+        // Height 1 is its own anchor; everything above inherits its parent's.
+        // Following the PARENT rather than the canonical chain is what makes
+        // this reorg-safe: a block admitted onto a competing branch takes that
+        // branch's anchor, so two branches forking at height 1 never borrow each
+        // other's schedule. A block whose parent is not yet known carries none
+        // and acquires one when it connects. The anchor is held as the
+        // height-1 block it is read from.
+        let parent = graph[block].parent
+        if input.blockHeight == 1 {
+            graph[block].anchor = block
+        } else if parent != BlockGraph.none {
+            graph[block].anchor = graph[parent].anchor
         }
-        for block in blocks.records {
-            let blockHash = block.blockHash
-            for grindID in (blocks.work(of: blockHash)?.workByID ?? [:]).keys
-            where !observe(grindID, at: blockHash) {
-                return false
-            }
+        graph.propagateAnchor(from: block)
+        graph.recordSnapshot(input.snapshot, at: block)
+        // A block declaring a spec other than its root's (a `spec !=
+        // parent.spec` exclusion, or below one) keeps its root's spec for the
+        // schedule of its own children. Header admission always holds the
+        // parent, so every header-admitted block is settled here.
+        if parent != BlockGraph.none, graph.isHeld(parent),
+           let rootSpec = graph.rootSpec(of: parent), rootSpec != graph[block].spec {
+            graph.offRootSpec[block] = rootSpec
         }
-        return true
+        return block
     }
 
     // MARK: - Additional proof facts
@@ -1106,30 +1161,40 @@ public struct ChainTree: Sendable {
         to blockHash: String,
         attributed: Bool = false
     ) -> SubmissionResult {
-        guard graph.contains(blockHash),
-              forkChoice.acceptsLocation(of: contribution.id, at: blockHash) else {
+        guard let block = graph.handle(blockHash) else { return .discarded() }
+        return addWorkContribution(contribution, to: block, attributed: attributed)
+    }
+
+    mutating func addWorkContribution(
+        _ contribution: VerifiedWorkContribution,
+        to block: UInt32,
+        attributed: Bool = false
+    ) -> SubmissionResult {
+        // A contribution ID is computed from content this node holds, so it
+        // is a canonical CID: any other shape is refused here.
+        guard let id = GrindID(contribution.id),
+              graph.acceptsLocation(of: id, at: block) else {
             return .discarded()
         }
-        let existing = workContribution(id: contribution.id, at: blockHash)
-        if let existing, existing.work >= contribution.work {
+        let existing = graph.grindIDs.firstIndex(of: id).map { graph.grinds[$0].work.uint256 }
+        if let existing, existing >= contribution.work {
             return .discarded()
         }
         guard hasUnreservedMutationCapacity else { return .discarded() }
-        applyLocalContribution(contribution, to: blockHash, attributed: attributed)
+        // A stronger observation on an excluded block weighs like any other: it
+        // raises every ancestor, and the descent still never steps into the
+        // excluded root, so no invalid block is resurrected by piling on work.
+        applyLocalContribution(contribution, to: block, attributed: attributed)
         // A strengthening raises this block's own work, so its run (§9.10)
         // rises by exactly that delta — once the block is connected. An
         // orphan's work is credited in full at the moment it connects. The
         // delta is this one contribution's rise, strictly positive by the
         // guard above: O(1), never a re-sum of the block's contributions.
-        if forkChoice.isRouted(blockHash) {
+        if graph.isRouted(block), !graph.served.isEmpty {
             let delta = WorkSum(contribution.work)
-                .subtracting(WorkSum(existing?.work ?? .zero))!
-            runs.credit(delta, at: blockHash)
+                .subtracting(WorkSum(existing ?? .zero))!
+            mutableGraph.credit(delta, at: block)
         }
-        // A stronger observation on an excluded block weighs like any other: it
-        // raises every ancestor, and the descent still never steps into the
-        // excluded root, so no invalid block is resurrected by piling on work.
-        forkChoice.applyContribution(contribution, at: blockHash)
         mutationGeneration += 1
 
         // A contribution only reaches here when it is strictly stronger than what
@@ -1137,17 +1202,14 @@ public struct ChainTree: Sendable {
         // exactly one point.
         let canonicalChange = deferProjectionForReplay
             ? nil
-            : projectCanonicalChain(monotoneIncreaseAt: blockHash)
-        if canonicalChange != nil {
-            frontier.refreshTipSnapshot()
-        }
+            : projectCanonicalChain(increasedAt: block)
         return SubmissionResult(
             addedBlock: false,
             addedContribution: true,
             extendsCanonical: false,
             commit: (canonicalChange ?? ChainCommit(tipHash: canonicalTip))
                 .atRevision(mutationGeneration),
-            weighed: [blockHash]
+            weighed: [graph.hash(block)]
         )
     }
 
@@ -1172,14 +1234,14 @@ public struct ChainTree: Sendable {
         for fact in batch.facts {
             guard case .validation(let validation) = fact,
                   let hash = CIDIdentity.canonicalString(validation.blockHash),
-                  forkChoice.excludedRoots.contains(hash) else { continue }
+                  let block = graph.handle(hash), graph.isExcludedRoot(block) else { continue }
             throw ChainStateRestoreError.executedVerdictContradiction
         }
         if let validated = Self.validationTarget(of: batch) {
             // A validation for a block this chain does not hold is deferred by
             // the caller's replay loop exactly as a work fact would be, not an
             // error: possession and execution arrive independently.
-            guard graph.contains(validated) else {
+            guard graph.handle(validated) != nil else {
                 throw ChainStateRestoreError.missingBlockFact
             }
             markValidated(blockHash: validated)
@@ -1206,9 +1268,9 @@ public struct ChainTree: Sendable {
                !context.admitsGenesis(input.blockHash) {
                 throw ChainStateRestoreError.unpinnedRootGenesis
             }
-            if let existing = graph[input.blockHash] {
+            if let existing = graph.handle(input.blockHash) {
                 guard matchesGraph(existing, input: input),
-                      frontier.snapshot(of: input.blockHash).map({
+                      graph.snapshot(of: existing).map({
                           $0 == input.snapshot
                       }) ?? true else {
                     throw ChainStateRestoreError.corruptConsensusGraph
@@ -1226,7 +1288,7 @@ public struct ChainTree: Sendable {
                     throw ChainStateRestoreError.corruptConsensusGraph
                 }
                 hydrateMetadata(from: input)
-                let submission = addWorkContribution(contribution, to: input.blockHash)
+                let submission = addWorkContribution(contribution, to: existing)
                 guard submission.addedContribution else {
                     throw ChainStateRestoreError.corruptConsensusGraph
                 }
@@ -1243,7 +1305,7 @@ public struct ChainTree: Sendable {
 
         let blockHash = trusted.workBlockHash
         let contribution = trusted.contribution
-        guard graph.contains(blockHash) else {
+        guard graph.handle(blockHash) != nil else {
             throw ChainStateRestoreError.missingBlockFact
         }
         if let existing = workContribution(
@@ -1279,16 +1341,16 @@ public struct ChainTree: Sendable {
     /// a not-yet-connected exclusion defers exactly like a work fact whose block
     /// has not arrived, so replay retries it once the subtree exists.
     private mutating func applyExclusion(blockHash: String) throws -> SubmissionResult? {
-        guard graph.contains(blockHash) else {
+        guard let block = graph.handle(blockHash) else {
             throw ChainStateRestoreError.missingBlockFact
         }
         // Idempotent: a duplicate exclusion adds nothing and cannot reorg.
-        if forkChoice.excludedRoots.contains(blockHash) { return nil }
+        if graph.isExcludedRoot(block) { return nil }
         // Execution is never revoked: an executed block is never excluded.
         // `applyConnect` refuses such a verdict before any fact is written;
         // this reducer is the fail-closed twin, and replay orders validations
         // first, so the contradiction is found whatever the enumeration order.
-        guard !frontier.validated.contains(blockHash) else {
+        guard !graph.isValidated(block) else {
             throw ChainStateRestoreError.executedVerdictContradiction
         }
         guard hasUnreservedMutationCapacity else {
@@ -1302,7 +1364,7 @@ public struct ChainTree: Sendable {
         // replayed yet, so the exclusion defers like any fact whose
         // prerequisites are missing — order-independent — and only a live
         // exclusion with nothing to stand on is a corrupt graph.
-        if graph.parent(of: blockHash) == nil,
+        if graph.parentHash(of: block) == nil,
            !hasExecutedRoot(besides: blockHash) {
             throw deferProjectionForReplay
                 ? ChainStateRestoreError.missingBlockFact
@@ -1310,7 +1372,7 @@ public struct ChainTree: Sendable {
         }
         // The block is not executed (above), so nothing at or below it is
         // anchored: the executed set is untouched.
-        forkChoice.exclude(blockHash)
+        mutableGraph[block].flags.insert(.excludedRoot)
         // No weight moves — work weighs regardless of validity — so nothing is
         // rebuilt. Selection moves only if the excluded block was on the
         // canonical path; otherwise the descent never reached it and every
@@ -1320,9 +1382,6 @@ public struct ChainTree: Sendable {
         let canonicalChange = (deferProjectionForReplay || !wasCanonical)
             ? nil
             : projectCanonicalChain(forceFull: true)
-        if canonicalChange != nil {
-            frontier.refreshTipSnapshot()
-        }
         return SubmissionResult(
             addedBlock: false,
             addedContribution: false,
@@ -1379,44 +1438,30 @@ public struct ChainTree: Sendable {
     /// anyway, so the comparison costs nothing, whereas comparing
     /// commitments would mean keeping them resident for every block only to
     /// re-check what the CID already binds.
-    private func matchesGraph(_ meta: BlockRecord, input: ConsensusBlockInput) -> Bool {
-        meta.blockHash == input.blockHash
-            && meta.parentBlockHash == input.parentBlockHash
-            && meta.blockHeight == input.blockHeight
+    private func matchesGraph(_ block: UInt32, input: ConsensusBlockInput) -> Bool {
+        graph.parentHash(of: block) == input.parentBlockHash
+            && graph[block].height == input.blockHeight
     }
 
+    /// Record the header fields of a block held without them.
     private mutating func hydrateMetadata(from input: ConsensusBlockInput) {
-        indexStateTransition(input.snapshot, blockHash: input.blockHash)
-        // The index above just recorded `input.snapshot` for this block.
-        if canonicalTip == input.blockHash {
-            frontier.refreshTipSnapshot()
-        }
+        guard let block = graph.handle(input.blockHash),
+              !graph[block].flags.contains(.hasSnapshot) else { return }
+        mutableGraph.recordSnapshot(input.snapshot, at: block)
     }
 
     // MARK: - Index Management
 
     private func connectsExistingSubtree(
-        _ input: ConsensusBlockInput
+        _ input: ConsensusBlockInput,
+        id: BlockID
     ) -> Bool {
-        guard !findChildren(
-            hash: input.blockHash,
-            blockHeight: input.blockHeight
-        ).isEmpty else { return false }
+        guard !graph.pendingChildren(of: id, height: input.blockHeight).isEmpty else {
+            return false
+        }
         guard let parentHash = input.parentBlockHash else {
             return input.blockHeight == 0
         }
-        return forkChoice.isRouted(parentHash)
+        return graph.handle(parentHash).map(graph.isRouted) ?? false
     }
-
-    mutating func addToBlockIndex(hash: String, blockHeight: UInt64) {
-        indexToBlockHash[blockHeight, default: []].insert(hash)
-    }
-
-    func findChildren(hash: String, blockHeight: UInt64) -> [String] {
-        let (childHeight, overflow) = blockHeight.addingReportingOverflow(1)
-        guard !overflow, let hashes = indexToBlockHash[childHeight] else { return [] }
-        return hashes.filter { graph.parent(of: $0) == hash }
-    }
-
 }
-

@@ -206,8 +206,7 @@ struct LiveSubject: OracleSubject {
             for to in probe.states {
                 let key = "state \(from)→\(to)"
                 seen["\(key) advanced"] = "\(tree.executedSetAdvanced(from: from, to: to))"
-                seen["\(key) path"] = tree.stateContinuityPath(from: from, to: to)
-                    .map { $0.joined(separator: ",") } ?? "nil"
+                seen["\(key) continuity"] = "\(tree.hasStateContinuity(from: from, to: to))"
             }
         }
         return seen

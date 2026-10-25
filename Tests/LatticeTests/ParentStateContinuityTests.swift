@@ -86,24 +86,18 @@ final class ParentStateContinuityTests: XCTestCase {
         XCTAssertTrue(rightBranch)
         XCTAssertFalse(backward)
         XCTAssertFalse(sideways)
-        let transitivePath = await chain.stateContinuityPath(from: a, to: c)
-        let reflexivePath = await chain.stateContinuityPath(from: b, to: b)
-        let sidewaysPath = await chain.stateContinuityPath(from: c, to: d)
-        XCTAssertEqual(transitivePath, [root, left])
-        XCTAssertEqual(reflexivePath, [])
-        XCTAssertNil(sidewaysPath)
-        let repeatedLeft = await chain.stateContinuityPath(from: c, to: e)
-        let repeatedRight = await chain.stateContinuityPath(from: d, to: e)
+        let repeatedLeft = await chain.hasStateContinuity(from: c, to: e)
+        let repeatedRight = await chain.hasStateContinuity(from: d, to: e)
         let disconnected = await chain.hasStateContinuity(from: d, to: z)
-        XCTAssertEqual(repeatedLeft, [leftTip])
-        XCTAssertEqual(repeatedRight, [rightTip])
+        XCTAssertTrue(repeatedLeft)
+        XCTAssertTrue(repeatedRight)
         XCTAssertFalse(disconnected)
         // Continuity carries no visit budget: the answer is a property of the
         // graph, not of how hard a node is willing to look. A budget would make
         // the same question answerable on one node and unanswerable on another
         // from identical data, splitting honest nodes by local policy.
-        let unbudgetedPath = await chain.stateContinuityPath(from: a, to: c)
-        XCTAssertEqual(unbudgetedPath, [root, left])
+        let unbudgeted = await chain.hasStateContinuity(from: a, to: c)
+        XCTAssertTrue(unbudgeted)
 #if DEBUG
         let visits = await chain.stateContinuityBlockVisitCount
         let absent = await chain.hasStateContinuity(

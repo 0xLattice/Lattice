@@ -77,13 +77,6 @@ public actor ChainState {
     // MARK: - Stored state (forwarded)
 
     var indexToBlockHash: [UInt64: Set<String>] { tree.indexToBlockHash }
-    var graph: BlockGraph {
-        get { tree.graph }
-        set { tree.graph = newValue }
-    }
-    var forkChoice: ForkChoice { tree.forkChoice }
-    var frontier: ExecutionFrontier { tree.frontier }
-    var runs: RunAttribution { tree.runs }
     var mutationGeneration: UInt64 {
         get { tree.mutationGeneration }
         set { tree.mutationGeneration = newValue }
@@ -237,19 +230,20 @@ public actor ChainState {
         tree.hasStateContinuity(from: fromStateCID, to: toStateCID)
     }
 
-    public func stateContinuityPath(
-        from fromStateCID: String,
-        to toStateCID: String
-    ) -> [String]? {
-        tree.stateContinuityPath(from: fromStateCID, to: toStateCID)
-    }
-
     package func hasExecutedRoot(besides blockHash: String) -> Bool {
         tree.hasExecutedRoot(besides: blockHash)
     }
 
-    func findChildren(hash: String, blockHeight: UInt64) -> [String] {
-        tree.findChildren(hash: hash, blockHeight: blockHeight)
+    func runWork(of committer: String, directory: String) -> WorkSum? {
+        tree.runWork(of: committer, directory: directory)
+    }
+
+    func grindWork(of blockHash: String) -> WorkSum? {
+        tree.grindWork(of: blockHash)
+    }
+
+    func forkChoiceWeight(ofHeld hash: String) -> WorkSum? {
+        tree.forkChoiceWeight(of: hash)
     }
 
     public func nearestCarrier(of blockHash: String, directory: String) -> String? {
@@ -330,10 +324,6 @@ public actor ChainState {
         monotoneIncreaseAt mutatedAt: String? = nil
     ) -> ChainCommit? {
         tree.projectCanonicalChain(forceFull: forceFull, monotoneIncreaseAt: mutatedAt)
-    }
-
-    func addToBlockIndex(hash: String, blockHeight: UInt64) {
-        tree.addToBlockIndex(hash: hash, blockHeight: blockHeight)
     }
 
     @discardableResult

@@ -180,18 +180,18 @@ final class ForkChoicePropertyTests: XCTestCase {
     func testReorgTipOnMainChain() async {
         for mainLen in [2, 5, 10] {
             for forkLen in [(mainLen + 1), (mainLen + 3)] {
-                var blocks: [BlockMeta] = [makeBlockMeta(hash: "G", height: 0, childHashes: ["M1", "F1"])]
+                var blocks: [BlockMeta] = [makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("M1"), blockCID("F1")])]
 
                 for i in 1...mainLen {
-                    let children = i < mainLen ? ["M\(i+1)"] : [String]()
-                    blocks.append(makeBlockMeta(hash: "M\(i)", previousHash: i == 1 ? "G" : "M\(i-1)", height: UInt64(i), childHashes: children))
+                    let children = i < mainLen ? [blockCID("M\(i+1)")] : [String]()
+                    blocks.append(makeBlockMeta(hash: blockCID("M\(i)"), previousHash: i == 1 ? blockCID("G") : blockCID("M\(i-1)"), height: UInt64(i), childHashes: children))
                 }
                 for i in 1...forkLen {
-                    let children = i < forkLen ? ["F\(i+1)"] : [String]()
-                    blocks.append(makeBlockMeta(hash: "F\(i)", previousHash: i == 1 ? "G" : "F\(i-1)", height: UInt64(i), childHashes: children))
+                    let children = i < forkLen ? [blockCID("F\(i+1)")] : [String]()
+                    blocks.append(makeBlockMeta(hash: blockCID("F\(i)"), previousHash: i == 1 ? blockCID("G") : blockCID("F\(i-1)"), height: UInt64(i), childHashes: children))
                 }
 
-                let chain = makeChain(blocks: blocks, canonicalHashes: Set(["G"] + (1...mainLen).map { "M\($0)" }))
+                let chain = makeChain(blocks: blocks, canonicalHashes: Set([blockCID("G")] + (1...mainLen).map { blockCID("M\($0)") }))
                 let _ = await chain.reevaluateForkChoice()
 
                 let tip = await chain.canonicalTip
@@ -203,28 +203,28 @@ final class ForkChoicePropertyTests: XCTestCase {
 
     // Property: After reorg, genesis is always on main chain
     func testGenesisAlwaysOnMainChainAfterReorg() async {
-        let g = makeBlockMeta(hash: "G", height: 0, childHashes: ["A1", "B1"])
-        let a1 = makeBlockMeta(hash: "A1", previousHash: "G", height: 1)
-        let b1 = makeBlockMeta(hash: "B1", previousHash: "G", height: 1, childHashes: ["B2"])
-        let b2 = makeBlockMeta(hash: "B2", previousHash: "B1", height: 2)
+        let g = makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("A1"), blockCID("B1")])
+        let a1 = makeBlockMeta(hash: blockCID("A1"), previousHash: blockCID("G"), height: 1)
+        let b1 = makeBlockMeta(hash: blockCID("B1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("B2")])
+        let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2)
 
-        let chain = makeChain(blocks: [g, a1, b1, b2], canonicalHashes: Set(["G", "A1"]))
+        let chain = makeChain(blocks: [g, a1, b1, b2], canonicalHashes: Set([blockCID("G"), blockCID("A1")]))
         let _ = await chain.reevaluateForkChoice()
 
-        let gOnMain = await chain.isCanonical(hash: "G")
+        let gOnMain = await chain.isCanonical(hash: blockCID("G"))
         XCTAssertTrue(gOnMain, "Genesis must always remain on main chain")
     }
 
     // Property: Reorg canonicalBlocksAdded and canonicalBlocksRemoved don't overlap
     func testReorgAddedAndRemovedDisjoint() async {
-        let g = makeBlockMeta(hash: "G", height: 0, childHashes: ["A1", "B1"])
-        let a1 = makeBlockMeta(hash: "A1", previousHash: "G", height: 1, childHashes: ["A2"])
-        let a2 = makeBlockMeta(hash: "A2", previousHash: "A1", height: 2)
-        let b1 = makeBlockMeta(hash: "B1", previousHash: "G", height: 1, childHashes: ["B2"])
-        let b2 = makeBlockMeta(hash: "B2", previousHash: "B1", height: 2, childHashes: ["B3"])
-        let b3 = makeBlockMeta(hash: "B3", previousHash: "B2", height: 3)
+        let g = makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("A1"), blockCID("B1")])
+        let a1 = makeBlockMeta(hash: blockCID("A1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("A2")])
+        let a2 = makeBlockMeta(hash: blockCID("A2"), previousHash: blockCID("A1"), height: 2)
+        let b1 = makeBlockMeta(hash: blockCID("B1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("B2")])
+        let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2, childHashes: [blockCID("B3")])
+        let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
-        let chain = makeChain(blocks: [g, a1, a2, b1, b2, b3], canonicalHashes: Set(["G", "A1", "A2"]))
+        let chain = makeChain(blocks: [g, a1, a2, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")]))
         let reorg = await chain.reevaluateForkChoice()
 
         XCTAssertNotNil(reorg)
@@ -238,28 +238,28 @@ final class ForkChoicePropertyTests: XCTestCase {
 
     // Property: chainWithMostWork always includes the starting block
     func testChainWithMostWorkIncludesStart() async {
-        let g = makeBlockMeta(hash: "G", height: 0, childHashes: ["A1"])
-        let a1 = makeBlockMeta(hash: "A1", previousHash: "G", height: 1, childHashes: ["A2"])
-        let a2 = makeBlockMeta(hash: "A2", previousHash: "A1", height: 2)
+        let g = makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("A1")])
+        let a1 = makeBlockMeta(hash: blockCID("A1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("A2")])
+        let a2 = makeBlockMeta(hash: blockCID("A2"), previousHash: blockCID("A1"), height: 2)
 
         let chain = makeChain(blocks: [g, a1, a2])
         let work = await chain.chainWithMostWork(startingBlock: g)
-        XCTAssertTrue(work.blocks.contains("G"))
+        XCTAssertTrue(work.blocks.contains(blockCID("G")))
     }
 
     // Property: chainWithMostWork block set is connected (each block's parent is in the set or is before the start)
     func testChainWithMostWorkConnectedness() async {
-        let g = makeBlockMeta(hash: "G", height: 0, childHashes: ["A1", "B1"])
-        let a1 = makeBlockMeta(hash: "A1", previousHash: "G", height: 1, childHashes: ["A2"])
-        let a2 = makeBlockMeta(hash: "A2", previousHash: "A1", height: 2)
-        let b1 = makeBlockMeta(hash: "B1", previousHash: "G", height: 1, childHashes: ["B2"])
-        let b2 = makeBlockMeta(hash: "B2", previousHash: "B1", height: 2, childHashes: ["B3"])
-        let b3 = makeBlockMeta(hash: "B3", previousHash: "B2", height: 3)
+        let g = makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("A1"), blockCID("B1")])
+        let a1 = makeBlockMeta(hash: blockCID("A1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("A2")])
+        let a2 = makeBlockMeta(hash: blockCID("A2"), previousHash: blockCID("A1"), height: 2)
+        let b1 = makeBlockMeta(hash: blockCID("B1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("B2")])
+        let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2, childHashes: [blockCID("B3")])
+        let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
         let chain = makeChain(blocks: [g, a1, a2, b1, b2, b3])
         let work = await chain.chainWithMostWork(startingBlock: g)
 
-        for hash in work.blocks where hash != "G" {
+        for hash in work.blocks where hash != blockCID("G") {
             let block = await chain.getConsensusBlock(hash: hash)
             XCTAssertNotNil(block)
             if let prevHash = block?.parentBlockHash {

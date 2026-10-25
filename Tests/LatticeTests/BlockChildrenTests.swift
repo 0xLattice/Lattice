@@ -207,12 +207,13 @@ final class BlockChildrenTests: XCTestCase {
         let base = try await AdmissionFixture.makeChild(of: genesis, fetcher: fetcher, timestamp: 2_000, nonce: 1)
         let someChild = try BlockHeader(node: genesis)
 
-        var control = tree
+        // Each insertion runs on its own tree: `tree` stays held for the next.
+        var control = tree.detached()
         let (valid, validMap) = try carrying(["K": someChild], base)
         XCTAssertNotNil(control.insertRootHeader(valid, childIndex: validMap).update, "a valid directory weighs")
 
         for name in Self.invalidDirectories {
-            var header = tree
+            var header = tree.detached()
             let (block, map) = try carrying([name: someChild], base)
             XCTAssertEqual(header.insertRootHeader(block, childIndex: map).failure, .protocolInvalid, name.prefix(16).description)
 

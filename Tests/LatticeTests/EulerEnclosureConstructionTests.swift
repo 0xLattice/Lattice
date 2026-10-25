@@ -38,14 +38,14 @@ final class EulerEnclosureConstructionTests: XCTestCase {
         }
 
         /// A tour of the forest, children in a random order, roots too.
-        func tour(_ rng: inout AnchorRandom) -> [EulerWorkIndex.Event] {
+        func tour(_ rng: inout AnchorRandom) -> [NamedEulerIndex.Event] {
             var children: [String: [String]] = [:]
             var roots: [String] = []
             for node in nodes {
                 if let p = parent[node] { children[p, default: []].append(node) } else { roots.append(node) }
             }
             rng.shuffle(&roots)
-            var events: [EulerWorkIndex.Event] = []
+            var events: [NamedEulerIndex.Event] = []
             for root in roots {
                 var stack: [(String, [String], Int)] = []
                 var kids = children[root] ?? []
@@ -71,7 +71,7 @@ final class EulerEnclosureConstructionTests: XCTestCase {
     /// node's root path — all the TRUE answers — plus random pairs.
     @discardableResult
     private func assertEncloses(
-        _ index: EulerWorkIndex, _ forest: Forest, _ rng: inout AnchorRandom,
+        _ index: NamedEulerIndex, _ forest: Forest, _ rng: inout AnchorRandom,
         randomPairs: Int = 100_000, _ what: String
     ) -> Int {
         XCTAssertTrue(index.debugInvariantsHold, "\(what): AVL invariants")
@@ -105,7 +105,7 @@ final class EulerEnclosureConstructionTests: XCTestCase {
         var total = 0
         for seed in 1...UInt64(6) {
             var rng = AnchorRandom(seed: seed)
-            var index = EulerWorkIndex.empty
+            var index = NamedEulerIndex.empty
             var forest = Forest()
             let count = seed <= 3 ? 600 : 3_000
             for i in 0..<count {
@@ -125,7 +125,7 @@ final class EulerEnclosureConstructionTests: XCTestCase {
             }
             total += assertEncloses(index, forest, &rng, "leaves seed \(seed)")
             // The linear rebuild of the same forest, in another tour order.
-            let rebuilt = EulerWorkIndex.build(events: forest.tour(&rng))
+            let rebuilt = NamedEulerIndex.build(events: forest.tour(&rng))
             total += assertEncloses(rebuilt, forest, &rng, "rebuild seed \(seed)")
         }
         print("[euler-leaves] encloses checks \(total)")
@@ -135,7 +135,7 @@ final class EulerEnclosureConstructionTests: XCTestCase {
         var total = 0
         for seed in 1...UInt64(8) {
             var rng = AnchorRandom(seed: seed &* 31)
-            var index = EulerWorkIndex.empty
+            var index = NamedEulerIndex.empty
             var forest = Forest()
             var next = 0
             func fresh() -> String { next += 1; return "s\(next)" }
@@ -175,7 +175,7 @@ final class EulerEnclosureConstructionTests: XCTestCase {
                 }
             }
             total += assertEncloses(index, forest, &rng, "splice seed \(seed)")
-            total += assertEncloses(EulerWorkIndex.build(events: forest.tour(&rng)), forest, &rng, "rebuild seed \(seed)")
+            total += assertEncloses(NamedEulerIndex.build(events: forest.tour(&rng)), forest, &rng, "rebuild seed \(seed)")
         }
         print("[euler-splice] encloses checks \(total)")
     }

@@ -26,7 +26,7 @@ final class ParentAnchorDifferentialTests: XCTestCase {
     /// `from == to` as continuity without asking whether `to` was produced.
     private func oracle(_ tree: inout ChainTree, from: String, to: String) -> Bool {
         if from == to || from == empty {
-            return tree.frontier.chainProduced(stateCID: to)
+            return tree.executedSetProduced(stateCID: to)
         }
         return tree.hasStateContinuity(from: from, to: to)
     }
@@ -55,8 +55,8 @@ final class ParentAnchorDifferentialTests: XCTestCase {
             let producedBy = Dictionary(grouping: model.blocks.filter { anchored.contains($0.hash) && $0.prev != $0.post }, by: \.post)
             duplicateProducers += producedBy.values.filter { $0.count > 1 }.count
 
-            XCTAssertEqual(live.frontier.anchored, anchored, "seed \(seed): live anchored set")
-            XCTAssertEqual(restored.frontier.anchored, anchored, "seed \(seed): restored anchored set")
+            XCTAssertEqual(live.anchoredForTesting, anchored, "seed \(seed): live anchored set")
+            XCTAssertEqual(restored.anchoredForTesting, anchored, "seed \(seed): restored anchored set")
 
             let states = model.queryStates
             for from in states {
@@ -132,7 +132,7 @@ final class ParentAnchorDifferentialTests: XCTestCase {
                         ? model.isAncestorOrSelf(a.hash, b.hash) : nil
                     ancestryPairs += 1
                     for (name, tree) in [("live", live), ("restored", restored), ("wholesale", wholesale)] {
-                        if tree.forkChoice.isAncestorOrSelf(a.hash, of: b.hash) != expected {
+                        if tree.isAncestorOrSelf(a.hash, of: b.hash) != expected {
                             XCTFail("seed \(seed) \(name): \(model.byHash[a.hash]!) encloses \(model.byHash[b.hash]!) expected \(String(describing: expected))")
                             return
                         }

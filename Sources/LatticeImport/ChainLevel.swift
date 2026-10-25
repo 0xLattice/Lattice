@@ -18,11 +18,11 @@ public actor ChainLevel {
         self.context = context
     }
 
-    /// An independent level over `tree`, for a host job (preflight, template)
-    /// that must not touch the live level. `ChainTree` is a value, so this
-    /// is a copy-on-write copy: O(1), whatever the history. Nil for a tree
-    /// made without a context. Keeps the genesis pin: a tree carrying a
-    /// context took every root through the pin check when it was inserted.
+    /// A level over `tree`, which it takes over: the caller hands over its
+    /// one reference (`ChainTree.mutableGraph`). O(1), whatever the history.
+    /// Nil for a tree made without a context. Keeps the genesis pin: a tree
+    /// carrying a context took every root through the pin check when it was
+    /// inserted.
     public init?(tree: ChainTree) {
         guard let context = tree.context else { return nil }
         self.init(chain: ChainState(tree: tree), context: context)

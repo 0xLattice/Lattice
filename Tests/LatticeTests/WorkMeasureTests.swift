@@ -84,48 +84,51 @@ final class WorkMeasureTests: XCTestCase {
     }
 
     func testBlockMetadataReplacesOnlyTheStrengthenedQuantity() throws {
-        var graph = BlockGraph(["block": BlockMeta(
-            blockHash: "block",
-            parentBlockHash: nil,
-            blockHeight: 0,
-            childHashes: [],
-            workContributions: [
-                contribution("shared", 7),
-                contribution("independent", 11),
-            ]
-        )])
+        let block = testCID("measure:block")
+        let shared = testCID("measure:shared")
+        var tree = try ChainTree(
+            canonicalTip: block, canonicalHashes: [block], indexToBlockHash: [:],
+            hashToBlock: [block: BlockMeta(
+                blockHash: block,
+                parentBlockHash: nil,
+                blockHeight: 0,
+                childHashes: [],
+                workContributions: [
+                    contribution(shared, 7),
+                    contribution(testCID("measure:independent"), 11),
+                ]
+            )]
+        )
 
-        XCTAssertTrue(graph.setWorkContribution(
-            contribution("shared", 13), attributed: false, at: "block"
-        ))
-        let metadata = try XCTUnwrap(graph.meta(of: "block", difficultyAnchor: nil))
-        XCTAssertEqual(metadata.workContributions["shared"]?.work, UInt256(13))
+        XCTAssertTrue(tree.addWorkContribution(contribution(shared, 13), to: block).addedContribution)
+        let metadata = try XCTUnwrap(tree.getConsensusBlock(hash: block))
+        XCTAssertEqual(metadata.workContributions[shared]?.work, UInt256(13))
         XCTAssertEqual(metadata.work, WorkSum(UInt256(24)))
     }
 
     func testStrengtheningAtTheSameBlockUpdatesPathOnce() async {
-        let original = contribution("strengthened", 2)
-        let stronger = contribution("strengthened", 13)
+        let original = contribution(testCID("strengthened"), 2)
+        let stronger = contribution(testCID("strengthened"), 13)
         var root = BlockMeta(
-            blockHash: "root",
+            blockHash: blockCID("root"),
             parentBlockHash: nil,
             blockHeight: 0,
-            childHashes: ["child"],
-            workContributions: [contribution("root-work", 1)]
+            childHashes: [blockCID("child")],
+            workContributions: [contribution(testCID("root-work"), 1)]
         )
         let child = BlockMeta(
-            blockHash: "child",
-            parentBlockHash: "root",
+            blockHash: blockCID("child"),
+            parentBlockHash: blockCID("root"),
             blockHeight: 1,
             childHashes: [],
             workContributions: [original]
         )
-        root.childHashes = ["child"]
+        root.childHashes = [blockCID("child")]
         let chain = makeChain(blocks: [root, child])
-        let result = await chain.addWorkContribution(stronger, to: "child")
+        let result = await chain.addWorkContribution(stronger, to: blockCID("child"))
 
-        let cumulative = await chain.getCumulativeWork(forHash: "child")
-        let subtree = await chain.subtreeWeight(forHash: "root")
+        let cumulative = await chain.getCumulativeWork(forHash: blockCID("child"))
+        let subtree = await chain.subtreeWeight(forHash: blockCID("root"))
 
         XCTAssertTrue(result.addedContribution)
         XCTAssertEqual(cumulative, WorkSum(UInt256(14)))

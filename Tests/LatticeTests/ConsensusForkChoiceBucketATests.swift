@@ -17,20 +17,20 @@ private func bucketSpec() -> ChainSpec {
 }
 
 final class ConsensusForkChoiceBucketATests: XCTestCase {
-    private var forkMainSet: Set<String> { ["G", "M1", "M2"] }
+    private var forkMainSet: Set<String> { [blockCID("G"), blockCID("M1"), blockCID("M2")] }
 
     private func forkDag() -> [BlockMeta] {
         let mainWork = UInt256(2)
         let forkWork = UInt256(1)
         return [
-            makeBlockMeta(hash: "G", height: 0, childHashes: ["M1", "F1"], work: forkWork),
-            makeBlockMeta(hash: "M1", previousHash: "G", height: 1, childHashes: ["M2"], work: mainWork),
-            makeBlockMeta(hash: "M2", previousHash: "M1", height: 2, work: mainWork),
-            makeBlockMeta(hash: "F1", previousHash: "G", height: 1, childHashes: ["F2"], work: forkWork),
-            makeBlockMeta(hash: "F2", previousHash: "F1", height: 2, childHashes: ["F3"], work: forkWork),
-            makeBlockMeta(hash: "F3", previousHash: "F2", height: 3, childHashes: ["F4"], work: forkWork),
-            makeBlockMeta(hash: "F4", previousHash: "F3", height: 4, childHashes: ["F5"], work: forkWork),
-            makeBlockMeta(hash: "F5", previousHash: "F4", height: 5, work: forkWork),
+            makeBlockMeta(hash: blockCID("G"), height: 0, childHashes: [blockCID("M1"), blockCID("F1")], work: forkWork),
+            makeBlockMeta(hash: blockCID("M1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("M2")], work: mainWork),
+            makeBlockMeta(hash: blockCID("M2"), previousHash: blockCID("M1"), height: 2, work: mainWork),
+            makeBlockMeta(hash: blockCID("F1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("F2")], work: forkWork),
+            makeBlockMeta(hash: blockCID("F2"), previousHash: blockCID("F1"), height: 2, childHashes: [blockCID("F3")], work: forkWork),
+            makeBlockMeta(hash: blockCID("F3"), previousHash: blockCID("F2"), height: 3, childHashes: [blockCID("F4")], work: forkWork),
+            makeBlockMeta(hash: blockCID("F4"), previousHash: blockCID("F3"), height: 4, childHashes: [blockCID("F5")], work: forkWork),
+            makeBlockMeta(hash: blockCID("F5"), previousHash: blockCID("F4"), height: 5, work: forkWork),
         ]
     }
 
@@ -39,7 +39,7 @@ final class ConsensusForkChoiceBucketATests: XCTestCase {
         _ = await chain.reevaluateForkChoice()
 
         let tip = await chain.canonicalTip
-        XCTAssertEqual(tip, "F5")
+        XCTAssertEqual(tip, blockCID("F5"))
     }
 
     func testTipCumulativeWorkIsExactBeyondUInt256() async throws {

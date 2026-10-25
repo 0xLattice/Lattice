@@ -155,9 +155,9 @@ final class SiblingFloodProjectionTests: XCTestCase {
             batch("g", parent: nil, height: 0, work: 1),
             batch("a", parent: "g", height: 1, work: 1_000),
         ])
-        tree.frontier.resetFullCanonicalProjectionCount()
+        tree.resetFullCanonicalProjectionCount()
         for i in 0..<2_000 { _ = try tree.replay(batch("s\(i)", parent: "g", height: 1, work: 1)) }
-        XCTAssertEqual(tree.frontier.fullCanonicalProjectionCount, 0)
+        XCTAssertEqual(tree.fullCanonicalProjectionCount, 0)
         XCTAssertEqual(tree.canonicalTip, h("a"))
     }
 }

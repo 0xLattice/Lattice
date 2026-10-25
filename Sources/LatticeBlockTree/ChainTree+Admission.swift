@@ -10,10 +10,11 @@ extension ChainTree {
     /// `parentState` must be (parent-chain continuity), and it is not a tip
     /// question: a side branch this chain executed counts the same.
     public func executedSetProduced(stateCID: String) -> Bool {
-        guard let canonical = CIDIdentity.canonicalString(stateCID) else {
+        guard let canonical = CIDIdentity.canonicalString(stateCID),
+              let state = graph.stateHandle(canonical) else {
             return false
         }
-        return frontier.chainProduced(stateCID: canonical)
+        return graph.chainProduced(state)
     }
 
     /// Whether this chain's executed set carried its state forward from
@@ -31,55 +32,57 @@ extension ChainTree {
             return false
         }
         if from == to || from == LatticeState.emptyHeader.rawCID {
-            return frontier.chainProduced(stateCID: to)
+            return executedSetProduced(stateCID: to)
         }
-        return forkChoice.anyIsAncestorOrSelf(
-            frontier.anchoredProducers(of: from),
-            of: frontier.anchoredProducers(of: to)
+        guard let fromState = graph.stateHandle(from),
+              let toState = graph.stateHandle(to) else { return false }
+        return graph.weights.anyEncloses(
+            graph.anchoredProducers(of: fromState),
+            graph.anchoredProducers(of: toState)
         )
     }
 
     /// Whether `blockHash` is a proven-invalid subtree root. Its work still
     /// weighs; the fork-choice descent never steps into it.
     public func isExcludedRoot(_ blockHash: String) -> Bool {
-        forkChoice.excludedRoots.contains(blockHash)
+        graph.handle(blockHash).map(graph.isExcludedRoot) ?? false
     }
 
     /// Whether this chain executed `blockHash`'s transition and found it
     /// valid. Irrevocable: execution is a fact about immutable bytes, so an
     /// executed block is never later proven invalid (`applyConnect`).
     public func isExecuted(blockHash: String) -> Bool {
-        frontier.validated.contains(blockHash)
+        graph.handle(blockHash).map(graph.isValidated) ?? false
     }
 
     /// The recorded header fields of a held block (post/prev state, spec,
     /// target, next target, height, timestamp): what header linkage reads for
     /// a parent.
     public func headerSnapshot(of blockHash: String) -> TipBlockSnapshot? {
-        frontier.snapshot(of: blockHash)
+        graph.handle(blockHash).flatMap(graph.snapshot(of:))
     }
 
     /// The parent CID a held block names, held or not.
     package func parentHash(of blockHash: String) -> String? {
-        graph.parent(of: blockHash)
+        parent(of: blockHash)
     }
 
     /// Whether the grind `id` may be credited at `blockHash`: a grind has one
     /// location in a chain.
     package func acceptsWorkLocation(of id: String, at blockHash: String) -> Bool {
-        forkChoice.acceptsLocation(of: id, at: blockHash)
+        graph.grindHandle(id).map { graph.hash(graph.grinds[Int($0)].block) == blockHash } ?? true
     }
 
     /// The block's strongest own grind (ties to the smaller ID) — never an
     /// attributed run.
     package func strongestGrind(of blockHash: String) -> VerifiedWorkContribution? {
-        guard let work = graph.work(of: blockHash) else { return nil }
-        return work.workByID
-            .filter { !work.attributedRuns.contains($0.key) }
+        guard let block = graph.handle(blockHash) else { return nil }
+        return graph.grinds(at: block)
+            .filter { !graph.grinds[Int($0)].isAttributed }
+            .map(graph.contribution)
             .max {
-                $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key
+                $0.work != $1.work ? $0.work < $1.work : $0.id > $1.id
             }
-            .flatMap { work.contribution(id: $0.key) }
     }
 
     /// Apply one locally authenticated admission batch through the single

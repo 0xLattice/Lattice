@@ -50,7 +50,7 @@ final class ParentAnchorDuplicateStateCostTests: XCTestCase {
         _ name: String, _ tree: inout ChainTree, from: String, to: String, expected: Bool,
         boundMilliseconds: Double
     ) {
-        let pairs = tree.frontier.anchoredProducers(of: from).count * tree.frontier.anchoredProducers(of: to).count
+        let pairs = tree.anchoredProducers(of: from).count * tree.anchoredProducers(of: to).count
         let (answer, newMs) = measure { tree.executedSetAdvanced(from: from, to: to) }
         var copy = tree
         let (old, oldMs) = measure { copy.hasStateContinuity(from: from, to: to) }
@@ -59,7 +59,7 @@ final class ParentAnchorDuplicateStateCostTests: XCTestCase {
         XCTAssertLessThan(newMs, boundMilliseconds, name)
         print(String(
             format: "[anchor-cost] %@: blocks %d, producer pairs %d, executedSetAdvanced %.2f ms (%.2f us/pair), old search %.2f ms",
-            name, tree.graph.records.count, pairs, newMs, pairs > 0 ? newMs * 1_000 / Double(pairs) : 0, oldMs
+            name, tree.blockCount, pairs, newMs, pairs > 0 ? newMs * 1_000 / Double(pairs) : 0, oldMs
         ))
     }
 
@@ -93,7 +93,7 @@ final class ParentAnchorDuplicateStateCostTests: XCTestCase {
             for h in 0..<run { tip = builder.add(parent: tip, height: UInt64(2 + h), from: s, to: s) }
             _ = builder.add(parent: tip, height: UInt64(2 + run), from: s, to: t)
             var tree = try ChainTree.restoreWithoutContext(replaying: builder.batches)
-            XCTAssertEqual(tree.frontier.anchoredProducers(of: s).count, 1)
+            XCTAssertEqual(tree.anchoredProducers(of: s).count, 1)
             report("no-op run \(run) s->t", &tree, from: s, to: t, expected: true, boundMilliseconds: 1_000)
             report("no-op run \(run) t->s", &tree, from: t, to: s, expected: false, boundMilliseconds: 1_000)
         }

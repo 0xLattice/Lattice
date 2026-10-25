@@ -354,8 +354,8 @@ final class ChainTreeArchitectureTests: XCTestCase {
         let committerCID = try cid(committer)
         XCTAssertEqual(parent.recordedChildCommitments(of: committerCID), ["Child": try cid(childBlock)])
         parent.serveRuns(for: "Child")
-        let runWork = try XCTUnwrap(parent.runs.runWork["Child"]?[committerCID])
-        let ownWork = try XCTUnwrap(parent.graph.work(of: committerCID)?.grindWork)
+        let runWork = try XCTUnwrap(parent.runWork(of: committerCID, directory: "Child"))
+        let ownWork = try XCTUnwrap(parent.grindWork(of: committerCID))
 
         // The committer's grind secures the child block.
         let grind = VerifiedWorkContribution(id: committerCID, work: UInt256(1))

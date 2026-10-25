@@ -131,6 +131,8 @@ public enum LatticeConsensusSimulator {
         let allBlocks = Dictionary(uniqueKeysWithValues: spec.blocks.map {
             ($0.hash, simBlock($0.hash, previous: $0.parent, height: $0.height, work: $0.work))
         })
+        let names = Dictionary(uniqueKeysWithValues: spec.blocks.map { (simCID($0.hash), $0.hash) })
+        func name(_ cid: String) -> String { names[cid] ?? cid }
         var visibleHashes = Set(spec.initiallyVisible)
         var currentMain = Set(spec.initialMain)
         var events: [ConsensusSimEvent] = []
@@ -147,17 +149,17 @@ public enum LatticeConsensusSimulator {
             let candidateRoot = forkRoot(for: release.blockHash, visible: visibleHashes, currentMain: currentMain, blocksByHash: blocksByHash)
             let commit = await chain.reevaluateForkChoice()
             if let commit {
-                currentMain.subtract(commit.canonicalBlocksRemoved)
-                currentMain.formUnion(commit.canonicalBlocksAdded.keys)
+                currentMain.subtract(commit.canonicalBlocksRemoved.map(name))
+                currentMain.formUnion(commit.canonicalBlocksAdded.keys.map(name))
             }
 
             let tip = await chain.canonicalTip
-            let snapshot = await chain.forkChoiceSnapshot(startingAt: candidateRoot)
+            let snapshot = await chain.forkChoiceSnapshot(startingAt: simCID(candidateRoot))
             events.append(event(
                 idx,
                 "t=\(release.atMillis)ms release \(release.blockHash)",
-                tip: tip,
-                candidate: snapshot,
+                tip: name(tip),
+                candidate: snapshot.map { named($0, name) },
                 main: nil,
                 reorged: commit != nil
             ))
@@ -188,10 +190,12 @@ public enum LatticeConsensusSimulator {
         let f1 = simBlock("F1", previous: "G", height: 1)
         let chain = simChain(blocks: [g, m1, f1], main: Set(["G", "M1"]))
 
-        let candidate = await chain.forkChoiceSnapshot(startingAt: "F1")
-        let main = await chain.forkChoiceSnapshot(startingAt: "M1")
+        let names = Dictionary(uniqueKeysWithValues: ["G", "M1", "F1"].map { (simCID($0), $0) })
+        func name(_ cid: String) -> String { names[cid] ?? cid }
+        let candidate = await chain.forkChoiceSnapshot(startingAt: simCID("F1")).map { named($0, name) }
+        let main = await chain.forkChoiceSnapshot(startingAt: simCID("M1")).map { named($0, name) }
         let reorg = await chain.reevaluateForkChoice()
-        let tip = await chain.canonicalTip
+        let tip = name(await chain.canonicalTip)
 
         return ConsensusSimTrace(
             scenario: "equal-work-tie-stable-base",
@@ -270,6 +274,28 @@ public enum LatticeConsensusSimulator {
         )
     }
 
+    /// The block tree holds canonical CIDs only, so a simulated block named
+    /// `name` is the CIDv1 dag-cbor sha2-256 whose digest is the name's bytes,
+    /// zero-padded: deterministic, and ordered exactly as the names are, so
+    /// every equal-work tie-break between names stands.
+    static func simCID(_ name: String) -> String {
+        let bytes = Array(name.utf8)
+        precondition(bytes.count <= 32, "simulated block name too long: \(name)")
+        return CIDIdentity.base32Multibase(
+            [0x01, 0x71, 0x12, 0x20] + bytes + Array(repeating: 0, count: 32 - bytes.count)
+        )
+    }
+
+    /// `snapshot` with its CIDs read back as names.
+    private static func named(_ snapshot: ForkChoiceSnapshot, _ name: (String) -> String) -> ForkChoiceSnapshot {
+        ForkChoiceSnapshot(
+            startingHash: name(snapshot.startingHash),
+            subtreeWork: snapshot.subtreeWork,
+            tipHash: name(snapshot.tipHash),
+            canonicalPath: Set(snapshot.canonicalPath.map(name))
+        )
+    }
+
     private static func simBlock(
         _ hash: String,
         previous: String? = nil,
@@ -278,12 +304,12 @@ public enum LatticeConsensusSimulator {
         work: UInt256 = UInt256(1)
     ) -> BlockMeta {
         BlockMeta(
-            blockHash: hash,
-            parentBlockHash: previous,
+            blockHash: simCID(hash),
+            parentBlockHash: previous.map(simCID),
             blockHeight: height,
-            childHashes: children,
+            childHashes: children.map(simCID),
             workContributions: [VerifiedWorkContribution(
-                id: "sim:\(hash)",
+                id: simCID("sim:\(hash)"),
                 work: work
             )]
         )
@@ -291,8 +317,9 @@ public enum LatticeConsensusSimulator {
 
     private static func simChain(
         blocks: [BlockMeta],
-        main: Set<String>
+        main names: Set<String>
     ) -> ChainState {
+        let main = Set(names.map(simCID))
         var index: [UInt64: Set<String>] = [:]
         var byHash: [String: BlockMeta] = [:]
         for block in blocks {

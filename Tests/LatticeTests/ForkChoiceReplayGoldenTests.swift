@@ -431,17 +431,19 @@ struct ForkChoiceGolden: Codable, Equatable {
         var runs: [RunRecord] = []
         let directory = ForkChoiceGoldenGraph.directory
         for block in graph.blocks where block.commitsChild {
-            let runValue = await chain.runs.runWork[directory]?[block.hash]
+            let runValue = await chain.runWork(of: block.hash, directory: directory)
             let runWork = try XCTUnwrap(runValue, "\(block.name) commits into \(directory) but keeps no run")
-            let workValue = await chain.graph.work(of: block.hash)
-            let work = try XCTUnwrap(workValue)
+            let metaValue = await chain.getConsensusBlock(hash: block.hash)
+            let meta = try XCTUnwrap(metaValue)
+            let ownValue = await chain.grindWork(of: block.hash)
+            let ownWork = try XCTUnwrap(ownValue)
             let commitments = await chain.recordedChildCommitments(of: block.hash)
             runs.append(RunRecord(
                 committer: block.name,
                 childBlock: try XCTUnwrap(commitments?[directory]),
-                grinds: work.grinds.sorted(),
+                grinds: Set(meta.workContributions.keys).subtracting(meta.attributedRuns).sorted(),
                 runWork: runWork.toHexString(),
-                ownWork: work.grindWork.toHexString()
+                ownWork: ownWork.toHexString()
             ))
         }
 

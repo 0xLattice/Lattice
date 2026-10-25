@@ -41,19 +41,27 @@ final class ChainLevelFromTreeTests: XCTestCase {
         )
     }
 
-    func testMutatingTheCopyLeavesTheSourceUnchanged() async throws {
-        let source = try XCTUnwrap(ChainLevel(tree: try Self.tree(blocks: 10)))
-        let before = await source.chain.tree
-        let copy = try XCTUnwrap(ChainLevel(tree: before))
+    /// A level takes over the tree it is given: the caller hands its one
+    /// reference over, and the level mutates it in place. (A tree still held
+    /// elsewhere must not be mutated — the runtime owns one live tree — which
+    /// traps in DEBUG.)
+    func testALevelMutatesTheTreeItWasHanded() async throws {
+        let level = try XCTUnwrap(ChainLevel(tree: try Self.tree(blocks: 10)))
 
-        _ = try await copy.chain.applyStaged(Self.batch(10))
+        _ = try await level.chain.applyStaged(Self.batch(10))
 
-        let copyHeight = await copy.chain.getHighestBlockHeight()
-        XCTAssertEqual(copyHeight, 10)
-        let sourceHeight = await source.chain.getHighestBlockHeight()
-        XCTAssertEqual(sourceHeight, 9)
-        let sourceTip = await source.chain.canonicalTip
-        XCTAssertEqual(sourceTip, before.canonicalTip)
+        let height = await level.chain.getHighestBlockHeight()
+        XCTAssertEqual(height, 10)
+    }
+
+    /// Serving a directory already served is a no-op and writes nothing:
+    /// with a second holder of the tree, a write would trap in DEBUG.
+    func testServingAServedDirectoryAgainWritesNothing() throws {
+        var tree = try Self.tree(blocks: 3)
+        tree.serveRuns(for: "kid")
+        let held = tree
+        tree.serveRuns(for: "kid")
+        XCTAssertEqual(held.canonicalTip, tree.canonicalTip)
     }
 
     func testATreeWithoutContextHasNoLevel() throws {
