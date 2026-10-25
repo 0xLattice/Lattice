@@ -1,6 +1,41 @@
 import CID
 import UInt256
 import LatticePrimitives
+import LatticePoW
+
+/// A block's recorded header fields as held: a `TipBlockSnapshot` with its
+/// two targets inline rather than in `UInt256`'s heap arrays.
+struct HeldSnapshot: Sendable, Equatable {
+    let postStateCID: String
+    let prevStateCID: String
+    let specCID: String
+    let target: Fixed256
+    let nextTarget: Fixed256
+    let tipHeight: UInt64
+    let timestamp: Int64
+
+    init(_ snapshot: TipBlockSnapshot) {
+        postStateCID = snapshot.postStateCID
+        prevStateCID = snapshot.prevStateCID
+        specCID = snapshot.specCID
+        target = Fixed256(snapshot.target)
+        nextTarget = Fixed256(snapshot.nextTarget)
+        tipHeight = snapshot.tipHeight
+        timestamp = snapshot.timestamp
+    }
+
+    var snapshot: TipBlockSnapshot {
+        TipBlockSnapshot(
+            postStateCID: postStateCID,
+            prevStateCID: prevStateCID,
+            specCID: specCID,
+            target: target.uint256,
+            nextTarget: nextTarget.uint256,
+            tipHeight: tipHeight,
+            timestamp: timestamp
+        )
+    }
+}
 
 /// The canonical projection and the execution frontier as a value: the
 /// selected path, which blocks were executed and which are executed all the
@@ -55,7 +90,7 @@ struct ExecutionFrontier: Sendable {
 
     // MARK: State-continuity index
 
-    private(set) var snapshots: [String: TipBlockSnapshot]
+    private(set) var snapshots: [String: HeldSnapshot]
     /// Blocks by declared post-state, for every block whose transition
     /// changes state. A transition between two distinct states is one of
     /// these filtered by its pre-state, so no index by transition is kept.
@@ -89,9 +124,9 @@ struct ExecutionFrontier: Sendable {
     ) throws {
         self.canonicalTip = canonicalTip
         self.tipSnapshot = tipSnapshot
-        self.snapshots = snapshots
+        self.snapshots = snapshots.mapValues(HeldSnapshot.init)
         if let tipSnapshot {
-            self.snapshots[canonicalTip] = tipSnapshot
+            self.snapshots[canonicalTip] = HeldSnapshot(tipSnapshot)
         }
         self.validated = validated
         self.byPostState = [:]
@@ -146,7 +181,15 @@ struct ExecutionFrontier: Sendable {
     // MARK: Queries
 
     func snapshot(of blockHash: String) -> TipBlockSnapshot? {
-        snapshots[blockHash]
+        snapshots[blockHash]?.snapshot
+    }
+
+    /// The difficulty anchor a height-1 block sets: its own timestamp and
+    /// target, read from its held header.
+    func anchor(setBy anchorBlock: String) -> DifficultyAnchor? {
+        snapshots[anchorBlock].map {
+            DifficultyAnchor(blockHeight: 1, timestamp: $0.timestamp, target: $0.target.uint256)
+        }
     }
 
     func isAnchored(_ blockHash: String) -> Bool {
@@ -288,9 +331,10 @@ struct ExecutionFrontier: Sendable {
     }
 
     mutating func indexTransition(
-        _ snapshot: TipBlockSnapshot,
+        _ tipSnapshot: TipBlockSnapshot,
         blockHash: String
     ) {
+        let snapshot = HeldSnapshot(tipSnapshot)
         if let previous = snapshots[blockHash],
            previous != snapshot {
             if previous.prevStateCID != previous.postStateCID {
@@ -312,7 +356,7 @@ struct ExecutionFrontier: Sendable {
 
     /// Re-read the tip's snapshot after the tip or its snapshot changed.
     mutating func refreshTipSnapshot() {
-        tipSnapshot = snapshots[canonicalTip]
+        tipSnapshot = snapshots[canonicalTip]?.snapshot
     }
 
     /// A bump that carries no graph mutation keeps the projection exact.
@@ -410,7 +454,7 @@ struct ExecutionFrontier: Sendable {
                 canonicalHashByHeight[height] = hash
             }
         }
-        tipSnapshot = snapshots[newTip]
+        tipSnapshot = snapshots[newTip]?.snapshot
         return ChainCommit(
             tipHash: newTip,
             canonicalBlocksAdded: added,
@@ -642,7 +686,7 @@ struct ExecutionFrontier: Sendable {
         for (hash, height) in added {
             canonicalHashByHeight[height] = hash
         }
-        tipSnapshot = snapshots[tipHash]
+        tipSnapshot = snapshots[tipHash]?.snapshot
         return ChainCommit(
             tipHash: tipHash,
             canonicalBlocksAdded: added,

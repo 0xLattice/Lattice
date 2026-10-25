@@ -40,6 +40,15 @@ struct WorkContributionRecord: Sendable, Equatable {
     }
 }
 
+/// One grind's location as held: its block, its strongest work inline, and
+/// whether that work is already in the weights. `WorkContributionRecord` is
+/// its read view.
+struct GrindLocation: Sendable, Equatable {
+    let blockHash: String
+    var work: Fixed256
+    var isRouted: Bool
+}
+
 public struct ForkChoiceSnapshot: Sendable, Equatable {
     public let startingHash: String
     public let subtreeWork: WorkSum
@@ -73,7 +82,7 @@ struct ForkChoice: Sendable {
     private(set) var weights: EulerWorkIndex = .empty
     /// Each grind's one location, its strongest observation, and whether that
     /// work is already in `weights`.
-    private(set) var locations: [String: WorkContributionRecord] = [:]
+    private(set) var locations: [String: GrindLocation] = [:]
     /// Roots of proven-invalid subtrees (deferred-execution validated tier: a
     /// block whose execution completed and FAILED). Rebuilt on recovery from the
     /// durable `.exclusion` facts. Insert-only.
@@ -113,23 +122,20 @@ struct ForkChoice: Sendable {
     static func locations(
         of hashes: some Sequence<String>,
         in blocks: BlockGraph
-    ) -> [String: WorkContributionRecord] {
-        var result: [String: WorkContributionRecord] = [:]
-        func observe(_ contribution: VerifiedWorkContribution, at hash: String) {
-            var record = result[contribution.id] ?? WorkContributionRecord(
-                blockHash: hash,
-                contribution: contribution
-            )
-            if contribution.work > record.contribution.work {
-                record.contribution = contribution
+    ) -> [String: GrindLocation] {
+        var result: [String: GrindLocation] = [:]
+        func observe(_ id: String, _ work: Fixed256, at hash: String) {
+            var record = result[id] ?? GrindLocation(blockHash: hash, work: work, isRouted: false)
+            if work > record.work {
+                record.work = work
             }
-            result[contribution.id] = record
+            result[id] = record
         }
 
         for hash in hashes {
             guard let work = blocks.work(of: hash) else { continue }
-            for contribution in work.contributions.values {
-                observe(contribution, at: hash)
+            for (id, value) in work.workByID {
+                observe(id, value, at: hash)
             }
         }
         return result
@@ -146,7 +152,13 @@ struct ForkChoice: Sendable {
     }
 
     func location(of grindID: String) -> WorkContributionRecord? {
-        locations[grindID]
+        locations[grindID].map {
+            WorkContributionRecord(
+                blockHash: $0.blockHash,
+                contribution: VerifiedWorkContribution(id: grindID, work: $0.work.uint256),
+                isRouted: $0.isRouted
+            )
+        }
     }
 
     func acceptsLocation(of grindID: String, at blockHash: String) -> Bool {
@@ -262,7 +274,7 @@ struct ForkChoice: Sendable {
         events: [EulerWorkIndex.Event],
         rootedAt rootHash: String,
         under parentHash: String?,
-        locations component: [String: WorkContributionRecord]
+        locations component: [String: GrindLocation]
     ) -> Bool {
         var updatedCells = 0
         if let parentHash {
@@ -301,18 +313,16 @@ struct ForkChoice: Sendable {
         at blockHash: String
     ) {
         let id = contribution.id
+        let work = Fixed256(contribution.work)
         if locations[id] == nil {
-            locations[id] = WorkContributionRecord(
-                blockHash: blockHash,
-                contribution: contribution
-            )
+            locations[id] = GrindLocation(blockHash: blockHash, work: work, isRouted: false)
         }
         guard let existing = locations[id],
               existing.blockHash == blockHash else { return }
-        if contribution.work > existing.contribution.work {
+        if work > existing.work {
             if existing.isRouted {
                 let delta = WorkSum(contribution.work)
-                    .subtracting(WorkSum(existing.contribution.work))!
+                    .subtracting(WorkSum(existing.work))!
                 guard let updatedCells = weights.add(
                         delta,
                         at: blockHash
@@ -321,13 +331,13 @@ struct ForkChoice: Sendable {
                 workUpdateCellCount += UInt64(updatedCells)
 #endif
             }
-            locations[id]?.contribution = contribution
+            locations[id]?.work = work
         }
 
         guard locations[id]?.isRouted == false,
-              let strongest = locations[id]?.contribution else { return }
+              let strongest = locations[id]?.work else { return }
         guard let updatedCells = weights.add(
-                WorkSum(strongest.work),
+                WorkSum(strongest),
                 at: blockHash
               ) else {
             return
@@ -349,7 +359,7 @@ struct ForkChoice: Sendable {
     /// within it, which is the only thing fork choice reads.
     private static func buildWeights(
         in blocks: BlockGraph,
-        workByGrind: inout [String: WorkContributionRecord]
+        workByGrind: inout [String: GrindLocation]
     ) -> EulerWorkIndex {
         // Routed-ness was a lookup into the quotient; it is now exactly what it
         // always meant — reachable from a genesis root through blocks that are
@@ -368,16 +378,14 @@ struct ForkChoice: Sendable {
             })
         }
 
-        var directWorkByBlock: [String: WorkSum] = [:]
+        var directWorkByBlock: [String: WorkTotal] = [:]
         for grindID in workByGrind.keys {
             guard var record = workByGrind[grindID] else { continue }
             let routed = routedBlocks.contains(record.blockHash)
             record.isRouted = routed
             workByGrind[grindID] = record
             if routed {
-                directWorkByBlock[record.blockHash, default: .zero] =
-                    directWorkByBlock[record.blockHash, default: .zero]
-                    + record.contribution.work
+                directWorkByBlock[record.blockHash, default: WorkTotal()].add(record.work)
             }
         }
 
@@ -400,7 +408,7 @@ struct ForkChoice: Sendable {
             .sorted()
         for root in roots {
             var tourStack: [(hash: String, children: [String], next: Int)] = []
-            events.append(.open(root, directWorkByBlock[root] ?? .zero))
+            events.append(.open(root, directWorkByBlock[root]?.exact ?? .zero))
             tourStack.append((root, routedChildren(root), 0))
             while var frame = tourStack.popLast() {
                 guard frame.next < frame.children.count else {
@@ -410,7 +418,7 @@ struct ForkChoice: Sendable {
                 let child = frame.children[frame.next]
                 frame.next += 1
                 tourStack.append(frame)
-                events.append(.open(child, directWorkByBlock[child] ?? .zero))
+                events.append(.open(child, directWorkByBlock[child]?.exact ?? .zero))
                 tourStack.append((child, routedChildren(child), 0))
             }
         }
@@ -567,14 +575,12 @@ extension ChainTree {
         // `isRouted` is set here because the build call that used to set it as a
         // side effect is gone. Leaving it false would let the contribution path
         // add this same work a second time.
-        var componentDirectWork: [String: WorkSum] = [:]
+        var componentDirectWork: [String: WorkTotal] = [:]
         for grindID in componentWorkByGrind.keys {
             guard var record = componentWorkByGrind[grindID] else { continue }
             record.isRouted = true
             componentWorkByGrind[grindID] = record
-            componentDirectWork[record.blockHash, default: .zero] =
-                componentDirectWork[record.blockHash, default: .zero]
-                + record.contribution.work
+            componentDirectWork[record.blockHash, default: WorkTotal()].add(record.work)
         }
 
         if let parentHash = graph.parent(of: rootHash) {
@@ -598,7 +604,7 @@ extension ChainTree {
                 .sorted()
         }
         var tourStack: [(hash: String, children: [String], next: Int)] = []
-        events.append(.open(rootHash, componentDirectWork[rootHash] ?? .zero))
+        events.append(.open(rootHash, componentDirectWork[rootHash]?.exact ?? .zero))
         tourStack.append((rootHash, componentChildren(rootHash), 0))
         while var frame = tourStack.popLast() {
             guard frame.next < frame.children.count else {
@@ -608,7 +614,7 @@ extension ChainTree {
             let child = frame.children[frame.next]
             frame.next += 1
             tourStack.append(frame)
-            events.append(.open(child, componentDirectWork[child] ?? .zero))
+            events.append(.open(child, componentDirectWork[child]?.exact ?? .zero))
             tourStack.append((child, componentChildren(child), 0))
         }
 

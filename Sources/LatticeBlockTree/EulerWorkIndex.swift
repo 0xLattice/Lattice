@@ -36,19 +36,24 @@ struct EulerWorkIndex: Sendable {
         case close(String)
     }
 
+    /// `value` and `aggregate` are inline 320-bit sums. One that outgrows 320
+    /// bits is kept exactly in `spilledValue` / `spilledAggregate` under its
+    /// node instead, and its inline field is unused.
     private struct Node: Sendable {
         var left: Int = -1
         var right: Int = -1
         var parent: Int = -1
         var height: Int = 1
-        var value: WorkSum = .zero
-        var aggregate: WorkSum = .zero
+        var value: Work320 = .zero
+        var aggregate: Work320 = .zero
     }
 
     private var nodes: [Node] = []
     private var root = -1
     private var openNode: [String: Int] = [:]
     private var closeNode: [String: Int] = [:]
+    private var spilledValue: [Int: WorkSum] = [:]
+    private var spilledAggregate: [Int: WorkSum] = [:]
 
     static var empty: EulerWorkIndex { EulerWorkIndex() }
 
@@ -153,9 +158,19 @@ struct EulerWorkIndex: Sendable {
     }
 
     private func subtreeWork(open: Int, close: Int, visits: inout Int) -> WorkSum? {
-        guard let between = prefixThrough(close, visits: &visits)
-            .subtracting(prefixThrough(open, visits: &visits)) else { return nil }
-        return between + nodes[open].value
+        let through = prefixThrough(close, visits: &visits)
+        let before = prefixThrough(open, visits: &visits)
+        var total: WorkTotal
+        if let through = through.inline, let before = before.inline {
+            let (between, borrow) = through.subtractingReportingOverflow(before)
+            guard !borrow else { return nil }
+            total = WorkTotal(between)
+        } else {
+            guard let between = through.exact.subtracting(before.exact) else { return nil }
+            total = WorkTotal(between)
+        }
+        addValue(of: open, to: &total)
+        return total.exact
     }
 
     // MARK: - Mutation
@@ -167,7 +182,10 @@ struct EulerWorkIndex: Sendable {
     @discardableResult
     mutating func add(_ delta: WorkSum, at blockHash: String) -> Int? {
         guard let open = openNode[blockHash] else { return nil }
-        nodes[open].value = nodes[open].value + delta
+        var total = WorkTotal()
+        addValue(of: open, to: &total)
+        total.add(delta)
+        setValue(total, of: open)
         return repairAggregates(from: open)
     }
 
@@ -187,10 +205,10 @@ struct EulerWorkIndex: Sendable {
         guard openNode[blockHash] == nil else { return false }
         // A second root shares the sequence, placed wholly after the first, so
         // the tours stay disjoint and no range can span two trees.
-        let open = makeNode(value: .zero)
+        let open = makeNode()
         openNode[blockHash] = open
         appendLast(open)
-        let close = makeNode(value: .zero)
+        let close = makeNode()
         closeNode[blockHash] = close
         appendLast(close)
         return true
@@ -270,7 +288,7 @@ struct EulerWorkIndex: Sendable {
                 guard openNode[hash] != nil, closeNode[hash] == nil else {
                     return nil
                 }
-                let node = makeNode(value: .zero)
+                let node = makeNode()
                 closeNode[hash] = node
                 touched += insert(node, before: anchor)
             }
@@ -292,7 +310,7 @@ struct EulerWorkIndex: Sendable {
                 index.openNode[hash] = node
                 order.append(node)
             case let .close(hash):
-                let node = index.makeNode(value: .zero)
+                let node = index.makeNode()
                 index.closeNode[hash] = node
                 order.append(node)
             }
@@ -304,9 +322,41 @@ struct EulerWorkIndex: Sendable {
 
     // MARK: - Sequence tree
 
-    private mutating func makeNode(value: WorkSum) -> Int {
-        nodes.append(Node(value: value, aggregate: value))
-        return nodes.count - 1
+    private mutating func makeNode(value: WorkSum = .zero) -> Int {
+        nodes.append(Node())
+        let node = nodes.count - 1
+        setValue(WorkTotal(value), of: node)
+        refresh(node)
+        return node
+    }
+
+    /// Store `total` as `node`'s value: inline, or spilled when it outgrows
+    /// 320 bits.
+    private mutating func setValue(_ total: WorkTotal, of node: Int) {
+        if let inline = total.inline {
+            nodes[node].value = inline
+            if !spilledValue.isEmpty { spilledValue.removeValue(forKey: node) }
+        } else {
+            nodes[node].value = .zero
+            spilledValue[node] = total.exact
+        }
+    }
+
+    private func addValue(of node: Int, to total: inout WorkTotal) {
+        if !spilledValue.isEmpty, let spilled = spilledValue[node] {
+            total.add(spilled)
+        } else {
+            total.add(nodes[node].value)
+        }
+    }
+
+    private func addAggregate(of node: Int, to total: inout WorkTotal) {
+        guard node >= 0 else { return }
+        if !spilledAggregate.isEmpty, let spilled = spilledAggregate[node] {
+            total.add(spilled)
+        } else {
+            total.add(nodes[node].aggregate)
+        }
     }
 
     /// Perfectly balanced from a sorted run, so a rebuild costs one pass and
@@ -333,15 +383,19 @@ struct EulerWorkIndex: Sendable {
         node < 0 ? 0 : nodes[node].height
     }
 
-    private func aggregate(_ node: Int) -> WorkSum {
-        node < 0 ? .zero : nodes[node].aggregate
-    }
-
     private mutating func refresh(_ node: Int) {
         nodes[node].height = 1 + max(height(nodes[node].left), height(nodes[node].right))
-        nodes[node].aggregate = aggregate(nodes[node].left)
-            + nodes[node].value
-            + aggregate(nodes[node].right)
+        var total = WorkTotal()
+        addAggregate(of: nodes[node].left, to: &total)
+        addValue(of: node, to: &total)
+        addAggregate(of: nodes[node].right, to: &total)
+        if let inline = total.inline {
+            nodes[node].aggregate = inline
+            if !spilledAggregate.isEmpty { spilledAggregate.removeValue(forKey: node) }
+        } else {
+            nodes[node].aggregate = .zero
+            spilledAggregate[node] = total.exact
+        }
     }
 
     private func rightmost(_ node: Int) -> Int {
@@ -469,11 +523,13 @@ struct EulerWorkIndex: Sendable {
     /// Sum of every element at or before `node` in sequence order. `visits`
     /// counts sequence-tree nodes touched — compiled out in release — so the
     /// O(log n) claim is asserted as a counter on THIS walk, not on a copy.
-    private func prefixThrough(_ node: Int, visits: inout Int) -> WorkSum {
+    private func prefixThrough(_ node: Int, visits: inout Int) -> WorkTotal {
 #if DEBUG
         visits += 1
 #endif
-        var total = aggregate(nodes[node].left) + nodes[node].value
+        var total = WorkTotal()
+        addAggregate(of: nodes[node].left, to: &total)
+        addValue(of: node, to: &total)
         var current = node
         var up = nodes[current].parent
         while up >= 0 {
@@ -481,7 +537,8 @@ struct EulerWorkIndex: Sendable {
             visits += 1
 #endif
             if nodes[up].right == current {
-                total = total + aggregate(nodes[up].left) + nodes[up].value
+                addAggregate(of: nodes[up].left, to: &total)
+                addValue(of: up, to: &total)
             }
             current = up
             up = nodes[current].parent
@@ -522,10 +579,12 @@ struct EulerWorkIndex: Sendable {
                 current = nodes[current].left
             }
             let node = stack.removeLast()
+            var value = WorkTotal()
+            addValue(of: node, to: &value)
             if let hash = hashByOpen[node] {
-                result.append((hash, true, nodes[node].value))
+                result.append((hash, true, value.exact))
             } else if let hash = hashByClose[node] {
-                result.append((hash, false, nodes[node].value))
+                result.append((hash, false, value.exact))
             }
             current = nodes[node].right
         }
@@ -537,10 +596,13 @@ struct EulerWorkIndex: Sendable {
     /// mysterious fork-choice divergence.
     var debugInvariantsHold: Bool {
         for node in nodes.indices {
-            let expected = aggregate(nodes[node].left)
-                + nodes[node].value
-                + aggregate(nodes[node].right)
-            if nodes[node].aggregate != expected { return false }
+            var expected = WorkTotal()
+            addAggregate(of: nodes[node].left, to: &expected)
+            addValue(of: node, to: &expected)
+            addAggregate(of: nodes[node].right, to: &expected)
+            var stored = WorkTotal()
+            addAggregate(of: node, to: &stored)
+            if stored.exact != expected.exact { return false }
             let expectedHeight = 1 + max(
                 height(nodes[node].left),
                 height(nodes[node].right)
@@ -559,5 +621,8 @@ struct EulerWorkIndex: Sendable {
     }
 
     var debugNodeCount: Int { nodes.count }
+
+    /// Nodes whose value or aggregate outgrew 320 bits and is held spilled.
+    var debugSpilledCount: Int { spilledValue.count + spilledAggregate.count }
 #endif
 }

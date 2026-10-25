@@ -98,7 +98,7 @@ final class WorkMeasureTests: XCTestCase {
         XCTAssertTrue(graph.setWorkContribution(
             contribution("shared", 13), attributed: false, at: "block"
         ))
-        let metadata = try XCTUnwrap(graph.meta(of: "block"))
+        let metadata = try XCTUnwrap(graph.meta(of: "block", difficultyAnchor: nil))
         XCTAssertEqual(metadata.workContributions["shared"]?.work, UInt256(13))
         XCTAssertEqual(metadata.work, WorkSum(UInt256(24)))
     }

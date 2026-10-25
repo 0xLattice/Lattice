@@ -46,7 +46,6 @@ public struct BlockMeta: Sendable {
         blockHeight: UInt64,
         childHashes: [String],
         workContributions: [VerifiedWorkContribution],
-        difficultyAnchor: DifficultyAnchor? = nil,
         childCommitments: [String: String] = [:]
     ) {
         let contributions = Dictionary(
@@ -62,7 +61,8 @@ public struct BlockMeta: Sendable {
         self.work = work
         self.childHashes = childHashes
         self.workContributions = contributions
-        self.difficultyAnchor = difficultyAnchor
+        // Derived from ancestry once the block is held.
+        self.difficultyAnchor = nil
         self.childCommitments = childCommitments
         // Attributed runs are derived after the block (`applyParentRun`); a
         // block is built with its grinds alone.
@@ -364,7 +364,14 @@ public struct ChainTree: Sendable {
 
     /// Every held block's public read view, keyed by hash. Test-facing and
     /// O(N) — assembled on read; production reads `graph`.
-    var hashToBlock: [String: BlockMeta] { graph.metas }
+    var hashToBlock: [String: BlockMeta] {
+        var result: [String: BlockMeta] = [:]
+        result.reserveCapacity(graph.records.count)
+        for record in graph.records {
+            result[record.blockHash] = getConsensusBlock(hash: record.blockHash)
+        }
+        return result
+    }
 
     package init(
         canonicalTip: String,
@@ -849,7 +856,10 @@ public struct ChainTree: Sendable {
     /// weight are derived on demand (`getCumulativeWork(forHash:)`,
     /// `subtreeWeight(forHash:)`).
     public func getConsensusBlock(hash: String) -> BlockMeta? {
-        graph.meta(of: hash)
+        graph.meta(
+            of: hash,
+            difficultyAnchor: graph.anchorBlock(of: hash).flatMap(frontier.anchor(setBy:))
+        )
     }
 
     public func getHighestBlockHeight() -> UInt64 {
@@ -875,25 +885,26 @@ public struct ChainTree: Sendable {
     /// anchor from its own admission, so the walk always terminates.
     ///
     /// The result is a pure function of the block's ancestry either way; the
-    /// cache only decides how much of that ancestry has to be re-read.
+    /// cache only decides how much of that ancestry has to be re-read. What is
+    /// cached is the height-1 block the anchor is read from, never a copy.
     public mutating func difficultyAnchor(forBlockHash hash: String) -> DifficultyAnchor? {
         var unresolved: [String] = []
         var current: String? = hash
-        var resolved: DifficultyAnchor?
+        var resolved: String?
         while let step = current, let meta = graph[step] {
-            if let anchor = graph.difficultyAnchor(of: step) {
-                resolved = anchor
+            if let anchorBlock = graph.anchorBlock(of: step) {
+                resolved = anchorBlock
                 break
             }
             unresolved.append(step)
             guard meta.blockHeight > 1 else { break }
             current = meta.parentBlockHash
         }
-        guard let anchor = resolved else { return nil }
+        guard let anchorBlock = resolved else { return nil }
         for step in unresolved {
-            graph.adoptDifficultyAnchor(anchor, at: step)
+            graph.adoptAnchorBlock(anchorBlock, at: step)
         }
-        return anchor
+        return frontier.anchor(setBy: anchorBlock)
     }
 
     // MARK: - Block Submission
@@ -990,17 +1001,14 @@ public struct ChainTree: Sendable {
         // branch's anchor, so two branches forking at height 1 never borrow each
         // other's schedule. A block whose parent is not yet known carries none
         // and acquires one when it connects.
-        let anchor: DifficultyAnchor?
+        // The anchor is held as the height-1 block it is read from.
+        let anchorBlock: String?
         if input.blockHeight == 1 {
-            anchor = DifficultyAnchor(
-                blockHeight: 1,
-                timestamp: input.timestamp,
-                target: input.snapshot.target
-            )
+            anchorBlock = blockHash
         } else if let parentHash = input.parentBlockHash {
-            anchor = graph.difficultyAnchor(of: parentHash)
+            anchorBlock = graph.anchorBlock(of: parentHash)
         } else {
-            anchor = nil
+            anchorBlock = nil
         }
         graph.insert(
             BlockRecord(
@@ -1010,7 +1018,7 @@ public struct ChainTree: Sendable {
                 childCommitments: input.childCommitments
             ),
             children: childHashes,
-            difficultyAnchor: anchor
+            anchorBlock: anchorBlock
         )
         indexStateTransition(input.snapshot, blockHash: blockHash)
         if let prevHash = input.parentBlockHash {
@@ -1083,7 +1091,7 @@ public struct ChainTree: Sendable {
         }
         for block in blocks.records {
             let blockHash = block.blockHash
-            for grindID in (blocks.work(of: blockHash)?.contributions ?? [:]).keys
+            for grindID in (blocks.work(of: blockHash)?.workByID ?? [:]).keys
             where !observe(grindID, at: blockHash) {
                 return false
             }

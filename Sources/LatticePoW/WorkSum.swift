@@ -5,11 +5,12 @@ import LatticePrimitives
 /// Individual targets remain `UInt256`; cumulative and subtree work must not
 /// clamp because fork choice depends on strict ordering after every addition.
 public struct WorkSum: Codable, Hashable, Sendable, Comparable, CustomStringConvertible {
-    private var limbs: [UInt64]
+    /// Least significant first, with no trailing zero limb.
+    package private(set) var limbs: [UInt64]
 
     public static let zero = WorkSum(limbs: [])
 
-    private init(limbs: [UInt64]) {
+    package init(limbs: [UInt64]) {
         self.limbs = limbs
         while self.limbs.last == 0 { self.limbs.removeLast() }
     }
