@@ -52,42 +52,38 @@ final class BlockTreeOracleScenarioTests: XCTestCase {
         script.check(self, tip: first)
     }
 
-    /// A header naming its parent under another codec (or as a CIDv0) names a
-    /// different block, even with the parent's digest: it never connects.
-    func testParentNamedUnderAnotherShapeNeverConnects() {
-        for codec: UInt8? in [0x55, 0x70, nil] {
-            var script = Script("twin-parent-\(codec.map(String.init) ?? "v0")")
-            let genesis = script.genesis()
-            let held = script.block("held", under: genesis)
-            let twin = oracleCID(digest: oracleDigest(held.hash), codec: codec)
-            let orphan = script.block("orphan", under: held, naming: twin)
-            let below = script.block("below", under: orphan)
-            script.add(held, work: 2)
-            script.add(orphan, work: 50)
-            script.add(below, work: 50)
-            script.check(self, tip: held)
-        }
-    }
-
-    /// Post- and prev-states under another codec, or as a CIDv0, are other
-    /// states: continuity and the executed set never confuse them with the
-    /// canonical state of the same digest.
-    func testStatesUnderAnotherShapeAreOtherStates() {
-        var script = Script("twin-state")
+    /// A block naming a parent, state, spec or child that is not the
+    /// standard CID (another codec, a CIDv0, or no CID) is not a Lattice
+    /// block: the live tree refuses it at entry with `nonStandardLink`, and
+    /// holds nothing of it. (The 50.0.1 reference has no such rule; the
+    /// equivalence stream's adapter refuses for it.)
+    func testANonStandardLinkIsRefusedAtEntry() throws {
+        var script = Script("non-standard-link")
         let genesis = script.genesis()
-        let rawTwin = oracleCID(digest: oracleDigest(genesis.postState), codec: 0x55)
-        let v0Twin = oracleCID(digest: oracleDigest(genesis.postState), codec: nil)
-        let a = script.block("a", under: genesis, post: rawTwin)
-        let b = script.block("b", under: a, post: v0Twin)
-        let c = script.block("c", under: b)
-        script.add(a, work: 1)
-        script.add(b, work: 1)
-        script.add(c, work: 1)
-        script.validate(genesis)
-        script.validate(a)
-        script.validate(b)
-        script.restart(shuffled: true)
-        script.check(self, tip: c)
+        guard let genesisBatch = script.genesisBatch else { return XCTFail("no genesis") }
+        var live = try LiveSubject.restoreRoot([genesisBatch], specs: [script.spec]).get()
+        let held = script.block("held", under: genesis)
+        let shapes: [String] = [UInt8(0x55), 0x70, nil].map {
+            oracleCID(digest: oracleDigest(held.hash), codec: $0)
+        } + ["not-a-cid"]
+        let edits: [(String, (inout OracleBlockFact, String) -> Void)] = [
+            ("parent", { $0.parent = $1 }),
+            ("postState", { $0.postState = $1 }),
+            ("prevState", { $0.prevState = $1 }),
+            ("spec", { $0.spec = $1 }),
+            ("child", { $0.childCommitments = ["Child": $1] }),
+        ]
+        for (field, edit) in edits {
+            for shape in shapes {
+                var block = script.block("\(field)-\(shape.prefix(12))", under: genesis)
+                edit(&block, shape)
+                let outcome = live.apply(OracleBatch(facts: [
+                    .block(block), .work(blockHash: block.hash, grindID: oracleCID("grind-\(block.hash)"), work: 5),
+                ]), reserved: false)
+                XCTAssertEqual(outcome.rendered, "throw:nonStandardLink", "\(field) \(shape)")
+            }
+        }
+        XCTAssertEqual(live.observeTip()["tip"], genesis.hash)
     }
 
     /// A block hash and a grind ID are computed locally, so the live tree
@@ -271,10 +267,10 @@ private struct Script {
     /// A block under `parent`, its header naming the parent as `naming` when
     /// given (the parent's hash otherwise).
     mutating func block(
-        _ label: String, under parent: OracleBlockFact, post: String? = nil, naming: String? = nil
+        _ label: String, under parent: OracleBlockFact, post: String? = nil
     ) -> OracleBlockFact {
         let block = OracleBlockFact(
-            hash: oracleCID("scenario-\(name)-\(label)"), parent: naming ?? parent.hash, height: parent.height + 1,
+            hash: oracleCID("scenario-\(name)-\(label)"), parent: parent.hash, height: parent.height + 1,
             postState: post ?? oracleCID("scenario-\(name)-post-\(label)"), prevState: parent.postState,
             spec: parent.spec, target: "ffff", nextTarget: "ffff",
             timestamp: parent.timestamp + 1_000, childCommitments: nil

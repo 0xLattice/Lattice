@@ -106,9 +106,7 @@ extension BlockGraph {
             let entry = self[next]
             guard entry.flags.contains(.held), !entry.flags.contains(.anchored),
                   entry.flags.contains(.validated) else { continue }
-            let parentAnchored = entry.parent == Self.none
-                ? foreignParents[next] == nil
-                : isAnchored(entry.parent)
+            let parentAnchored = entry.parent == Self.none || isAnchored(entry.parent)
             // A proven-invalid block extends nothing: its subtree left fork
             // choice, and the states it declared are not states this chain
             // stands behind.
@@ -234,7 +232,7 @@ extension BlockGraph {
         while !isCanonical(current) {
             let entry = self[current]
             guard entry.parent != Self.none else {
-                return entry.height == 0 && foreignParents[current] == nil ? .otherRoot : .malformed
+                return entry.height == 0 ? .otherRoot : .malformed
             }
             guard isHeld(entry.parent), self[entry.parent].height < entry.height else { return .malformed }
             below = current

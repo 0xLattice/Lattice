@@ -1,3 +1,5 @@
+import Foundation
+import Crypto
 import CID
 import Synchronization
 
@@ -90,5 +92,18 @@ public enum CIDIdentity {
 
     public static func isCanonical(_ value: String) -> Bool {
         canonicalString(value) == value
+    }
+
+    /// Whether `value` is Lattice's one standard CID, spelled canonically:
+    /// CIDv1, dag-cbor, sha2-256, a 32-byte digest — the bytes `01 71 12 20`
+    /// then the digest (`CIDDigest`). Every CID link in a block header must
+    /// be one; a header with any other link is malformed (spec §3.1).
+    public static func isStandard(_ value: String) -> Bool {
+        CIDDigest(value) != nil
+    }
+
+    /// The standard CID naming `data`, whatever `data` decodes as.
+    package static func standardCID(of data: Data) -> String {
+        base32Multibase([0x01, 0x71, 0x12, 0x20] + Array(SHA256.hash(data: data)))
     }
 }

@@ -35,6 +35,7 @@ bounded by the child-proof wire's `UInt16` length capacity (65535 bytes) — a
 structural encoding bound, not a policy cap. Honest DAG-CBOR + SHA-256 CIDs are
 ~59 bytes, far below it; the canonical round-trip is the real identity check, and
 this bound only limits parse work on untrusted input to what the wire can carry.
+A block header's links are narrower still: only the standard CID (section 3.1).
 
 ## 3. Data Structures
 
@@ -63,6 +64,19 @@ B = (
 
 `rewardRecipient` is the account credited with the block's coinbase (reward
 plus fees, section 8.2). `nil` burns that amount.
+
+Every CID link in a block — `previousBlock`, `transactions`, `spec`,
+`parentState`, `prevState`, `postState`, `children`, and every child block CID
+in the `children` map — MUST be the standard CID: CIDv1, dag-cbor (`0x71`),
+sha2-256 (`0x12`), a 32-byte digest, i.e. the bytes `01 71 12 20` then the
+digest, in its canonical spelling, with no encryption info; a header with any
+other link is malformed. (`rewardRecipient` is an account, not a link: it is
+held to section 2's canonical form.)
+A header whose own links break this does not decode as a block; a child entry
+breaking it lives in the separate child-index node, so the header decodes and
+the block is structurally refused at admission (section 9.9). Either way it is
+refused before admission: never weighed, never stored. It is a well-formedness rule, not a validity rule
+(section 9.9).
 
 `children` is one plain DAG-CBOR map, so its canonical bytes are DAG-CBOR's.
 Every key is a directory (visible ASCII, no `/`, within the child-proof wire's
@@ -1276,11 +1290,11 @@ selected, exactly as for an execution verdict. Every other outcome records no
 fact:
 
 - **Proof-of-work failure** — no contribution, off the schedule, or bytes that
-  do not decode or match their CID. The only header failure that blames its
-  sender.
-- **Dropped** — a wrong version or height (including an unrepresentable one),
-  a child index that does not match the block's `children` CID, a malformed
-  reward recipient, a genesis, or a child whose `parentState` is not its
+  do not match their CID. The only header failure that blames its sender.
+- **Dropped** — bytes that do not decode as a block (a malformed header,
+  section 3.1), a wrong version or height (including an unrepresentable one),
+  a child index that does not match the block's `children` CID or names a
+  child that is not a standard CID (section 3.1), a malformed reward recipient, a genesis, or a child whose `parentState` is not its
   carrier's `prevState`. No weight, no blame.
 - **Held** — a timestamp after the node's `now`, an unknown parent, or a
   difficulty anchor not in hand. Retried; never a verdict. The schedule is

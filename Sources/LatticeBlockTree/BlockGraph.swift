@@ -36,8 +36,7 @@ struct BlockEntry: Sendable {
     var nextTarget: Fixed256 = .zero
     var height: UInt64 = 0
     var timestamp: Int64 = 0
-    /// The block named as parent, held or not; `none` for a root or for a
-    /// parent that is not a canonical CID (`BlockGraph.foreignParents`).
+    /// The block named as parent, held or not; `none` for a root.
     var parent: UInt32 = BlockGraph.none
     var firstChild: UInt32 = BlockGraph.none
     var nextSibling: UInt32 = BlockGraph.none
@@ -84,16 +83,11 @@ struct BlockRecord: Sendable, Equatable {
 /// while it holds the one reference (`ChainTree.mutableGraph`).
 final class BlockGraph: @unchecked Sendable {
     static let none = UInt32.max
-    /// Marks a state handle as an index into `otherStates`.
-    static let otherState: UInt32 = 1 << 31
 
     // MARK: Identities
 
     private(set) var ids: OrderedSet<BlockID> = []
     var blocks: ContiguousArray<BlockEntry> = []
-    /// Parents named by something other than a canonical CID, by the block
-    /// naming them: such a parent is never held, so the block never connects.
-    var foreignParents: [UInt32: String] = [:]
     /// Blocks naming a held parent at the wrong height: never its children,
     /// but their anchor is still read through it, so `propagateAnchor`
     /// reaches them from here.
@@ -102,16 +96,10 @@ final class BlockGraph: @unchecked Sendable {
     var grinds: ContiguousArray<Grind> = []
     /// Direct work past 320 bits, for blocks flagged `spilledWork`.
     var spilledDirectWork: [UInt32: WorkSum] = [:]
-    /// Declared states that are canonical CIDs, and the head of each one's
-    /// producer list.
+    /// Declared states, and the head of each one's producer list.
     var states: OrderedSet<StateID> = []
     var firstProducer: ContiguousArray<UInt32> = []
-    /// Declared states that are not canonical CIDs, by their canonical text:
-    /// a state is the author's choice, so its shape is never refused, and a
-    /// separate table keeps such a state from meeting a canonical digest.
-    var otherStates: OrderedSet<String> = []
-    var otherFirstProducer: ContiguousArray<UInt32> = []
-    var specIDs: OrderedSet<String> = []
+    var specIDs: OrderedSet<CIDDigest> = []
     /// Directory → child block CID, for the blocks that commit any.
     var commitments: [UInt32: [String: String]] = [:]
     /// Blocks whose declared spec is not their root's, mapped to their root's
@@ -161,15 +149,12 @@ final class BlockGraph: @unchecked Sendable {
         let copy = BlockGraph()
         copy.ids = ids
         copy.blocks = blocks
-        copy.foreignParents = foreignParents
         copy.unlinkedChildren = unlinkedChildren
         copy.grindIDs = grindIDs
         copy.grinds = grinds
         copy.spilledDirectWork = spilledDirectWork
         copy.states = states
         copy.firstProducer = firstProducer
-        copy.otherStates = otherStates
-        copy.otherFirstProducer = otherFirstProducer
         copy.specIDs = specIDs
         copy.commitments = commitments
         copy.offRootSpec = offRootSpec
@@ -238,8 +223,7 @@ final class BlockGraph: @unchecked Sendable {
     /// The parent a held block names, held or not; nil for a root.
     func parentHash(of block: UInt32) -> String? {
         let parent = self[block].parent
-        if parent != Self.none { return hash(parent) }
-        return foreignParents[block]
+        return parent == Self.none ? nil : hash(parent)
     }
 
     /// The held parent `block` hangs under, or `none`: a parent that does not
@@ -360,39 +344,31 @@ final class BlockGraph: @unchecked Sendable {
 
     // MARK: States and specs
 
-    /// The handle of a declared state, interning it when new.
+    /// The handle of a declared state, interning it when new. The tree's
+    /// entry admits only standard CIDs (`ConsensusBlockInput`).
     func internState(_ cid: String) -> UInt32 {
-        if let id = StateID(cid) {
-            let (inserted, index) = states.append(id)
-            if inserted { firstProducer.append(Self.none) }
-            return UInt32(index)
+        guard let id = StateID(cid) else {
+            preconditionFailure("a non-standard state reached the block graph: \(cid)")
         }
-        let (inserted, index) = otherStates.append(cid)
-        if inserted { otherFirstProducer.append(Self.none) }
-        return Self.otherState | UInt32(index)
+        let (inserted, index) = states.append(id)
+        if inserted { firstProducer.append(Self.none) }
+        return UInt32(index)
     }
 
     /// The handle of a state already declared by some block, or nil.
     func stateHandle(_ cid: String) -> UInt32? {
-        if let id = StateID(cid) {
-            return states.firstIndex(of: id).map(UInt32.init)
-        }
-        return otherStates.firstIndex(of: cid).map { Self.otherState | UInt32($0) }
+        StateID(cid).flatMap { states.firstIndex(of: $0) }.map(UInt32.init)
     }
 
     func stateString(_ state: UInt32) -> String {
-        state & Self.otherState == 0
-            ? states[Int(state)].string
-            : otherStates[Int(state & ~Self.otherState)]
+        states[Int(state)].string
     }
 
     /// The blocks declaring `state` as post-state, among those whose
     /// transition changes state.
     func producers(of state: UInt32) -> [UInt32] {
         var result: [UInt32] = []
-        var block = state & Self.otherState == 0
-            ? firstProducer[Int(state)]
-            : otherFirstProducer[Int(state & ~Self.otherState)]
+        var block = firstProducer[Int(state)]
         while block != Self.none {
             result.append(block)
             block = self[block].nextProducer
@@ -408,12 +384,17 @@ final class BlockGraph: @unchecked Sendable {
         return entry.flags.contains(.hasSnapshot) ? entry.spec : nil
     }
 
+    /// The handle of a declared spec, interning it when new: a standard CID,
+    /// like every identity the tree's entry admits.
     func internSpec(_ cid: String) -> UInt32 {
-        UInt32(specIDs.append(cid).index)
+        guard let id = CIDDigest(cid) else {
+            preconditionFailure("a non-standard spec reached the block graph: \(cid)")
+        }
+        return UInt32(specIDs.append(id).index)
     }
 
     func specString(_ spec: UInt32) -> String {
-        specIDs[Int(spec)]
+        specIDs[Int(spec)].string
     }
 
     /// The recorded header fields of a block, or nil without them.
@@ -445,14 +426,8 @@ final class BlockGraph: @unchecked Sendable {
         self[block].timestamp = snapshot.timestamp
         self[block].flags.insert(.hasSnapshot)
         guard post != prev else { return }
-        if post & Self.otherState == 0 {
-            self[block].nextProducer = firstProducer[Int(post)]
-            firstProducer[Int(post)] = block
-        } else {
-            let index = Int(post & ~Self.otherState)
-            self[block].nextProducer = otherFirstProducer[index]
-            otherFirstProducer[index] = block
-        }
+        self[block].nextProducer = firstProducer[Int(post)]
+        firstProducer[Int(post)] = block
     }
 
     // MARK: Insertion
@@ -511,13 +486,12 @@ final class BlockGraph: @unchecked Sendable {
             commitments[block] = childCommitments
         }
         if let parent {
-            if let parentID = BlockID(parent) {
-                let parentBlock = intern(parentID)
-                self[block].parent = parentBlock
-                appendChild(block, to: parentBlock)
-            } else {
-                foreignParents[block] = parent
+            guard let parentID = BlockID(parent) else {
+                preconditionFailure("a non-standard parent reached the block graph: \(parent)")
             }
+            let parentBlock = intern(parentID)
+            self[block].parent = parentBlock
+            appendChild(block, to: parentBlock)
         } else {
             roots.append(block)
         }

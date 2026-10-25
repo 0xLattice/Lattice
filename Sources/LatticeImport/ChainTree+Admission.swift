@@ -226,10 +226,11 @@ extension ChainTree {
         )
     }
 
-    /// How header admission treats a failed `verifySecuringWork`: a CID or
-    /// byte mismatch, or an undecodable path, is a proof-of-work failure
-    /// (blame); a child `parentState` that is not its carrier's `prevState`
-    /// is structural (drop, no blame).
+    /// How header admission treats a failed `verifySecuringWork`: bytes that
+    /// do not match their CID are a proof-of-work failure (blame); a carrier
+    /// whose bytes match but are not a well-formed block (a non-standard
+    /// link included), or a child `parentState` that is not its carrier's
+    /// `prevState`, is structural (drop, no blame; spec §9.9).
     public static func headerFailure(
         _ failure: ChildProofVerificationFailure
     ) -> BlockImportError {
@@ -258,7 +259,8 @@ extension ChainTree {
     /// - `.notYetValid` / `.unavailableEvidence` (hold): a timestamp in this
     ///   node's future, an unknown parent, or a difficulty anchor not in hand.
     /// - Anything else (drop, no blame): version, height, the child-index
-    ///   binding, a malformed reward recipient, a genesis.
+    ///   binding or a non-standard child in it, a malformed reward
+    ///   recipient, a genesis.
     ///
     /// No validation and no cross-chain fact: a weighed-only block issues
     /// none.
@@ -293,7 +295,7 @@ extension ChainTree {
         guard let spec = scheduleSpec(underParent: parentHash) else {
             return .rejected(.notAcceptedAtCurrentChain)
         }
-        guard childIndex.hasValidDirectories,
+        guard childIndex.isWellFormed,
               (try? HeaderImpl(node: childIndex).rawCID)
                 == block.children.rawCID else {
             return .rejected(.protocolInvalid)
@@ -567,7 +569,7 @@ extension ChainTree {
         guard ChainTree.binds(spec, to: block.spec.rawCID) else {
             return .rejected(.providerMalformedEvidence)
         }
-        guard childIndex.hasValidDirectories,
+        guard childIndex.isWellFormed,
               (try? HeaderImpl(node: childIndex).rawCID) == block.children.rawCID else {
             return .rejected(.protocolInvalid)
         }

@@ -70,8 +70,8 @@ public struct DirectChildEdge: Hashable, Scalar {
     }
 
     private func canonicalHop() async -> DirectChildHop? {
-        guard CIDIdentity.isCanonical(parentCarrierCID),
-              CIDIdentity.isCanonical(childCID),
+        guard CIDIdentity.isStandard(parentCarrierCID),
+              CIDIdentity.isStandard(childCID),
               isValidChildDirectory(directory),
               let proof,
               proof.rootCID == parentCarrierCID,
@@ -228,7 +228,7 @@ public struct ChildBlockProof: Sendable {
     /// path as an originally single-hop proof.
     public func directHop() async -> DirectChildHop? {
         guard let directory = directoryPath.last,
-              CIDIdentity.isCanonical(rootCID) else { return nil }
+              CIDIdentity.isStandard(rootCID) else { return nil }
 
         var uniqueEntries: [String: Data] = [:]
         for entry in entries {
@@ -246,9 +246,9 @@ public struct ChildBlockProof: Sendable {
                     paths: [[directory]: .targeted],
                     fetcher: source
                   ).node,
-                  children.hasValidDirectories,
+                  children.isWellFormed,
                   let next: BlockHeader = children[directory],
-                  CIDIdentity.isCanonical(next.rawCID) else { return nil }
+                  CIDIdentity.isStandard(next.rawCID) else { return nil }
             carrier = next
         }
 
@@ -259,9 +259,9 @@ public struct ChildBlockProof: Sendable {
               ),
               let block = hop.block,
               let children = hop.children,
-              children.hasValidDirectories,
+              children.isWellFormed,
               let child: BlockHeader = children[directory],
-              CIDIdentity.isCanonical(child.rawCID) else { return nil }
+              CIDIdentity.isStandard(child.rawCID) else { return nil }
         let proof = hop.proof
 
         return DirectChildHop(
@@ -293,7 +293,7 @@ public struct ChildBlockProof: Sendable {
             }
         }
         guard let rootData = proofEntries[rootCID],
-              contentBoundBlock(cid: rootCID, data: rootData) != nil else {
+              case .success = contentBoundBlock(cid: rootCID, data: rootData) else {
             return nil
         }
 
@@ -315,7 +315,7 @@ public struct ChildBlockProof: Sendable {
                 canonicalEntries[entry.cid] = entry.data
             }
             guard let children = hop.children,
-                  children.hasValidDirectories,
+                  children.isWellFormed,
                   let childHeader: BlockHeader = children[directory] else {
                 return nil
             }
@@ -333,7 +333,7 @@ public struct ChildBlockProof: Sendable {
             }
 
             guard let data = proofEntries[childHeader.rawCID],
-                  let next = contentBoundBlock(cid: childHeader.rawCID, data: data),
+                  case .success(let next) = contentBoundBlock(cid: childHeader.rawCID, data: data),
                   next.parentState.rawCID == current.prevState.rawCID else { return nil }
             deploymentTarget = min(deploymentTarget, next.target)
             current = next
@@ -343,12 +343,10 @@ public struct ChildBlockProof: Sendable {
 
     private func verifiedRoot() -> Result<(block: Block, hash: UInt256), ChildProofVerificationFailure> {
         let rootEntries = entries.filter { $0.cid == rootCID }
-        guard rootEntries.count == 1,
-              let rootData = rootEntries.first?.data,
-              let rootBlock = contentBoundBlock(cid: rootCID, data: rootData) else {
+        guard rootEntries.count == 1, let rootData = rootEntries.first?.data else {
             return .failure(.malformedEvidence)
         }
-        return .success((rootBlock, rootBlock.proofOfWorkHash()))
+        return contentBoundBlock(cid: rootCID, data: rootData).map { ($0, $0.proofOfWorkHash()) }
     }
 
     /// Verify the complete root-to-child directory commitment and derive its
@@ -397,7 +395,7 @@ public struct ChildBlockProof: Sendable {
                   ).node,
                   let childHeader: VolumeImpl<Block> = children[directory]
             else { return .failure(.malformedEvidence) }
-            guard children.hasValidDirectories else { return .failure(.protocolInvalid) }
+            guard children.isWellFormed else { return .failure(.protocolInvalid) }
 
             if index == directoryPath.count - 1 {
                 guard childHeader.rawCID == childCID else {
@@ -469,9 +467,13 @@ public struct ChildBlockProof: Sendable {
                 ))
             }
 
-            guard let nextData = proofEntries[childHeader.rawCID],
-                  let next = contentBoundBlock(cid: childHeader.rawCID, data: nextData) else {
+            guard let nextData = proofEntries[childHeader.rawCID] else {
                 return .failure(.malformedEvidence)
+            }
+            let next: Block
+            switch contentBoundBlock(cid: childHeader.rawCID, data: nextData) {
+            case .success(let block): next = block
+            case .failure(let failure): return .failure(failure)
             }
             directlyConsumed.insert(childHeader.rawCID)
             guard next.parentState.rawCID == currentBlock.prevState.rawCID else {
@@ -595,12 +597,16 @@ private actor _TrackingProofFetcher: Fetcher {
     }
 }
 
-private func contentBoundBlock(cid: String, data: Data) -> Block? {
-    guard let block = Block(data: data),
-          block.hasWellFormedRewardRecipient,
-          let header = try? VolumeImpl<Block>(node: block),
-          header.rawCID == cid else { return nil }
-    return block
+/// The carrier `data` names, bound to `cid`. Bytes that are not the
+/// content `cid` names are a proof-of-work failure (blame); bytes that are,
+/// but are not a well-formed Lattice block (a non-standard link, a malformed
+/// recipient), are structural: dropped without blame (spec §9.9).
+private func contentBoundBlock(cid: String, data: Data) -> Result<Block, ChildProofVerificationFailure> {
+    guard CIDIdentity.standardCID(of: data) == cid else { return .failure(.malformedEvidence) }
+    guard let block = Block(data: data), block.hasWellFormedRewardRecipient else {
+        return .failure(.protocolInvalid)
+    }
+    return .success(block)
 }
 
 
