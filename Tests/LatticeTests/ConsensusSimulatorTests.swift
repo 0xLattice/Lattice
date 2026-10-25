@@ -10,6 +10,16 @@ import XCTest
 import UInt256
 
 final class ConsensusSimulatorTests: XCTestCase {
+    /// The seed-42 adversarial report, computed once per test process and
+    /// shared by the tests that only read it (each run takes minutes in debug).
+    private static let sharedAdversarialReportSeed42 = Task {
+        await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+    }
+
+    private static func adversarialReportSeed42() async -> AdversarialReport {
+        await sharedAdversarialReportSeed42.value
+    }
+
     func testDefaultSimulatorTraceIsDeterministicForSeed() async throws {
         let first = await LatticeConsensusSimulator.runDefaultScenarios(seed: 42)
         let second = await LatticeConsensusSimulator.runDefaultScenarios(seed: 42)
@@ -66,7 +76,9 @@ final class ConsensusSimulatorTests: XCTestCase {
     // MARK: — no-finality adversarial scenarios
 
     func testAdversarialReportIsDeterministicForSeed() async throws {
-        let first = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        // One side is the shared run, the other is computed fresh here, so
+        // this still compares two independent runs of seed 42.
+        let first = await Self.adversarialReportSeed42()
         let second = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
         XCTAssertEqual(first, second)
         XCTAssertEqual(
@@ -90,7 +102,7 @@ final class ConsensusSimulatorTests: XCTestCase {
         let committedJSON = try Data(contentsOf: docsDir.appendingPathComponent("adversarial-report.json"))
         let committedMD = try Data(contentsOf: docsDir.appendingPathComponent("adversarial-report.md"))
 
-        let report = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        let report = await Self.adversarialReportSeed42()
         let regeneratedJSON = try LatticeConsensusSimulator.encodeAdversarialJSON(report)
         let regeneratedMD = Data(LatticeConsensusSimulator.renderAdversarialMarkdown(report).utf8)
 
@@ -101,7 +113,7 @@ final class ConsensusSimulatorTests: XCTestCase {
     }
 
     func testDeepReorgProbabilityGrowsWithHashrateAndIsNegligibleBelowMajority() async throws {
-        let report = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        let report = await Self.adversarialReportSeed42()
         let deep = report.deepReorg.sorted { $0.hashrateFraction < $1.hashrateFraction }
 
         // Monotone non-decreasing in f everywhere: more hashrate never reduces achievable
@@ -136,7 +148,7 @@ final class ConsensusSimulatorTests: XCTestCase {
     /// Equal targets fall through to independent block hashes, so either miner wins half the
     /// matched ties: γ = 1/2 and the Eyal–Sirer threshold is exactly f = 1/4.
     func testSelfishMiningThresholdIsExactlyOneQuarterForGammaHalf() async throws {
-        let report = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        let report = await Self.adversarialReportSeed42()
 
         let measuredGamma = await LatticeConsensusSimulator.measuredTieAdoptionGamma(seed: 42, fraction: 0.3)
         XCTAssertEqual(measuredGamma, 0.5, "stable independent hashes imply γ = 1/2")
@@ -170,7 +182,7 @@ final class ConsensusSimulatorTests: XCTestCase {
     }
 
     func testBalancingSurvivalIsNegligibleAcrossSampledHorizon() async throws {
-        let report = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        let report = await Self.adversarialReportSeed42()
         for p in report.balancing {
             // At horizon 64, f^64 is negligible throughout the sampled range.
             XCTAssertEqual(p.survivalProbability, 0,
@@ -186,7 +198,7 @@ final class ConsensusSimulatorTests: XCTestCase {
     /// monotonicity of cost in `f` and an end-to-end strict growth across the curve so the
     /// scenario measures cost-as-a-function-of-`f`, not just feasibility.
     func testBalancingCostGrowsWithAttackerWork() async throws {
-        let report = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        let report = await Self.adversarialReportSeed42()
         let sorted = report.balancing.sorted { $0.hashrateFraction < $1.hashrateFraction }
         XCTAssertGreaterThanOrEqual(sorted.count, 3, "need several balancing points to test cost growth")
 
@@ -209,7 +221,7 @@ final class ConsensusSimulatorTests: XCTestCase {
     }
 
     func testAdversarialMarkdownRendersAllThreeScenarios() async throws {
-        let report = await LatticeConsensusSimulator.runAdversarialReport(seed: 42)
+        let report = await Self.adversarialReportSeed42()
         let md = LatticeConsensusSimulator.renderAdversarialMarkdown(report)
         XCTAssertTrue(md.contains("(a) Deep reorg"))
         XCTAssertTrue(md.contains("(b) Selfish mining"))
