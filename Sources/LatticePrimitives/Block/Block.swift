@@ -34,7 +34,7 @@ public struct Block: Hashable {
     public let prevState: LatticeStateHeader
     public let postState: LatticeStateHeader
     /// Directory → child block, in one flat node; every key a valid child
-    /// directory (`hasValidDirectories`).
+    /// directory and every child a standard CID (`isWellFormed`).
     public let children: HeaderImpl<FlatDictionary<BlockHeader>>
     public let height: UInt64
     public let timestamp: Int64
@@ -77,6 +77,48 @@ public struct Block: Hashable {
         case timestamp
         case rewardRecipient
         case nonce
+    }
+
+    /// Decoding enforces well-formedness: a header any of whose links is not
+    /// the standard CID (`hasStandardLinks`) is not a Lattice header, so it
+    /// never becomes a `Block` — it is refused like any undecodable bytes,
+    /// never weighed, never stored.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            version: try container.decode(UInt16.self, forKey: .version),
+            parent: try container.decodeIfPresent(VolumeImpl<Block>.self, forKey: .parent),
+            transactions: try container.decode(HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>.self, forKey: .transactions),
+            target: try container.decode(UInt256.self, forKey: .target),
+            nextTarget: try container.decode(UInt256.self, forKey: .nextTarget),
+            spec: try container.decode(VolumeImpl<ChainSpec>.self, forKey: .spec),
+            parentState: try container.decode(LatticeStateHeader.self, forKey: .parentState),
+            prevState: try container.decode(LatticeStateHeader.self, forKey: .prevState),
+            postState: try container.decode(LatticeStateHeader.self, forKey: .postState),
+            children: try container.decode(HeaderImpl<FlatDictionary<BlockHeader>>.self, forKey: .children),
+            height: try container.decode(UInt64.self, forKey: .height),
+            timestamp: try container.decode(Int64.self, forKey: .timestamp),
+            rewardRecipient: try container.decodeIfPresent(String.self, forKey: .rewardRecipient),
+            nonce: try container.decode(UInt64.self, forKey: .nonce)
+        )
+        guard hasStandardLinks else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath,
+                debugDescription: "a header link is not a standard CID"
+            ))
+        }
+    }
+
+    /// Structural rule: every CID link in the header — parent, transactions,
+    /// spec, parent/prev/post state, children — is the standard CID
+    /// (`CIDIdentity.isStandard`), plain: no encryption info. Enforced by
+    /// decoding (`init(from:)`); the child index's own links by
+    /// `FlatDictionary.isWellFormed`.
+    var hasStandardLinks: Bool {
+        let links: [any cashew.Header] = [
+            transactions, spec, parentState, prevState, postState, children,
+        ] + (parent.map { [$0] } ?? [])
+        return links.allSatisfy(isStandardLink)
     }
 
     public static func == (lhs: Block, rhs: Block) -> Bool {
@@ -162,10 +204,17 @@ extension Block: Node {
 
 public typealias BlockHeader = VolumeImpl<Block>
 
+/// A header link in its one standard form: the standard CID
+/// (`CIDIdentity.isStandard`) with no encryption info.
+func isStandardLink(_ link: any cashew.Header) -> Bool {
+    link.encryptionInfo == nil && CIDIdentity.isStandard(link.rawCID)
+}
+
 package extension FlatDictionary where Value == BlockHeader {
-    /// Every child is carried under a valid child directory. A received block
-    /// whose `children` fail this is structurally invalid.
-    var hasValidDirectories: Bool {
-        entries.keys.allSatisfy(isValidChildDirectory)
+    /// Every child is a plain standard CID (`isStandardLink`) carried under
+    /// a valid child directory. A received block whose `children` fail this
+    /// is structurally invalid.
+    var isWellFormed: Bool {
+        entries.allSatisfy { isValidChildDirectory($0.key) && isStandardLink($0.value) }
     }
 }

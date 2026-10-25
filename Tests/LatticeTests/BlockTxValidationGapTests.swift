@@ -136,7 +136,7 @@ final class BlockHeaderDeferVsRejectGapTests: XCTestCase {
             previous: g, timestamp: t - 10_000, target: easyDifficulty, nonce: 0, fetcher: f
         )
 
-        let fakePostState = VolumeImpl<LatticeState>(rawCID: "bafyfaketamperedpoststate000000000000000000000000000000000000")
+        let fakePostState = VolumeImpl<LatticeState>(rawCID: testCID("fake-tampered-post-state"))
         let tampered = validBlock.set(properties: [POST_STATE_PROPERTY: fakePostState])
         guard let minedTampered = BlockBuilder.mine(block: tampered, target: easyDifficulty, maxAttempts: 10) else {
             XCTFail("Could not mine tampered block"); return

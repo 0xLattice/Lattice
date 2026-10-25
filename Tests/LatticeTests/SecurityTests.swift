@@ -1109,7 +1109,7 @@ final class StateRootValidationTests: XCTestCase {
 
         // Tamper postState. Re-mine using the block's own target (UInt256.max),
         // so nonce 0 trivially satisfies the PoW check.
-        let fakePostState = VolumeImpl<LatticeState>(rawCID: "bafyfaketamperedpoststate000000000000000000000000000000000000")
+        let fakePostState = VolumeImpl<LatticeState>(rawCID: testCID("fake-tampered-post-state"))
         let tampered = validBlock.set(properties: [POST_STATE_PROPERTY: fakePostState])
         guard let minedTampered = BlockBuilder.mine(
             block: tampered, target: easyDifficulty, maxAttempts: 10
@@ -1168,7 +1168,7 @@ final class StateRootValidationTests: XCTestCase {
             "Returned state must be the post-state committed by the accepted block"
         )
 
-        let fakePostState = VolumeImpl<LatticeState>(rawCID: "bafyfaketamperedpoststate000000000000000000000000000000000000")
+        let fakePostState = VolumeImpl<LatticeState>(rawCID: testCID("fake-tampered-post-state"))
         let tampered = validBlock.set(properties: [POST_STATE_PROPERTY: fakePostState])
         guard let minedTampered = BlockBuilder.mine(
             block: tampered, target: easyDifficulty, maxAttempts: 10
@@ -1256,7 +1256,7 @@ final class StateRootValidationTests: XCTestCase {
             previous: g, timestamp: t - 10_000, target: easyDifficulty, nonce: 0, fetcher: f
         )
 
-        let fakePostState = VolumeImpl<LatticeState>(rawCID: "bafyfaketamperedpoststate000000000000000000000000000000000000")
+        let fakePostState = VolumeImpl<LatticeState>(rawCID: testCID("fake-tampered-post-state"))
         let tampered = validBlock.set(properties: [POST_STATE_PROPERTY: fakePostState])
         guard let minedTampered = BlockBuilder.mine(
             block: tampered, target: easyDifficulty, maxAttempts: 10
@@ -1316,7 +1316,7 @@ final class StateRootValidationTests: XCTestCase {
         )
         try await storeBlockToFetcher(validChildBlock, fetcher: f)
 
-        let fakePostState = VolumeImpl<LatticeState>(rawCID: "bafyfakechildpoststate00000000000000000000000000000000000000")
+        let fakePostState = VolumeImpl<LatticeState>(rawCID: testCID("fake-child-post-state"))
         let tamperedChild = validChildBlock.set(properties: [POST_STATE_PROPERTY: fakePostState])
         guard let minedTamperedChild = BlockBuilder.mine(
             block: tamperedChild, target: easyDifficulty, maxAttempts: 10

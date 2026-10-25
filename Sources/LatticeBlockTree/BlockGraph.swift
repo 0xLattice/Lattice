@@ -106,9 +106,10 @@ final class BlockGraph: @unchecked Sendable {
     /// producer list.
     var states: OrderedSet<StateID> = []
     var firstProducer: ContiguousArray<UInt32> = []
-    /// Declared states that are not canonical CIDs, by their canonical text:
-    /// a state is the author's choice, so its shape is never refused, and a
-    /// separate table keeps such a state from meeting a canonical digest.
+    /// Declared states that are not canonical CIDs, by their canonical text,
+    /// kept apart so such a state never meets a canonical digest. Decoding
+    /// refuses a header with any non-standard link (spec §3.1), so only a
+    /// fact recorded outside that boundary can name one.
     var otherStates: OrderedSet<String> = []
     var otherFirstProducer: ContiguousArray<UInt32> = []
     var specIDs: OrderedSet<String> = []

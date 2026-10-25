@@ -258,7 +258,8 @@ extension ChainTree {
     /// - `.notYetValid` / `.unavailableEvidence` (hold): a timestamp in this
     ///   node's future, an unknown parent, or a difficulty anchor not in hand.
     /// - Anything else (drop, no blame): version, height, the child-index
-    ///   binding, a malformed reward recipient, a genesis.
+    ///   binding or a non-standard child in it, a malformed reward
+    ///   recipient, a genesis.
     ///
     /// No validation and no cross-chain fact: a weighed-only block issues
     /// none.
@@ -293,7 +294,7 @@ extension ChainTree {
         guard let spec = scheduleSpec(underParent: parentHash) else {
             return .rejected(.notAcceptedAtCurrentChain)
         }
-        guard childIndex.hasValidDirectories,
+        guard childIndex.isWellFormed,
               (try? HeaderImpl(node: childIndex).rawCID)
                 == block.children.rawCID else {
             return .rejected(.protocolInvalid)
@@ -567,7 +568,7 @@ extension ChainTree {
         guard ChainTree.binds(spec, to: block.spec.rawCID) else {
             return .rejected(.providerMalformedEvidence)
         }
-        guard childIndex.hasValidDirectories,
+        guard childIndex.isWellFormed,
               (try? HeaderImpl(node: childIndex).rawCID) == block.children.rawCID else {
             return .rejected(.protocolInvalid)
         }

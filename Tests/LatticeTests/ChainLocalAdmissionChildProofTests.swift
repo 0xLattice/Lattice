@@ -486,7 +486,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             parentChainBlock: parentTemplate
         )
         let wrongParentState = VolumeImpl<LatticeState>(
-            rawCID: "bafywrongparentstate000000000000000000000000000000000000000"
+            rawCID: testCID("wrong-parent-state")
         )
         let tampered = candidate.set(properties: [PARENT_STATE_PROPERTY: wrongParentState])
         guard let mined = BlockBuilder.mine(block: tampered, target: AdmissionFixture.easy, maxAttempts: 10) else {

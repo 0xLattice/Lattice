@@ -70,8 +70,8 @@ public struct DirectChildEdge: Hashable, Scalar {
     }
 
     private func canonicalHop() async -> DirectChildHop? {
-        guard CIDIdentity.isCanonical(parentCarrierCID),
-              CIDIdentity.isCanonical(childCID),
+        guard CIDIdentity.isStandard(parentCarrierCID),
+              CIDIdentity.isStandard(childCID),
               isValidChildDirectory(directory),
               let proof,
               proof.rootCID == parentCarrierCID,
@@ -228,7 +228,7 @@ public struct ChildBlockProof: Sendable {
     /// path as an originally single-hop proof.
     public func directHop() async -> DirectChildHop? {
         guard let directory = directoryPath.last,
-              CIDIdentity.isCanonical(rootCID) else { return nil }
+              CIDIdentity.isStandard(rootCID) else { return nil }
 
         var uniqueEntries: [String: Data] = [:]
         for entry in entries {
@@ -246,9 +246,9 @@ public struct ChildBlockProof: Sendable {
                     paths: [[directory]: .targeted],
                     fetcher: source
                   ).node,
-                  children.hasValidDirectories,
+                  children.isWellFormed,
                   let next: BlockHeader = children[directory],
-                  CIDIdentity.isCanonical(next.rawCID) else { return nil }
+                  CIDIdentity.isStandard(next.rawCID) else { return nil }
             carrier = next
         }
 
@@ -259,9 +259,9 @@ public struct ChildBlockProof: Sendable {
               ),
               let block = hop.block,
               let children = hop.children,
-              children.hasValidDirectories,
+              children.isWellFormed,
               let child: BlockHeader = children[directory],
-              CIDIdentity.isCanonical(child.rawCID) else { return nil }
+              CIDIdentity.isStandard(child.rawCID) else { return nil }
         let proof = hop.proof
 
         return DirectChildHop(
@@ -315,7 +315,7 @@ public struct ChildBlockProof: Sendable {
                 canonicalEntries[entry.cid] = entry.data
             }
             guard let children = hop.children,
-                  children.hasValidDirectories,
+                  children.isWellFormed,
                   let childHeader: BlockHeader = children[directory] else {
                 return nil
             }
@@ -397,7 +397,7 @@ public struct ChildBlockProof: Sendable {
                   ).node,
                   let childHeader: VolumeImpl<Block> = children[directory]
             else { return .failure(.malformedEvidence) }
-            guard children.hasValidDirectories else { return .failure(.protocolInvalid) }
+            guard children.isWellFormed else { return .failure(.protocolInvalid) }
 
             if index == directoryPath.count - 1 {
                 guard childHeader.rawCID == childCID else {

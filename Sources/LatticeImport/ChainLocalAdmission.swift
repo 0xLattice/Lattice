@@ -962,7 +962,7 @@ enum BlockImport {
             guard let children = resolved.node?.children.node else {
                 return .failure(.unavailableEvidence)
             }
-            guard children.hasValidDirectories else {
+            guard children.isWellFormed else {
                 return .failure(.protocolInvalid)
             }
             return .success(children.entries.mapValues(\.rawCID))

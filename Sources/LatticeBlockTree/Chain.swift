@@ -209,8 +209,9 @@ private struct ConsensusBlockInput: Sendable {
 
     init?(fact: ChainBlockFact) {
         // The block hash is computed from the block's own bytes, so it is a
-        // canonical CID; a parent, states and spec are the author's choice
-        // and keep whatever CID shape the author named.
+        // canonical CID. Decoding refuses a header whose parent, states or
+        // spec are not standard CIDs (spec §3.1); a fact recorded outside
+        // that boundary keeps the canonical CID shape it names.
         guard let blockHash = CIDIdentity.canonicalString(fact.blockHash),
               BlockID(blockHash) != nil,
               let postStateCID = CIDIdentity.canonicalString(fact.postStateCID),
