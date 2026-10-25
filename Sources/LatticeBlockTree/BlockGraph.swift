@@ -100,8 +100,10 @@ struct BlockGraph: Sendable {
     private var anchorBlockByHash: [String: String] = [:]
 
     /// Decompose restored or fixture blocks into the graph's tables. A
-    /// fixture carries no anchors: each is derived from ancestry on demand
-    /// (`ChainTree.difficultyAnchor(forBlockHash:)`).
+    /// fixture block holds no anchor, and none is derived for it later: only
+    /// admission (`insertBlock`) records one, at height 1, so
+    /// `ChainTree.difficultyAnchor(forBlockHash:)` answers nil for a
+    /// fixture block.
     init(_ blocks: [String: BlockMeta] = [:]) {
         for (hash, meta) in blocks {
             recordByHash[hash] = BlockRecord(

@@ -1110,19 +1110,20 @@ public struct ChainTree: Sendable {
               forkChoice.acceptsLocation(of: contribution.id, at: blockHash) else {
             return .discarded()
         }
-        if let existing = workContribution(id: contribution.id, at: blockHash),
-           existing.work >= contribution.work {
+        let existing = workContribution(id: contribution.id, at: blockHash)
+        if let existing, existing.work >= contribution.work {
             return .discarded()
         }
         guard hasUnreservedMutationCapacity else { return .discarded() }
-        let workBefore = graph.work(of: blockHash)?.work ?? .zero
         applyLocalContribution(contribution, to: blockHash, attributed: attributed)
         // A strengthening raises this block's own work, so its run (§9.10)
         // rises by exactly that delta — once the block is connected. An
-        // orphan's work is credited in full at the moment it connects.
-        if forkChoice.isRouted(blockHash),
-           let workAfter = graph.work(of: blockHash)?.work,
-           let delta = workAfter.subtracting(workBefore) {
+        // orphan's work is credited in full at the moment it connects. The
+        // delta is this one contribution's rise, strictly positive by the
+        // guard above: O(1), never a re-sum of the block's contributions.
+        if forkChoice.isRouted(blockHash) {
+            let delta = WorkSum(contribution.work)
+                .subtracting(WorkSum(existing?.work ?? .zero))!
             runs.credit(delta, at: blockHash)
         }
         // A stronger observation on an excluded block weighs like any other: it

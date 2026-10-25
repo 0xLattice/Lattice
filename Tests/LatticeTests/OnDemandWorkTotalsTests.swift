@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import UInt256
 @testable import Lattice
@@ -10,6 +11,42 @@ import UInt256
 
 @MainActor
 final class OnDemandWorkTotalsTests: XCTestCase {
+    /// Adding a contribution to a block costs the same however many the block
+    /// already holds: the run's delta is the one contribution's rise, never
+    /// a re-sum of the block. Ratio, not stopwatch: twenty times the
+    /// contributions must not cost several times more per addition.
+    func testAddingContributionsToOneBlockIsLinear() throws {
+        let genesis = testCID("linear-add:genesis")
+        let state = testCID("linear-add:state")
+        let batch = BlockImportBatch.staged([
+            .block(ChainBlockFact(
+                blockHash: genesis, parentBlockHash: nil, blockHeight: 0,
+                postStateCID: state, prevStateCID: state, specCID: testCID("linear-add:spec"),
+                target: "ff", nextTarget: "ff", timestamp: 0, stateDiff: .empty
+            )),
+            .work(ChainWorkFact(
+                blockHash: genesis,
+                contribution: VerifiedWorkContribution(id: genesis, work: UInt256(1))
+            )),
+        ])
+        func perAddition(_ count: Int) throws -> Double {
+            var tree = try ChainTree.restoreWithoutContext(replaying: [batch])
+            tree.serveRuns(for: "child")
+            let contributions = (0..<count).map {
+                VerifiedWorkContribution(id: testCID("linear-add:\(count):\($0)"), work: UInt256(2))
+            }
+            let start = DispatchTime.now().uptimeNanoseconds
+            for contribution in contributions {
+                XCTAssertTrue(tree.addWorkContribution(contribution, to: genesis).addedContribution)
+            }
+            return Double(DispatchTime.now().uptimeNanoseconds - start) / Double(count)
+        }
+        _ = try perAddition(500)
+        let few = try perAddition(500)
+        let many = try perAddition(10_000)
+        XCTAssertLessThan(many / few, 3, "per-addition cost grew with the block's contributions")
+    }
+
     /// The diagnostic totals are derived on demand: no block carries them.
     func testLinearAdmissionsAnswerLocalTotalsOnDemand() async throws {
         let (chain, hashes) = try await lazyCacheLinearChain(count: 6)
