@@ -22,7 +22,11 @@ public enum ChainStateRestoreError: Error, Sendable, Equatable {
 /// `cid` in its canonical spelling when it is the standard CID (spec §3.1),
 /// the only identity the block tree holds; nil for anything else.
 func standardCID(_ cid: String) -> String? {
-    CIDIdentity.canonicalString(cid).flatMap { CIDIdentity.isStandard($0) ? $0 : nil }
+    // The standard CID in canonical spelling, as every honest fact names it,
+    // is proven by the one strict parse; only another spelling pays for the
+    // canonical round-trip.
+    if CIDIdentity.isStandard(cid) { return cid }
+    return CIDIdentity.canonicalString(cid).flatMap { CIDIdentity.isStandard($0) ? $0 : nil }
 }
 
 // MARK: - Concrete Types
@@ -232,7 +236,7 @@ private struct ConsensusBlockInput: Sendable {
               let postStateCID = standardCID(fact.postStateCID),
               let prevStateCID = standardCID(fact.prevStateCID),
               let specCID = standardCID(fact.specCID),
-              let childCommitments = Self.standardCommitments(fact.childCommitments ?? [:]),
+              (fact.childCommitments ?? [:]).values.allSatisfy({ standardCID($0) != nil }),
               let target = UInt256.fromHexDigits(fact.target),
               let nextTarget = UInt256.fromHexDigits(fact.nextTarget),
               // Every block, genesis included, commits a positive target and
@@ -248,7 +252,7 @@ private struct ConsensusBlockInput: Sendable {
         parentBlockHash = normalizedParent
         blockHeight = fact.blockHeight
         timestamp = fact.timestamp
-        self.childCommitments = childCommitments
+        childCommitments = fact.childCommitments ?? [:]
         snapshot = TipBlockSnapshot(
             postStateCID: postStateCID,
             prevStateCID: prevStateCID,
@@ -264,18 +268,8 @@ private struct ConsensusBlockInput: Sendable {
     /// CIDs in canonical spelling: what the block graph holds.
     var namesStandardCIDs: Bool {
         (parentBlockHash.map { BlockID($0) != nil } ?? true)
-            && childCommitments.values.allSatisfy { BlockID($0) != nil }
+            && childCommitments.values.allSatisfy { standardCID($0) != nil }
             && snapshot.namesStandardCIDs
-    }
-
-    /// The commitments with every child CID standard, or nil.
-    private static func standardCommitments(_ commitments: [String: String]) -> [String: String]? {
-        var result: [String: String] = [:]
-        for (directory, child) in commitments {
-            guard let standard = standardCID(child) else { return nil }
-            result[directory] = standard
-        }
-        return result
     }
 
     /// Whether the fact names a parent, state, spec or child that is not
@@ -500,7 +494,7 @@ public struct ChainTree: Sendable {
         guard hashToBlock.values.allSatisfy({
                   BlockID($0.blockHash) != nil
                       && ($0.parentBlockHash.map { BlockID($0) != nil } ?? true)
-                      && $0.childCommitments.values.allSatisfy { BlockID($0) != nil }
+                      && $0.childCommitments.values.allSatisfy { standardCID($0) != nil }
               }),
               snapshots.allSatisfy(\.namesStandardCIDs) else {
             throw ChainStateRestoreError.corruptConsensusGraph
