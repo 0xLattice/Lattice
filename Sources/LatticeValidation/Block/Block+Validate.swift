@@ -427,7 +427,6 @@ public extension Block {
 
         // Directory is positional (the anchor context / chainPath), not in the
         // spec; nil chainPath ⇒ root.
-        if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: expectedChainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
@@ -435,6 +434,9 @@ public extension Block {
         }
         if !validateChainPaths(transactionBodies: transactionBodies, expectedPath: expectedChainPath) { return (false, .empty, nil) }
         if !validateNoDepositsOrWithdrawalsOnRoot(transactionBodies: transactionBodies, expectedPath: expectedChainPath) { return (false, .empty, nil) }
+        // The policies after the block's own limits: a block over them costs
+        // no policy evaluation.
+        if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: expectedChainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
 
         if try await !validateWithdrawals(
             transactionBodies: transactionBodies,

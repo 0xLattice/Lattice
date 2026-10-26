@@ -31,6 +31,11 @@ public extension ChainLevel {
     /// A transaction with negative miner surplus (it creates value) is
     /// `.invalid`. Block-wide conservation, count, and aggregate-growth checks
     /// remain the block builder's responsibility.
+    ///
+    /// The chain's policies run after the checks that can refuse a
+    /// transaction cheaply (signatures, nonce, withdrawals, state), and before
+    /// any verdict that keeps it: nothing they refuse is `.ready`, `.future`,
+    /// or `.unavailable` for want of its parent's state.
     func preflightTransaction(
         _ transaction: Transaction,
         at tipCID: String? = nil,
@@ -57,6 +62,11 @@ public enum TransactionPreflight {
     /// reads them (a nil snapshot is `.unavailable`), and the chain's path.
     /// A host job that holds only these classifies exactly as the level
     /// would, without holding the chain's tree.
+    ///
+    /// `checksPolicies: false` leaves the chain's policies out: a host
+    /// re-checking a transaction they already accepted on an earlier tip
+    /// learns whether it still fits this one's state. It must judge the
+    /// transaction by them again before any block it builds carries it.
     public static func classify(
         _ transaction: Transaction,
         tipCID: String,
@@ -64,7 +74,8 @@ public enum TransactionPreflight {
         chainPath: [String],
         parentState: LatticeStateHeader? = nil,
         fetcher: any Fetcher,
-        validationContext: ValidationContext = .current
+        validationContext: ValidationContext = .current,
+        checksPolicies: Bool = true
     ) async -> TransactionPreflightResult {
         let tip = (cid: tipCID, snapshot: snapshot)
         guard let snapshot = tip.snapshot else {
@@ -98,24 +109,36 @@ public enum TransactionPreflight {
             guard let spec = try await specHeader.resolve(fetcher: fetcher).node else {
                 return result(.unavailable, tipCID: tip.cid)
             }
-            // Policies see the block that would carry this transaction next: the
-            // one above the tip, stamped no earlier than now.
-            let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
-            guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
-            let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
             // Only the floor is a permanent verdict: whether credits create
             // accounts depends on the state the transaction lands on.
             guard spec.isValid,
-                  try TransactionBody.stateGrowthFloor(of: [body]).map({ $0 <= spec.maxStateGrowth }) ?? false,
-                  try await TransactionBody.batchVerifyPolicies(
+                  try TransactionBody.stateGrowthFloor(of: [body]).map({ $0 <= spec.maxStateGrowth }) ?? false else {
+                return result(.invalid, tipCID: tip.cid)
+            }
+
+            // The policies run after every cheap check that can refuse: a
+            // transaction those refuse never costs this node a policy
+            // evaluation. Any verdict that keeps a transaction (ready, future,
+            // or a withdrawal waiting for its parent) is reached only through
+            // them, so nothing they refuse is pooled. They see the block that
+            // would carry it next: the one above the tip, stamped no earlier
+            // than now.
+            func judged(_ disposition: TransactionPreflightDisposition) async throws -> TransactionPreflightResult {
+                guard checksPolicies else { return result(disposition, tipCID: tip.cid) }
+                let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
+                guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
+                let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
+                guard try await TransactionBody.batchVerifyPolicies(
                     bodies: [body],
                     spec: spec,
                     chainPath: chainPath,
                     height: snapshot.tipHeight + 1,
                     timestamp: nextTimestamp,
                     fetcher: fetcher
-                  ) else {
-                return result(.invalid, tipCID: tip.cid)
+                ) else {
+                    return result(.invalid, tipCID: tip.cid)
+                }
+                return result(disposition, tipCID: tip.cid)
             }
 
             let stateHeader = LatticeStateHeader(rawCID: snapshot.postStateCID)
@@ -133,7 +156,7 @@ public enum TransactionPreflight {
                     return result(.invalid, tipCID: tip.cid)
                 }
                 if body.nonce > expected {
-                    return result(.future, tipCID: tip.cid)
+                    return try await judged(.future)
                 }
             }
 
@@ -142,7 +165,29 @@ public enum TransactionPreflight {
                       let directory = chainPath.last,
                       let parent = try await parentState.resolve(fetcher: fetcher).node
                 else {
-                    return result(.unavailable, tipCID: tip.cid)
+                    return try await judged(.unavailable)
+                }
+                // A receipt or deposit this node does not hold yet may be one
+                // block away (its parent level lags the wallet's): a retry,
+                // the transaction not ready and not pooled. One it holds
+                // that contradicts the withdrawal is a verdict, as is a spent
+                // deposit (`proveAndUpdateState` below).
+                for withdrawal in body.withdrawalActions {
+                    let receiptKey = ReceiptKey(withdrawalAction: withdrawal, directory: directory).storageKey
+                    let depositKey = DepositKey(withdrawalAction: withdrawal).description
+                    let receipts = try await parent.receiptState.resolve(
+                        paths: [[receiptKey]: .targeted], fetcher: fetcher
+                    ).node
+                    let deposits = try await state.depositState.resolve(
+                        paths: [[depositKey]: .targeted], fetcher: fetcher
+                    ).node
+                    let withdrawer: String? = try? receipts?.get(key: receiptKey)
+                    if let withdrawer, withdrawer != withdrawal.withdrawer {
+                        return result(.invalid, tipCID: tip.cid)
+                    }
+                    guard withdrawer != nil, (try? deposits?.get(key: depositKey) as UInt64?) != nil else {
+                        return result(.unavailable, tipCID: tip.cid)
+                    }
                 }
                 guard try await body.withdrawalsAreValid(
                     directory: directory,
@@ -163,7 +208,7 @@ public enum TransactionPreflight {
                 transactionBodies: [body],
                 fetcher: fetcher
             )
-            return result(.ready, tipCID: tip.cid)
+            return try await judged(.ready)
         } catch {
             return result(
                 transactionPreflightEvidenceUnavailable(error)

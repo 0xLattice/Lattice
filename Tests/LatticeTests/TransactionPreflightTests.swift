@@ -363,6 +363,105 @@ final class TransactionPreflightTests: XCTestCase {
         XCTAssertEqual(missingBodyResult.disposition, .unavailable)
     }
 
+    func testTheCheapChecksDecideBeforeAnyPolicyRuns() async throws {
+        // The policy's module is missing, so a transaction that reaches the
+        // policy is `.unavailable`. Every other verdict below was reached
+        // without running it.
+        let fetcher = StorableFetcher()
+        let alice = CryptoUtils.generateKeyPair()
+        let bob = CryptoUtils.generateKeyPair()
+        let missingModule = WasmPolicyRef(
+            moduleCID: testCID("missing-policy"),
+            scope: .transaction
+        )
+        let aliceAddress = testAddress(publicKey: alice.publicKey)
+        let genesis = try await buildAndStoreGenesis(
+            spec: spec(premine: 1, policies: [missingModule]),
+            transactions: [transaction(
+                signers: [alice],
+                nonce: 0,
+                accountActions: [AccountAction(owner: aliceAddress, delta: 500)]
+            )],
+            timestamp: 1_000,
+            target: easy,
+            fetcher: fetcher
+        )
+        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let bobAddress = testAddress(publicKey: bob.publicKey)
+
+        let cases: [(String, Transaction, TransactionPreflightDisposition)] = [
+            ("stale nonce", transaction(signers: [alice], nonce: 0), .invalid),
+            ("future nonce: the policy judges what is kept", transaction(signers: [alice], nonce: 2), .unavailable),
+            ("overspend", transaction(
+                signers: [bob],
+                nonce: 0,
+                accountActions: [AccountAction(owner: bobAddress, delta: -1)]
+            ), .invalid),
+            ("a wrong old value", transaction(
+                signers: [alice],
+                nonce: 1,
+                actions: [Action(key: "k", oldValue: "not-there", newValue: "v")]
+            ), .invalid),
+            ("ready: the policy runs", transaction(signers: [alice], nonce: 1), .unavailable),
+        ]
+        for (label, tx, expected) in cases {
+            let result = await level.preflightTransaction(tx, fetcher: fetcher)
+            XCTAssertEqual(result.disposition, expected, label)
+        }
+
+        // Without the policies, the same ready transaction is ready, and the
+        // state checks still refuse what they refused.
+        let tree = await level.chain.tree
+        let basis = tree.transactionPreflightTip(at: nil)
+        let unjudged: [(String, Transaction, TransactionPreflightDisposition)] = [
+            ("ready", transaction(signers: [alice], nonce: 1), .ready),
+            ("stale nonce", transaction(signers: [alice], nonce: 0), .invalid),
+            ("future nonce", transaction(signers: [alice], nonce: 2), .future),
+        ]
+        for (label, tx, expected) in unjudged {
+            let result = await TransactionPreflight.classify(
+                tx,
+                tipCID: basis.cid,
+                snapshot: basis.snapshot,
+                chainPath: level.context.path,
+                fetcher: fetcher,
+                checksPolicies: false
+            )
+            XCTAssertEqual(result.disposition, expected, "unjudged: \(label)")
+        }
+    }
+
+    func testNothingAPolicyRefusesIsKeptWhateverItsNonce() async throws {
+        let fetcher = StorableFetcher()
+        let alice = CryptoUtils.generateKeyPair()
+        let refusing = try await storeWasmPolicy(
+            accepts: false,
+            scope: .transaction,
+            fetcher: fetcher
+        )
+        let aliceAddress = testAddress(publicKey: alice.publicKey)
+        let genesis = try await buildAndStoreGenesis(
+            spec: spec(premine: 1, policies: [refusing]),
+            transactions: [transaction(
+                signers: [alice],
+                nonce: 0,
+                accountActions: [AccountAction(owner: aliceAddress, delta: 500)]
+            )],
+            timestamp: 1_000,
+            target: easy,
+            fetcher: fetcher
+        )
+        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+
+        for (label, nonce) in [("ready", UInt64(1)), ("future", 2), ("far future", 40)] {
+            let result = await level.preflightTransaction(
+                transaction(signers: [alice], nonce: nonce),
+                fetcher: fetcher
+            )
+            XCTAssertEqual(result.disposition, .invalid, label)
+        }
+    }
+
     func testRejectingPolicyIsInvalid() async throws {
         let fetcher = StorableFetcher()
         let policy = try await storeWasmPolicy(
@@ -736,5 +835,29 @@ final class TransactionPreflightTests: XCTestCase {
             fetcher: fetcher
         )
         XCTAssertEqual(result.disposition, .unavailable)
+
+        // A parent state without the receipt: it may be a block away, so a
+        // retry, never a verdict.
+        try await LatticeState.emptyHeader.storeRecursively(storer: fetcher)
+        let unproven = await level.preflightTransaction(
+            withdrawal,
+            parentState: LatticeState.emptyHeader,
+            fetcher: fetcher
+        )
+        XCTAssertEqual(unproven.disposition, .unavailable)
+
+        // A receipt that is there and names another withdrawer is a verdict.
+        let empty = LatticeState.empty
+        let (receipts, _) = try await empty.receiptState.proveAndUpdateState(allReceiptActions: [ReceiptAction(
+            withdrawer: testAddress(publicKey: CryptoUtils.generateKeyPair().publicKey),
+            nonce: 1, demander: address, amountDemanded: 1, directory: "Child"
+        )], fetcher: fetcher)
+        let parent = try LatticeStateHeader(node: LatticeState(
+            accountState: empty.accountState, generalState: empty.generalState,
+            depositState: empty.depositState, receiptState: receipts
+        ))
+        try await parent.storeRecursively(storer: fetcher)
+        let contradicted = await level.preflightTransaction(withdrawal, parentState: parent, fetcher: fetcher)
+        XCTAssertEqual(contradicted.disposition, .invalid)
     }
 }
