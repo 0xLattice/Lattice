@@ -169,7 +169,9 @@ final class WasmPolicyHostDeterminismTests: XCTestCase {
             XCTAssertThrowsError(try WasmPolicyEvaluator.validate(policy: policy, moduleBytes: bytes), item) { error in
                 XCTAssertEqual(wasmPolicyErrorVerdict(error), .invalid, "\(item): \(error)")
             }
-            XCTAssertThrowsError(try evaluate(bytes), item)
+            XCTAssertThrowsError(try evaluate(bytes), item) { error in
+                XCTAssertEqual(wasmPolicyErrorVerdict(error), .invalid, "\(item): \(error)")
+            }
         }
         let importedMemory = Data(try wat2wasm("""
         (module
@@ -238,16 +240,21 @@ final class WasmPolicyHostDeterminismTests: XCTestCase {
     }
 
     private func onThread<T>(stackSize: Int, _ body: @escaping @Sendable () throws -> T) throws -> T {
-        var result: Result<T, Error>!
-        let done = DispatchSemaphore(value: 0)
+        let box = ResultBox<T>()
         let thread = Thread {
-            result = Result { try body() }
-            done.signal()
+            box.result = Result { try body() }
+            box.done.signal()
         }
         thread.stackSize = stackSize
         thread.start()
-        done.wait()
-        return try result.get()
+        box.done.wait()
+        return try box.result!.get()
+    }
+
+    /// Written once by the thread before `done` is signalled, read after.
+    private final class ResultBox<T>: @unchecked Sendable {
+        var result: Result<T, Error>?
+        let done = DispatchSemaphore(value: 0)
     }
 
     /// The trap depth is fixed by `callStackBytes` and the engine's frame
