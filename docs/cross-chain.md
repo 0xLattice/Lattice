@@ -98,7 +98,8 @@ The receipt transaction must satisfy:
 - `withdrawer` signed the transaction;
 - `amountDemanded > 0`;
 - the `ReceiptKey` is absent before insertion;
-- the withdrawer can fund the derived debit.
+- the withdrawer can fund the derived debit, netted with the block's other
+  deltas to the same owner (spec §6.2).
 
 The parent derives an equal debit and credit:
 

@@ -612,7 +612,8 @@ postState = proveAndUpdateState(prevState, actions)
 
 This operation:
 1. Partitions actions by type into 5 groups (one per sub-state)
-2. For each sub-state, concurrently:
+2. For each sub-state, concurrently (the account deltas include those receipts
+   derive, §6.5, netted per owner as §6.2 says):
    a. Generates Sparse Merkle proofs that current values match `prevState`
    b. Applies mutations (inserts, updates, deletions)
    c. Returns new Merkle root
@@ -628,7 +629,8 @@ same block needs only the net amount, never an intermediate balance. An owner
 whose deltas cancel is untouched. For each owner with a nonzero net delta:
 - **Proof**: Verify `prevState.accountState[owner]` exists (or does not, for new accounts)
 - **Update**: Apply the net delta to the balance. Positive = credit, negative = debit.
-  - If resulting balance < 0: the block is invalid
+  - If resulting balance < 0, or a net delta or resulting balance exceeds
+    `UInt64`: the block is invalid
   - If resulting balance > 0: set `accountState[owner] = newBalance`
   - If resulting balance == 0: delete `accountState[owner]`
 
@@ -967,8 +969,8 @@ With a recipient, fees move from payers to the recipient; receipts net to zero.
 **No double-deposit**: Deposit keys are unique in deposit state (insertion proof prevents duplicate deposits with the same nonce/demander/amount).
 
 **No double-withdrawal**: Withdrawal leaves a permanent zero-valued marker. A
-second withdrawal fails the nonzero amount check, and insertion cannot recreate
-the same deposit key.
+second withdrawal fails the check that the stored deposit is nonzero, and
+insertion cannot recreate the same deposit key.
 
 **No over-withdrawal**: The stored `amountDeposited` must exactly match the
 declared `amountWithdrawn`. A larger declaration fails the state proof.
