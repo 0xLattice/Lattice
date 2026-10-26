@@ -205,17 +205,26 @@ private final class ForkChoiceTrace {
 
     func after() -> [String: Any] {
         guard let tree = subject?.tree else {
-            return ["canonicalTip": NSNull(), "validatedTip": NSNull(), "weights": [String: String]()]
+            return [
+                "canonicalTip": NSNull(), "validatedTip": NSNull(),
+                "weights": [String: String](), "cumulative": [String: String](),
+            ]
         }
         func label(_ hash: String) -> Any { hash.isEmpty ? NSNull() : labelOfHash[hash]! }
-        var weights: [String: String] = [:]
+        // `weights` is what fork choice compares (`BlockGraph.preferred` reads
+        // the same index): the block's whole subtree. `cumulative` is the
+        // block plus its ancestors (spec §9.2 `cumulativeWork`).
+        var weights: [String: String] = [:], cumulative: [String: String] = [:]
         for label in held {
-            weights[label] = tree.getCumulativeWork(forHash: facts[label]!.hash).map(decimal) ?? "nil"
+            let hash = facts[label]!.hash
+            weights[label] = tree.forkChoiceWeight(of: hash).map(decimal) ?? "nil"
+            cumulative[label] = tree.getCumulativeWork(forHash: hash).map(decimal) ?? "nil"
         }
         return [
             "canonicalTip": label(tree.canonicalTip),
             "validatedTip": label(tree.heaviestExecutedTip()),
             "weights": weights,
+            "cumulative": cumulative,
         ]
     }
 
@@ -241,10 +250,13 @@ private final class ForkChoiceTrace {
     func checkSanity(_ test: XCTestCase) {
         XCTAssertFalse(events.isEmpty, "seed \(seed)")
         for event in events {
-            guard let weights = (event["after"] as? [String: Any])?["weights"] as? [String: String] else {
+            let after = event["after"] as? [String: Any]
+            guard let weights = after?["weights"] as? [String: String],
+                  let cumulative = after?["cumulative"] as? [String: String] else {
                 return XCTFail("seed \(seed): no weights")
             }
-            for (label, weight) in weights {
+            XCTAssertEqual(Set(weights.keys), Set(cumulative.keys), "seed \(seed)")
+            for (label, weight) in weights.map({ $0 }) + cumulative.map({ $0 }) {
                 guard let value = UInt64(weight) else { return XCTFail("seed \(seed) \(label): \(weight)") }
                 XCTAssertGreaterThanOrEqual(value, initialQuantity[label]!, "seed \(seed) \(label)")
             }
