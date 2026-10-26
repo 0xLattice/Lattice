@@ -360,7 +360,8 @@ enum BlockImport {
         { query in
             switch query {
             case .continuity(let expected):
-                return facts?.hasContinuity(expected) == true ? .present : .absent
+                guard let facts else { return .absent }
+                return await facts.hasContinuity(expected) ? .present : .absent
             case .none:
                 return .absent
             }
@@ -375,7 +376,7 @@ enum BlockImport {
         childCID: String,
         predecessorParentState: String?,
         context: ChainRuntimeContext
-    ) -> BlockImportError? {
+    ) async -> BlockImportError? {
         let parentPath = Array(context.path.dropLast())
         // Every block proves that the parent chain carried its anchor forward
         // from its predecessor's (§5.3 step 6): its `parentState` was produced
@@ -414,7 +415,7 @@ enum BlockImport {
             // either. Dropping back to it from a real anchor moves backward,
             // and both anchors are in the blocks' own bytes.
             guard fromStateCID == emptyCID else { return .protocolInvalid }
-            return lookup(.none) == .absent ? nil : .providerMalformedEvidence
+            return await lookup(.none) == .absent ? nil : .providerMalformedEvidence
         }
 
         let expected = ParentStateContinuityLink(
@@ -422,7 +423,7 @@ enum BlockImport {
             fromStateCID: fromStateCID,
             toStateCID: toStateCID
         )
-        switch lookup(.continuity(expected)) {
+        switch await lookup(.continuity(expected)) {
         case .present:
             return nil
         case .malformed:
@@ -1050,7 +1051,7 @@ enum BlockImport {
                     return .failure(classifyResolutionFailure(error))
                 }
             }
-            if let failure = validateParentFacts(
+            if let failure = await validateParentFacts(
                 parentFacts,
                 child: block,
                 childCID: blockHash,

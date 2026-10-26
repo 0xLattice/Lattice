@@ -18,7 +18,12 @@ public protocol ParentChainFacts: Sendable {
     /// produced `toStateCID` and is or descends from one that produced
     /// `fromStateCID` (from the parent's genesis pre-state, or between equal
     /// states, only that `toStateCID` was produced).
-    func hasContinuity(_ link: ParentStateContinuityLink) -> Bool
+    ///
+    /// Async so a source that cannot lend the parent's tree to a connect
+    /// (one that keeps mutating it elsewhere) answers the exact link asked
+    /// from its live executed set. False means only "not yet": the block
+    /// awaits the fact, never invalid on it.
+    func hasContinuity(_ link: ParentStateContinuityLink) async -> Bool
 }
 
 /// A parent level's facts as values: its tree, whose executed set and path
@@ -53,7 +58,7 @@ enum ParentFactAnswer: Sendable, Equatable {
     case malformed
 }
 
-typealias ParentFactLookup = @Sendable (ParentFactQuery) -> ParentFactAnswer
+typealias ParentFactLookup = @Sendable (ParentFactQuery) async -> ParentFactAnswer
 
 // MARK: - Results
 
