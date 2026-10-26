@@ -24,7 +24,7 @@ sources rather than validity or fork-choice authorities.
 
 - `H(x)` -- SHA-256 hash of `x`
 - `CID(x)` -- Content Identifier of serialized `x` (IPLD DAG-CBOR + SHA-256)
-- `SMT` -- Sparse Merkle Tree
+- `Trie<K -> V>` -- content-addressed compressed radix trie mapping `K` to `V` (section 3.4.1)
 - `B[i]` -- Block at height `i` on a given chain
 - `||` -- concatenation
 - `>>` -- arithmetic right shift
@@ -111,16 +111,56 @@ TransactionBody = (
 
 ### 3.4 LatticeState
 
-The world state is a 4-tuple of Sparse Merkle Tree roots:
+The world state is a 4-tuple of radix-trie roots:
 
 ```
 LatticeState = (
-    accountState:      SMT<CID(PublicKey) -> uint64>,
-    generalState:      SMT<string -> string>,
-    depositState:      SMT<DepositKey -> uint64>,
-    receiptState:      SMT<ReceiptKey -> CID(PublicKey)>
+    accountState:      Trie<CID(PublicKey) -> uint64>,
+    generalState:      Trie<string -> string>,
+    depositState:      Trie<DepositKey -> uint64>,
+    receiptState:      Trie<ReceiptKey -> CID(PublicKey)>
 )
 ```
+
+`LatticeState` is the DAG-CBOR map of its four fields, each a `Link` to that
+sub-state's root; its CID is what a block commits as `parentState`,
+`prevState`, or `postState`.
+
+#### 3.4.1 State Commitment
+
+Each sub-state is a content-addressed compressed radix trie, not a sparse
+Merkle tree: it has no fixed depth and no default hashes. Its keys are
+state-key strings (the grammar in section 3.5; receipt state uses the hashed
+path given there), compared character by character. The empty string is not a
+key. Nodes are DAG-CBOR maps:
+
+```
+Root  = { count: uint, children: [Entry] }
+Inner = { prefix: string, value: V, children: [Entry] }  // value omitted when absent
+Entry = { key: string, value: Link }                     // key is exactly one character
+Link  = { rawCID: string }                               // canonical CID text
+```
+
+`V` is a uint64 in `accountState` and `depositState` and a text string in
+`generalState` and `receiptState` (the receipt value is the CID text).
+`count` is the number of entries in the map. `children` is sorted by `key`,
+without duplicates. A node's CID is the standard CID (section 3.1) of its
+canonical DAG-CBOR encoding (map keys ordered by length, then bytewise;
+minimal heads); bytes that do not re-encode identically are not a node.
+
+A trie commits a map only in canonical form, which determines the root CID
+from the map alone:
+
+- The child filed under character `c` has a prefix beginning with `c`. A
+  node's key is the concatenation of prefixes from the root to it, and the node
+  carries a value exactly when that key is in the map.
+- An inner node without a value has at least two children: a value-less node
+  left with one child is merged into it (prefixes concatenated), and one left
+  with none is removed.
+- The root never collapses. The empty map is `{count: 0, children: []}`.
+
+Every state a valid block commits, genesis included, is derived from the empty
+state by section 6.1, so it is in canonical form.
 
 ### 3.5 ChainSpec
 
@@ -611,13 +651,23 @@ postState = proveAndUpdateState(prevState, actions)
 ```
 
 This operation:
-1. Partitions actions by type into 5 groups (one per sub-state)
-2. For each sub-state, concurrently (the account deltas include those receipts
-   derive, §6.5, netted per owner as §6.2 says):
-   a. Generates Sparse Merkle proofs that current values match `prevState`
-   b. Applies mutations (inserts, updates, deletions)
-   c. Returns new Merkle root
-3. Assembles the 5 new roots into a new `LatticeState`
+1. Partitions actions among the four sub-states (the account deltas include
+   those receipts derive, §6.5, netted per owner as §6.2 says)
+2. For each sub-state, independently (`depositState` applies withdrawals, then
+   deposits, §6.4):
+   a. Resolves from `prevState` the trie nodes on the path of every touched
+      key, each checked against the CID that links it, and reads the current
+      values
+   b. Checks each precondition of §6.2–6.5: an insertion requires no value at
+      its key; an update or deletion requires one
+   c. Applies the insertions, updates, and deletions in canonical form
+      (§3.4.1) and recomputes CIDs bottom-up to a new root
+3. Assembles the four new roots into a new `LatticeState`
+
+There is no separate proof object: the resolved path nodes are the witness. A
+failed precondition makes the block invalid. A needed node that cannot be
+obtained leaves the transition unexecuted: the block is unavailable, not
+invalid (§9.9).
 
 ### 6.2 Account State Transitions
 
@@ -866,7 +916,7 @@ children.
 
 The cross-chain transfer protocol enables trustless value movement between
 parent and child chains in the hierarchy. Consensus requires signatures and
-Sparse Merkle proofs against state roots committed in blocks. Providers may
+state witnesses (trie paths, §3.4.1) against state roots committed in blocks. Providers may
 relay the required bytes, but no bridge, federation, or relayer has validity
 authority.
 
@@ -1443,7 +1493,7 @@ ceiling. That decision is local capacity policy, not `ChainSpec` invalidity.
 | Hash | SHA-256 | Block hashes, Merkle trees, addresses, proof-of-work |
 | Signature | Ed25519 | Transaction authorization |
 | Content addressing | CID (DAG-CBOR + SHA-256) | All data structure references |
-| Sparse proofs | Sparse Merkle Tree | State inclusion/exclusion proofs |
+| State witnesses | Compressed radix trie (§3.4.1) | State inclusion/exclusion proofs |
 
 ### 11.1 Address Derivation
 
