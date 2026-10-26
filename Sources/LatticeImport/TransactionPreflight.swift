@@ -167,22 +167,34 @@ public enum TransactionPreflight {
                 else {
                     return try await judged(.unavailable)
                 }
-                // A receipt or deposit this state lacks may be one block
-                // away (the parent level here lags the wallet's), so a
-                // failed proof is a retry, never a verdict: the
-                // transaction is still not ready and is not pooled.
-                let proven: Bool
-                do {
-                    proven = try await body.withdrawalsAreValid(
-                        directory: directory,
-                        prevState: state,
-                        parentState: parent,
-                        fetcher: fetcher
-                    )
-                } catch {
-                    return result(.unavailable, tipCID: tip.cid)
+                // A receipt or deposit this node does not hold yet may be one
+                // block away (its parent level lags the wallet's): a retry,
+                // the transaction not ready and not pooled. One it holds
+                // that contradicts the withdrawal is a verdict, as is a spent
+                // deposit (`proveAndUpdateState` below).
+                for withdrawal in body.withdrawalActions {
+                    let receiptKey = ReceiptKey(withdrawalAction: withdrawal, directory: directory).storageKey
+                    let depositKey = DepositKey(withdrawalAction: withdrawal).description
+                    let receipts = try await parent.receiptState.resolve(
+                        paths: [[receiptKey]: .targeted], fetcher: fetcher
+                    ).node
+                    let deposits = try await state.depositState.resolve(
+                        paths: [[depositKey]: .targeted], fetcher: fetcher
+                    ).node
+                    let withdrawer: String? = try? receipts?.get(key: receiptKey)
+                    if let withdrawer, withdrawer != withdrawal.withdrawer {
+                        return result(.invalid, tipCID: tip.cid)
+                    }
+                    guard withdrawer != nil, (try? deposits?.get(key: depositKey) as UInt64?) != nil else {
+                        return result(.unavailable, tipCID: tip.cid)
+                    }
                 }
-                guard proven else {
+                guard try await body.withdrawalsAreValid(
+                    directory: directory,
+                    prevState: state,
+                    parentState: parent,
+                    fetcher: fetcher
+                ) else {
                     return result(.invalid, tipCID: tip.cid)
                 }
             }

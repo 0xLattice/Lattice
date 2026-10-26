@@ -845,5 +845,19 @@ final class TransactionPreflightTests: XCTestCase {
             fetcher: fetcher
         )
         XCTAssertEqual(unproven.disposition, .unavailable)
+
+        // A receipt that is there and names another withdrawer is a verdict.
+        let empty = LatticeState.empty
+        let (receipts, _) = try await empty.receiptState.proveAndUpdateState(allReceiptActions: [ReceiptAction(
+            withdrawer: testAddress(publicKey: CryptoUtils.generateKeyPair().publicKey),
+            nonce: 1, demander: address, amountDemanded: 1, directory: "Child"
+        )], fetcher: fetcher)
+        let parent = try LatticeStateHeader(node: LatticeState(
+            accountState: empty.accountState, generalState: empty.generalState,
+            depositState: empty.depositState, receiptState: receipts
+        ))
+        try await parent.storeRecursively(storer: fetcher)
+        let contradicted = await level.preflightTransaction(withdrawal, parentState: parent, fetcher: fetcher)
+        XCTAssertEqual(contradicted.disposition, .invalid)
     }
 }
