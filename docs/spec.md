@@ -423,6 +423,13 @@ this order:
 7. Apply the ordinary genesis or non-genesis transition rules to `B`, including
    withdrawal proofs against `B.parentState`.
 
+The order says what each step may assume, not when a verdict may be reached.
+A transition that fails step 7 fails it against `B.parentState` as `B`
+declares it, so `B` is invalid whatever step 6 concludes; that failure is a
+deterministic verdict and may be recorded while step 6 is still unanswered (an
+anchor the parent has not shown it executed). A transition that passes step 7
+still needs step 6 proven before `B` is valid.
+
 Intermediate carriers need not satisfy their own target, transition, timing,
 target-succession, import, connectivity, or canonicity rules. Their exact
 bytes and directory commitments are sufficient for work verification. Parent
