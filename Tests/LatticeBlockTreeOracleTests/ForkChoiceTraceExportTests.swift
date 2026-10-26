@@ -63,6 +63,8 @@ private final class ForkChoiceTrace {
     /// attempted again until some root executes.
     var refusedRootExclusions: Set<String> = []
     var events: [[String: Any]] = []
+    /// Refusals outside the two this generator expects; the test fails on any.
+    var unexpectedRefusals: [String] = []
 
     init(seed: UInt64) {
         self.seed = seed
@@ -145,7 +147,12 @@ private final class ForkChoiceTrace {
             if subject == nil {
                 // A tree is restored from a log holding a genesis: the first
                 // admission (always a root) is that log.
-                subject = try? LiveSubject.restoreRoot([batch], specs: [spec]).get()
+                switch LiveSubject.restoreRoot([batch], specs: [spec]) {
+                case .success(let restored):
+                    subject = restored
+                case .failure(let failure):
+                    unexpectedRefusals.append("admit \(label): \(failure.text)")
+                }
                 accepted = subject != nil
             } else {
                 accepted = apply(batch)
@@ -162,7 +169,7 @@ private final class ForkChoiceTrace {
             let quantity = UInt64.random(in: 1...4, using: &rng)
             let accepted = apply(OracleBatch(facts: [
                 .work(blockHash: facts[label]!.hash, grindID: grindID(grindLabel), work: UInt256(quantity)),
-            ]))
+            ]), mayRefuse: grindLabel != grind(label))
             event = ["kind": "observe", "block": label, "grind": grindLabel, "qty": quantity, "accepted": accepted]
         case .validate(let label):
             let accepted = apply(OracleBatch(facts: [.validation(facts[label]!.hash)]))
@@ -172,7 +179,11 @@ private final class ForkChoiceTrace {
             }
             event = ["kind": "validate", "block": label, "accepted": accepted]
         case .exclude(let label):
-            let accepted = apply(OracleBatch(facts: [.exclusion(facts[label]!.hash)]))
+            let standsOnAnotherRoot = executed.contains { isRoot($0) && $0 != label }
+            let accepted = apply(
+                OracleBatch(facts: [.exclusion(facts[label]!.hash)]),
+                mayRefuse: isRoot(label) && !standsOnAnotherRoot
+            )
             if accepted {
                 excluded.insert(label)
             } else if isRoot(label) {
@@ -189,11 +200,19 @@ private final class ForkChoiceTrace {
     /// nil is the tree discarding work no stronger than what it holds. A
     /// validation returns nil on success, and an exclusion returns nil only
     /// as a duplicate, which this generator never sends.
-    func apply(_ batch: OracleBatch) -> Bool {
+    ///
+    /// `mayRefuse` marks the two refusals expected to throw
+    /// `corruptConsensusGraph`: work for a grind located at another block,
+    /// and excluding a root with no other executed root. Any other throw is
+    /// recorded as unexpected.
+    func apply(_ batch: OracleBatch, mayRefuse: Bool = false) -> Bool {
         let result: SubmissionResult?
         do {
             result = try subject!.tree.apply(LiveSubject.batch(batch))
+        } catch ChainStateRestoreError.corruptConsensusGraph where mayRefuse {
+            return false
         } catch {
+            unexpectedRefusals.append("\(batch.facts): \(error)")
             return false
         }
         switch batch.facts.first {
@@ -249,8 +268,14 @@ private final class ForkChoiceTrace {
 
     func checkSanity(_ test: XCTestCase) {
         XCTAssertFalse(events.isEmpty, "seed \(seed)")
+        XCTAssertEqual(unexpectedRefusals, [], "seed \(seed)")
+        var admitted = false
         for event in events {
             let after = event["after"] as? [String: Any]
+            if event["kind"] as? String == "admit", event["accepted"] as? Bool == true { admitted = true }
+            if admitted {
+                XCTAssertTrue(after?["canonicalTip"] is String, "seed \(seed): no canonical tip")
+            }
             guard let weights = after?["weights"] as? [String: String],
                   let cumulative = after?["cumulative"] as? [String: String] else {
                 return XCTFail("seed \(seed): no weights")
