@@ -268,8 +268,9 @@ extension ChainTree {
     ///   recipient, a genesis.
     ///
     /// No validation and no cross-chain fact: a weighed-only block issues
-    /// none.
-    private mutating func insertHeader(
+    /// none. Internal so a test can admit under a hash and grind of its own;
+    /// a node enters through `insertRootHeader`/`insertChildHeader`.
+    mutating func insertHeader(
         _ block: Block,
         blockHash: String,
         childIndex: FlatDictionary<BlockHeader>,
