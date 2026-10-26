@@ -32,9 +32,10 @@ public extension ChainLevel {
     /// `.invalid`. Block-wide conservation, count, and aggregate-growth checks
     /// remain the block builder's responsibility.
     ///
-    /// The chain's policies run only for a transaction every other check
-    /// finds ready, so a `.future` transaction has not been judged by them yet:
-    /// it is, once its nonce comes up.
+    /// The chain's policies run after the checks that can refuse a
+    /// transaction cheaply (signatures, nonce, withdrawals, state), and before
+    /// any verdict that keeps it: nothing they refuse is `.ready`, `.future`,
+    /// or `.unavailable` for want of its parent's state.
     func preflightTransaction(
         _ transaction: Transaction,
         at tipCID: String? = nil,
@@ -64,8 +65,8 @@ public enum TransactionPreflight {
     ///
     /// `checksPolicies: false` leaves the chain's policies out: a host
     /// re-checking a transaction they already accepted on an earlier tip
-    /// learns whether it still fits this one's state, and judges it by the
-    /// policies again where it builds the block that carries it.
+    /// learns whether it still fits this one's state. It must judge the
+    /// transaction by them again before any block it builds carries it.
     public static func classify(
         _ transaction: Transaction,
         tipCID: String,
@@ -115,6 +116,31 @@ public enum TransactionPreflight {
                 return result(.invalid, tipCID: tip.cid)
             }
 
+            // The policies run after every cheap check that can refuse: a
+            // transaction those refuse never costs this node a policy
+            // evaluation. Any verdict that keeps a transaction (ready, future,
+            // or a withdrawal waiting for its parent) is reached only through
+            // them, so nothing they refuse is pooled. They see the block that
+            // would carry it next: the one above the tip, stamped no earlier
+            // than now.
+            func judged(_ disposition: TransactionPreflightDisposition) async throws -> TransactionPreflightResult {
+                guard checksPolicies else { return result(disposition, tipCID: tip.cid) }
+                let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
+                guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
+                let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
+                guard try await TransactionBody.batchVerifyPolicies(
+                    bodies: [body],
+                    spec: spec,
+                    chainPath: chainPath,
+                    height: snapshot.tipHeight + 1,
+                    timestamp: nextTimestamp,
+                    fetcher: fetcher
+                ) else {
+                    return result(.invalid, tipCID: tip.cid)
+                }
+                return result(disposition, tipCID: tip.cid)
+            }
+
             let stateHeader = LatticeStateHeader(rawCID: snapshot.postStateCID)
             guard let state = try await stateHeader.resolve(fetcher: fetcher).node else {
                 return result(.unavailable, tipCID: tip.cid)
@@ -130,7 +156,7 @@ public enum TransactionPreflight {
                     return result(.invalid, tipCID: tip.cid)
                 }
                 if body.nonce > expected {
-                    return result(.future, tipCID: tip.cid)
+                    return try await judged(.future)
                 }
             }
 
@@ -139,7 +165,7 @@ public enum TransactionPreflight {
                       let directory = chainPath.last,
                       let parent = try await parentState.resolve(fetcher: fetcher).node
                 else {
-                    return result(.unavailable, tipCID: tip.cid)
+                    return try await judged(.unavailable)
                 }
                 guard try await body.withdrawalsAreValid(
                     directory: directory,
@@ -160,26 +186,7 @@ public enum TransactionPreflight {
                 transactionBodies: [body],
                 fetcher: fetcher
             )
-            guard checksPolicies else { return result(.ready, tipCID: tip.cid) }
-
-            // The policies run last: a transaction the cheap checks above
-            // refuse never costs this node a policy evaluation. They see the
-            // block that would carry it next: the one above the tip, stamped
-            // no earlier than now.
-            let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
-            guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
-            let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
-            guard try await TransactionBody.batchVerifyPolicies(
-                bodies: [body],
-                spec: spec,
-                chainPath: chainPath,
-                height: snapshot.tipHeight + 1,
-                timestamp: nextTimestamp,
-                fetcher: fetcher
-            ) else {
-                return result(.invalid, tipCID: tip.cid)
-            }
-            return result(.ready, tipCID: tip.cid)
+            return try await judged(.ready)
         } catch {
             return result(
                 transactionPreflightEvidenceUnavailable(error)

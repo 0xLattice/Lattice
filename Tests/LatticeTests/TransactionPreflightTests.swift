@@ -391,7 +391,7 @@ final class TransactionPreflightTests: XCTestCase {
 
         let cases: [(String, Transaction, TransactionPreflightDisposition)] = [
             ("stale nonce", transaction(signers: [alice], nonce: 0), .invalid),
-            ("future nonce", transaction(signers: [alice], nonce: 2), .future),
+            ("future nonce: the policy judges what is kept", transaction(signers: [alice], nonce: 2), .unavailable),
             ("overspend", transaction(
                 signers: [bob],
                 nonce: 0,
@@ -428,6 +428,37 @@ final class TransactionPreflightTests: XCTestCase {
                 checksPolicies: false
             )
             XCTAssertEqual(result.disposition, expected, "unjudged: \(label)")
+        }
+    }
+
+    func testNothingAPolicyRefusesIsKeptWhateverItsNonce() async throws {
+        let fetcher = StorableFetcher()
+        let alice = CryptoUtils.generateKeyPair()
+        let refusing = try await storeWasmPolicy(
+            accepts: false,
+            scope: .transaction,
+            fetcher: fetcher
+        )
+        let aliceAddress = testAddress(publicKey: alice.publicKey)
+        let genesis = try await buildAndStoreGenesis(
+            spec: spec(premine: 1, policies: [refusing]),
+            transactions: [transaction(
+                signers: [alice],
+                nonce: 0,
+                accountActions: [AccountAction(owner: aliceAddress, delta: 500)]
+            )],
+            timestamp: 1_000,
+            target: easy,
+            fetcher: fetcher
+        )
+        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+
+        for (label, nonce) in [("ready", UInt64(1)), ("future", 2), ("far future", 40)] {
+            let result = await level.preflightTransaction(
+                transaction(signers: [alice], nonce: nonce),
+                fetcher: fetcher
+            )
+            XCTAssertEqual(result.disposition, .invalid, label)
         }
     }
 
