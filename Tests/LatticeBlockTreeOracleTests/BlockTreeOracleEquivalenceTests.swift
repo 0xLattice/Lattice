@@ -425,7 +425,10 @@ final class OracleRun {
             guard let parent = pickParent(plan) else { return .idle }
             let block = makeBlock(side, under: parent)
             plan.register(block)
-            return send(side, newBlockBatch(side, block: block, huge: true))
+            // Near-max work on the child only: two such parent grinds in one
+            // run make an attributed run past 256 bits, which 50.0.1 skipped
+            // and §9.2 credits exactly, so the oracles would rightly differ.
+            return send(side, newBlockBatch(side, block: block, huge: side == .child))
         case 95:
             // Malformed: zero work, a parented height-0 block, a block named
             // by something that is not a CID, or a block naming a state,
