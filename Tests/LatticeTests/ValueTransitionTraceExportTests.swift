@@ -76,6 +76,27 @@ private enum Violation: String, CaseIterable {
     case overdraft, feeRule, deltaZero, depositExists, depositZero
     case withdrawWrongAmount, withdrawNoReceipt, withdrawWrongWithdrawer, withdrawSpent
     case receiptExists
+    /// Action-shape rules (`TransactionBody+Validity.swift`), checked before
+    /// any state is read. The model has no `amountDemanded != 0` rule for a
+    /// receipt; a zero-demand or zero-amount withdrawal it rejects through
+    /// the deposit rules instead (`implied`).
+    case receiptZeroDemand, withdrawZeroDemand, withdrawZeroAmount
+
+    /// The model-level rules a case of this kind breaks as a consequence.
+    var implied: Set<Violation> {
+        switch self {
+        case .withdrawZeroDemand: return [.withdrawWrongAmount, .withdrawNoReceipt]
+        case .withdrawZeroAmount: return [.withdrawWrongAmount]
+        default: return []
+        }
+    }
+
+    var isShapeRule: Bool { [.receiptZeroDemand, .withdrawZeroDemand, .withdrawZeroAmount].contains(self) }
+
+    /// Whether `violations` is this kind and only what it implies.
+    func labels(_ violations: Set<Violation>) -> Bool {
+        violations.contains(self) && violations.subtracting([self]).isSubset(of: implied)
+    }
 }
 
 private struct DKey: Hashable, Comparable {
@@ -141,6 +162,8 @@ private enum ModelMirror {
         if credits + deposited > debits + withdrawn { violations.insert(.feeRule) }
         var deposits = state.deposits
         for case let .withdrawal(w, n, dm, amtD, amtW) in actions {
+            if amtD == 0 { violations.insert(.withdrawZeroDemand) }
+            if amtW == 0 { violations.insert(.withdrawZeroAmount) }
             let key = DKey(demander: dm, amountDemanded: amtD, nonce: n)
             switch deposits[key] {
             case nil: violations.insert(.withdrawWrongAmount)
@@ -163,6 +186,7 @@ private enum ModelMirror {
         for case let .receipt(w, n, dm, amtD, d) in actions {
             let key = RKey(directory: d, demander: dm, amountDemanded: amtD, nonce: n)
             if receipts[key] != nil { violations.insert(.receiptExists) }
+            if amtD == 0 { violations.insert(.receiptZeroDemand) }
             receipts[key] = w
         }
         if let recipient {
@@ -281,7 +305,7 @@ private final class ValueTrace {
                 let actions = valid + extra
                 let verdict = ModelMirror.apply(dir: Self.dir, parent: parentReceipts, state: state,
                                                 actions: actions, reward: reward, recipient: recipient)
-                if verdict.violations == [kind] { mutated = (kind, actions); break }
+                if kind.labels(verdict.violations) { mutated = (kind, actions); break }
             }
             guard let (kind, actions) = mutated else {
                 try await step(actions: valid, recipient: recipient, violation: nil)
@@ -300,12 +324,26 @@ private final class ValueTrace {
         let reward = spec.rewardAtBlock(tip.height + 1)
         let expected = ModelMirror.apply(dir: Self.dir, parent: parentReceipts, state: state,
                                          actions: actions, reward: reward, recipient: recipient)
-        XCTAssertEqual(expected.violations, violation.map { [$0] } ?? [], "seed \(seed): generator labelled the case wrongly")
+        if let violation {
+            XCTAssertTrue(violation.labels(expected.violations), "seed \(seed): generator labelled the case wrongly")
+        } else {
+            XCTAssertEqual(expected.violations, [], "seed \(seed): generator labelled the case wrongly")
+        }
         let outcome = try await execute(actions: actions, recipient: recipient)
         if violation == nil {
             XCTAssertTrue(outcome.accepted, "seed \(seed) h\(tip.height + 1): valid block rejected: \(outcome.error ?? "")")
         } else {
             XCTAssertFalse(outcome.accepted, "seed \(seed) h\(tip.height + 1): \(violation!) accepted")
+            if let violation, violation.isShapeRule {
+                // Refused by the shape rule itself: the body fails it, and the
+                // block is refused at transaction validation (a false verdict),
+                // not by a deposit or receipt proof (which throws).
+                let shaped = body(actions)
+                XCTAssertFalse(violation == .receiptZeroDemand
+                               ? shaped.receiptActionsAreValid() : shaped.withdrawalActionsAreValid())
+                XCTAssertEqual(outcome.error, "validateNexus returned false",
+                               "seed \(seed): \(violation) refused for another reason")
+            }
         }
         if outcome.accepted, let post = outcome.post {
             XCTAssertEqual(post, expected.post, "seed \(seed) h\(tip.height + 1): post-state differs from the model")
@@ -476,6 +514,19 @@ private final class ValueTrace {
             guard let key = pick(deposits.filter { state.deposits[$0]! == 0 && parentReceipts[receiptKey(for: $0)] != nil })
             else { return nil }
             return [withdraw(key, by: parentReceipts[receiptKey(for: key)]!, amount(50))]
+        case .receiptZeroDemand:
+            let key = RKey(directory: pick(["G1", "G2"])!, demander: pick(users)!, amountDemanded: 0,
+                           nonce: UInt64.random(in: 0...3, using: &rng))
+            guard state.receipts[key] == nil else { return nil }
+            return [.receipt(withdrawer: pick(users)!, nonce: key.nonce, demander: key.demander,
+                             amountDemanded: 0, directory: key.directory)]
+        case .withdrawZeroDemand:
+            return [.withdrawal(withdrawer: pick(users)!, nonce: UInt64.random(in: 0...3, using: &rng),
+                                demander: pick(users)!, amountDemanded: 0, amountWithdrawn: amount(50))]
+        case .withdrawZeroAmount:
+            guard let key = pick(deposits.filter { state.deposits[$0]! > 0 && parentReceipts[receiptKey(for: $0)] != nil })
+            else { return nil }
+            return [withdraw(key, by: parentReceipts[receiptKey(for: key)]!, 0)]
         case .receiptExists:
             guard let key = pick(state.receipts.keys.sorted()) else { return nil }
             return [.receipt(withdrawer: pick(users)!, nonce: key.nonce, demander: key.demander,
