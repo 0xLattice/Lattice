@@ -106,29 +106,38 @@ final class ParentAnchorMonotonicityTests: XCTestCase {
         let facts: (any ParentChainFacts)? = ParentLevelFacts(tree: try parentTree(), path: [DEFAULT_ROOT_DIRECTORY])
         let lookup = BlockImport.parentFactLookup(facts)
         let context = testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
-        func verdict(_ predecessorAnchor: String?, _ anchor: String) -> BlockImportError? {
+        func verdict(_ predecessorAnchor: String?, _ anchor: String) async -> BlockImportError? {
             let block = child(anchor: anchor, genesis: predecessorAnchor == nil, template: template)
-            return BlockImport.validateParentFacts(
+            return await BlockImport.validateParentFacts(
                 lookup, child: block, childCID: testCID("child"),
                 predecessorParentState: predecessorAnchor, context: context
             )
         }
 
-        XCTAssertNil(verdict(nil, c), "a genesis anchors from the parent's genesis pre-state")
-        XCTAssertNil(verdict(b, c), "forward")
-        XCTAssertNil(verdict(c, c), "unchanged")
+        var found = await verdict(nil, c)
+        XCTAssertNil(found, "a genesis anchors from the parent's genesis pre-state")
+        found = await verdict(b, c)
+        XCTAssertNil(found, "forward")
+        found = await verdict(c, c)
+        XCTAssertNil(found, "unchanged")
         // The attack: a withdrawal anchored on `c`, whose branch the parent
         // then abandoned for `d`, cannot be extended from the new branch.
-        XCTAssertEqual(verdict(c, d), .crossChainEvidenceRequired(.parentStateContinuity(
+        found = await verdict(c, d)
+        XCTAssertEqual(found, .crossChainEvidenceRequired(.parentStateContinuity(
             parentPath: [DEFAULT_ROOT_DIRECTORY], fromStateCID: c, toStateCID: d
         )))
-        XCTAssertNotNil(verdict(f, b), "backward")
-        XCTAssertNotNil(verdict(g, g), "an unexecuted anchor is not carried along by equality")
+        found = await verdict(f, b)
+        XCTAssertNotNil(found, "backward")
+        found = await verdict(g, g)
+        XCTAssertNotNil(found, "an unexecuted anchor is not carried along by equality")
         // Committing no parent state is the genesis pre-state: dropping back
         // to it from a real anchor is backward, in the blocks' own bytes.
-        XCTAssertEqual(verdict(c, empty), .protocolInvalid)
-        XCTAssertNil(verdict(empty, empty), "no anchor yet, none now")
-        XCTAssertEqual(verdict(nil, empty), .protocolInvalid, "a genesis must anchor")
+        found = await verdict(c, empty)
+        XCTAssertEqual(found, .protocolInvalid)
+        found = await verdict(empty, empty)
+        XCTAssertNil(found, "no anchor yet, none now")
+        found = await verdict(nil, empty)
+        XCTAssertEqual(found, .protocolInvalid, "a genesis must anchor")
     }
 
     // MARK: - The tour ancestry test

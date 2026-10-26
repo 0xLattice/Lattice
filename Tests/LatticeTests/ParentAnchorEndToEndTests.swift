@@ -57,6 +57,21 @@ private actor GatedFetcher: Fetcher {
     func count(_ rawCid: String) -> Int { fetched[rawCid] ?? 0 }
 }
 
+/// Parent facts that suspend before answering, as a source reading a live
+/// parent elsewhere does, and record every link a connect asks.
+private actor RecordingFacts: ParentChainFacts {
+    let backing: ParentLevelFacts
+    private(set) var asked: [ParentStateContinuityLink] = []
+
+    init(_ backing: ParentLevelFacts) { self.backing = backing }
+
+    func hasContinuity(_ link: ParentStateContinuityLink) async -> Bool {
+        asked.append(link)
+        await Task.yield()
+        return backing.hasContinuity(link)
+    }
+}
+
 /// A Nexus, its executed parent `ChainTree`, the swap parties, and builders
 /// for parent blocks, child blocks anchored at a parent block's state, and
 /// their carrier proofs.
@@ -537,5 +552,27 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         try await w.executeParent(s)
         try assertConnected(try await w.connect(withdrawal, on: &child), block: withdrawal, tree: child, "the parent executed S")
         XCTAssertEqual(validatedTip(child), try cid(withdrawal))
+    }
+
+    /// A connect asks its parent facts exactly one link: from its
+    /// predecessor's `parentState` to its own, naming the parent chain, and
+    /// awaits an asynchronous answer.
+    func testAConnectAsksItsFactsExactlyItsContinuityLink() async throws {
+        let w = try await World()
+        let a = try await w.parentBlock(on: w.g, at: -95_000)
+        try await w.weighParent(a)
+        try await w.executeParent(a)
+
+        let genesis = try await w.childGenesis(anchoredAt: w.g, at: -94_000)
+        var child = try await w.bootstrapChild(genesis, carrierParent: w.g)
+        let block = try await w.childBlock(previous: genesis, anchoredAt: a, at: -80_000)
+        try await w.weigh(block, carrierParent: a, on: &child)
+
+        let facts = RecordingFacts(w.facts)
+        try assertConnected(try await w.connect(block, on: &child, facts: facts), block: block, tree: child, "answered")
+        let asked = await facts.asked
+        XCTAssertEqual(asked, [ParentStateContinuityLink(
+            parentPath: w.rootPath, fromStateCID: w.g.postState.rawCID, toStateCID: a.postState.rawCID
+        )])
     }
 }
