@@ -82,12 +82,16 @@ private enum Violation: String, CaseIterable {
     /// receipt; a zero-demand or zero-amount withdrawal it rejects through
     /// the deposit rules instead (`implied`).
     case receiptZeroDemand, withdrawZeroDemand, withdrawZeroAmount
+    /// Deposits a fresh key and withdraws it in the same block: valid only if
+    /// deposits applied before withdrawals, which §6.4 orders the other way.
+    case withdrawSameBlockDeposit
 
     /// The model-level rules a case of this kind breaks as a consequence.
     var implied: Set<Violation> {
         switch self {
         case .withdrawZeroDemand: return [.withdrawWrongAmount, .withdrawNoReceipt]
         case .withdrawZeroAmount: return [.withdrawWrongAmount]
+        case .withdrawSameBlockDeposit: return [.withdrawWrongAmount, .depositExists]
         default: return []
         }
     }
@@ -164,6 +168,9 @@ private enum ModelMirror {
         var deposits = state.deposits
         for case let .withdrawal(w, n, dm, amtD, amtW) in actions {
             if amtD == 0 { violations.insert(.withdrawZeroDemand) }
+            for case let .deposit(dn, ddm, damtD, _) in actions where (dn, ddm, damtD) == (n, dm, amtD) {
+                violations.insert(.withdrawSameBlockDeposit)
+            }
             if amtW == 0 { violations.insert(.withdrawZeroAmount) }
             let key = DKey(demander: dm, amountDemanded: amtD, nonce: n)
             switch deposits[key] {
@@ -234,8 +241,9 @@ private final class ValueTrace {
     /// Account actions the block carries in a second transaction (the same
     /// sponsor, the next nonce), exported after the first transaction's.
     var secondTransaction: [VAction] = []
-    /// Netting shapes the current valid block was generated to show.
-    var plannedFeatures: Set<String> = []
+    /// Netting shapes the current valid block was generated to show, each with
+    /// the owner it overdraws under in-order application.
+    var plannedFeatures: [String: String] = [:]
 
     var tip: Block
     var state = VState()
@@ -426,12 +434,18 @@ private final class ValueTrace {
             XCTAssertTrue(error.hasPrefix("invalidProofType(\"insertion proof on existing value"), label)
         case .withdrawNoReceipt:
             XCTAssertNil(depositStage, label)
-            XCTAssertTrue(receiptStage?.hasPrefix("invalidProofType(\"deletion/mutation proof on non-existent") ?? false, label)
+            XCTAssertTrue(receiptStage?.hasPrefix("invalidProofType(\"deletion/mutation proof") ?? false, label)
             XCTAssertEqual(error, receiptStage, label)
         case .withdrawWrongWithdrawer:
             XCTAssertNil(depositStage, label)
             XCTAssertEqual(receiptStage, String(describing: StateErrors.conflictingActions), label)
             XCTAssertEqual(error, receiptStage, label)
+        case .withdrawSameBlockDeposit:
+            // Refused where the withdrawal proves its deposit in prevState,
+            // before the block's own deposit is inserted.
+            XCTAssertNil(receiptStage, label)
+            XCTAssertTrue(depositStage?.hasPrefix("invalidProofType(\"deletion/mutation proof") ?? false, label)
+            XCTAssertEqual(error, depositStage, label)
         case .withdrawSpent, .withdrawWrongAmount:
             XCTAssertNil(depositStage, label)
             XCTAssertNil(receiptStage, label)
@@ -445,19 +459,21 @@ private final class ValueTrace {
         // Applying the balance deltas one at a time in exported order (the
         // coinbase last) overdraws some owner: valid only under netting.
         var running = state.balances.mapValues { Int64($0) }
-        var sequentialFails = false
+        var overdrawn = Set<String>()
         func apply(_ owner: String, _ delta: Int64) {
             running[owner, default: 0] += delta
-            if running[owner]! < 0 { sequentialFails = true }
+            if running[owner]! < 0 { overdrawn.insert(owner) }
         }
         for action in actions {
             if case let .account(owner, delta) = action { apply(owner, delta) }
             if case let .receipt(w, _, dm, amount, _) = action { apply(w, -Int64(amount)); apply(dm, Int64(amount)) }
         }
         if let recipient { apply(recipient, Int64(spec.rewardAtBlock(tip.height + 1)) + ModelMirror.fee(actions)) }
-        if sequentialFails { mark("sequentialFails") }
-        // A planned shape counts only when the block really needs netting.
-        if sequentialFails { plannedFeatures.sorted().forEach(mark) }
+        if !overdrawn.isEmpty { mark("sequentialFails") }
+        // A planned shape counts only when its own owner needs netting.
+        for (feature, owner) in plannedFeatures.sorted(by: { $0.key < $1.key }) where overdrawn.contains(owner) {
+            mark(feature)
+        }
         mark(recipient == nil ? "burn" : "recipient")
         var debited: [String: UInt64] = [:], credited = Set<String>()
         for case let .account(owner, delta) in actions {
@@ -482,7 +498,7 @@ private final class ValueTrace {
 
     func generateValid(recipient: String?) -> [VAction] {
         secondTransaction = []
-        plannedFeatures = []
+        plannedFeatures = [:]
         var actions: [VAction] = []
         var available = state.balances
         var usedDeposits = Set<DKey>(), usedReceipts = Set<RKey>()
@@ -503,20 +519,20 @@ private final class ValueTrace {
                                         .account(owner: owner, delta: Int64(covered))]
                 if Int.random(in: 0..<2, using: &rng) == 0 || !secondTransaction.isEmpty {
                     actions = spend + cover + actions
-                    plannedFeatures.insert("nettingDebitFirst")
+                    plannedFeatures["nettingDebitFirst"] = owner
                 } else {
                     actions = spend + actions
                     secondTransaction = cover
-                    plannedFeatures.insert("nettingDebitFirstTwoTx")
+                    plannedFeatures["nettingDebitFirstTwoTx"] = owner
                 }
             case 10: // the recipient overspends, covered only by its coinbase
                 guard let recipient, available[recipient] == state.balances[recipient],
-                      !plannedFeatures.contains("nettingCoinbase") else { continue }
+                      plannedFeatures["nettingCoinbase"] == nil else { continue }
                 let spent = (available[recipient] ?? 0) + amount(spec.rewardAtBlock(tip.height + 1))
                 available[recipient] = 0
                 actions = [.account(owner: recipient, delta: -Int64(spent)),
                            .account(owner: pick(users.filter { $0 != recipient })!, delta: Int64(spent))] + actions
-                plannedFeatures.insert("nettingCoinbase")
+                plannedFeatures["nettingCoinbase"] = recipient
             case 0, 1: // transfer, possibly back to the payer, possibly leaving a fee
                 guard let payer = funded() else { continue }
                 let paid = amount(min(available[payer]!, 40))
@@ -637,6 +653,16 @@ private final class ValueTrace {
         case .withdrawZeroDemand:
             return [.withdrawal(withdrawer: pick(users)!, nonce: UInt64.random(in: 0...3, using: &rng),
                                 demander: pick(users)!, amountDemanded: 0, amountWithdrawn: amount(50))]
+        case .withdrawSameBlockDeposit:
+            // A fresh key, with the parent's receipt for it already in place.
+            let key = DKey(demander: pick(users)!, amountDemanded: amount(50), nonce: UInt64.random(in: 30...40, using: &rng))
+            guard state.deposits[key] == nil, let withdrawer = pick(users) else { return nil }
+            if parentReceipts[receiptKey(for: key)] == nil { parentReceipts[receiptKey(for: key)] = withdrawer }
+            let locked = amount(10)
+            return funding(locked) + [
+                .deposit(nonce: key.nonce, demander: key.demander, amountDemanded: key.amountDemanded, amountDeposited: locked),
+                withdraw(key, by: parentReceipts[receiptKey(for: key)]!, locked),
+            ]
         case .withdrawZeroAmount:
             guard let key = pick(deposits.filter { state.deposits[$0]! > 0 && parentReceipts[receiptKey(for: $0)] != nil })
             else { return nil }
