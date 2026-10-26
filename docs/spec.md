@@ -1239,7 +1239,10 @@ head, or asserted as the node's state — requires the *validated* tier. A node
 MUST NOT act on a merely weighed tip; it acts on its heaviest *validated* tip:
 descending from genesis, at each fork it follows the heaviest child that is
 validated (heaviest by the whole subtree's work, unvalidated descendants
-included), and stops where no child is validated. Missing bodies of a heavier
+included), and stops where no child is validated. Several genesis roots are a
+fork like any other (9.4): the descent starts at the heaviest validated root
+that is not excluded, so a heavier root whose body is withheld weighs without
+stalling it. Missing bodies of a heavier
 weighed branch are an availability gap (9.5-style: retried indefinitely, never
 a verdict): the branch keeps its weight, is never marked, and takes over at
 its fork once its first block there is validated. A block whose body is not
