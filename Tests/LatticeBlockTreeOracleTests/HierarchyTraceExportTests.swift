@@ -165,6 +165,8 @@ private final class HierarchyTrace {
     /// chains) or `prevState` (non-genesis blocks); absent for `emptyHeader`.
     var anchor: [String: String] = [:]
     var prevStateBlock: [String: String] = [:]
+    /// The same block, read back from each header's declared prevState.
+    var declaredPrevStateBlock: [String: String] = [:]
     var parentState: [String: String] = [:]
     /// The header rule a block breaks, as header admission decided it.
     var headerBad: [String: String] = [:]
@@ -270,6 +272,23 @@ private final class HierarchyTrace {
                 unexpectedRefusals.append("header admission decided \(headerBad), generated \(intended)")
             }
             for label in headerBad.keys { valid[label] = false }
+            // Each block's declared prevState, read back from its header, as
+            // the same-chain block that produced it.
+            for chain in chains {
+                var producer: [String: String] = [:]
+                for label in labels[chain]! { producer[facts[label]!.postState] = label }
+                for label in labels[chain]! {
+                    let declared = header(label).prevState.rawCID
+                    let block = declared == empty ? nil : producer[declared]
+                    if declared != empty, block == nil {
+                        unexpectedRefusals.append("prevState of \(label) names no \(chain) block")
+                    }
+                    if headerBad[label] == nil, block != parent[label] {
+                        unexpectedRefusals.append("prevState of \(label) is \(block ?? "empty"), not its parent's")
+                    }
+                    declaredPrevStateBlock[label] = block
+                }
+            }
         }
 
         // Grinds: one per block. A committed block sometimes carries a grind
@@ -416,9 +435,12 @@ private final class HierarchyTrace {
     }
 
     /// Header admission's own decision (§9.9) for a non-genesis header
-    /// whose work verified and whose parent is held: `.excluded` is the
-    /// block weighed and excluded at once; it names which rule by the two
-    /// predicates it applies.
+    /// whose work verified and whose parent is held: `Block.headerAdmission`
+    /// called with this exporter's own linkage (the parent's fact) and
+    /// difficulty anchor (`heightOneAnchor`); the tree's private
+    /// `insertHeader`, which makes the same call, is not driven. `.excluded`
+    /// is the block weighed and excluded at once; it names which rule by the
+    /// two predicates it applies.
     func classifyHeader(_ label: String) {
         let block = header(label)
         let parentFact = facts[parent[label]!]!
@@ -846,7 +868,10 @@ private final class HierarchyTrace {
                     block["parentState"] = parentState[label]!
                     block["withheld"] = withheld.contains(label)
                 }
-                if levels == 3 { block["headerBad"] = headerBad[label] ?? NSNull() }
+                if levels == 3 {
+                    block["headerBad"] = headerBad[label] ?? NSNull()
+                    block["prevStateBlock"] = declaredPrevStateBlock[label] ?? NSNull()
+                }
                 return block
             }
         }
