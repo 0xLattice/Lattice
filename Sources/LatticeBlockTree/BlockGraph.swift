@@ -50,7 +50,7 @@ struct BlockEntry: Sendable {
     var firstGrind: UInt32 = BlockGraph.none
     var spec: UInt32 = BlockGraph.none
     /// The first of its child commitments in `BlockGraph.commitments`, or
-    /// `none` when it commits none. Held in what was the entry's padding.
+    /// `none` when it commits none.
     var firstCommitment: UInt32 = BlockGraph.none
     var flags: Flags = []
 }
