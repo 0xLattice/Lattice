@@ -130,6 +130,9 @@ final class OracleRun {
     var observationRNG: SplitMix64
     /// Counts of what the live outcomes showed.
     var coverage: [String: Int] = [:]
+    /// Near-max work on the parent chain too. Off for the frozen-reference
+    /// oracle (see `nextAction`); the spec differential turns it on.
+    var hugeWorkOnParent = false
 
     init(seed: UInt64) {
         self.seed = seed
@@ -428,7 +431,7 @@ final class OracleRun {
             // Near-max work on the child only: two such parent grinds in one
             // run make an attributed run past 256 bits, which 50.0.1 skipped
             // and §9.2 credits exactly, so the oracles would rightly differ.
-            return send(side, newBlockBatch(side, block: block, huge: side == .child))
+            return send(side, newBlockBatch(side, block: block, huge: side == .child || hugeWorkOnParent))
         case 95:
             // Malformed: zero work, a parented height-0 block, a block named
             // by something that is not a CID, or a block naming a state,
