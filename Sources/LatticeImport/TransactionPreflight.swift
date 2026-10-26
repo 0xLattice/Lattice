@@ -31,6 +31,10 @@ public extension ChainLevel {
     /// A transaction with negative miner surplus (it creates value) is
     /// `.invalid`. Block-wide conservation, count, and aggregate-growth checks
     /// remain the block builder's responsibility.
+    ///
+    /// The chain's policies run only for a transaction every other check
+    /// finds ready, so a `.future` transaction has not been judged by them yet:
+    /// it is, once its nonce comes up.
     func preflightTransaction(
         _ transaction: Transaction,
         at tipCID: String? = nil,
@@ -57,6 +61,11 @@ public enum TransactionPreflight {
     /// reads them (a nil snapshot is `.unavailable`), and the chain's path.
     /// A host job that holds only these classifies exactly as the level
     /// would, without holding the chain's tree.
+    ///
+    /// `checksPolicies: false` leaves the chain's policies out: a host
+    /// re-checking a transaction they already accepted on an earlier tip
+    /// learns whether it still fits this one's state, and judges it by the
+    /// policies again where it builds the block that carries it.
     public static func classify(
         _ transaction: Transaction,
         tipCID: String,
@@ -64,7 +73,8 @@ public enum TransactionPreflight {
         chainPath: [String],
         parentState: LatticeStateHeader? = nil,
         fetcher: any Fetcher,
-        validationContext: ValidationContext = .current
+        validationContext: ValidationContext = .current,
+        checksPolicies: Bool = true
     ) async -> TransactionPreflightResult {
         let tip = (cid: tipCID, snapshot: snapshot)
         guard let snapshot = tip.snapshot else {
@@ -98,23 +108,10 @@ public enum TransactionPreflight {
             guard let spec = try await specHeader.resolve(fetcher: fetcher).node else {
                 return result(.unavailable, tipCID: tip.cid)
             }
-            // Policies see the block that would carry this transaction next: the
-            // one above the tip, stamped no earlier than now.
-            let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
-            guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
-            let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
             // Only the floor is a permanent verdict: whether credits create
             // accounts depends on the state the transaction lands on.
             guard spec.isValid,
-                  try TransactionBody.stateGrowthFloor(of: [body]).map({ $0 <= spec.maxStateGrowth }) ?? false,
-                  try await TransactionBody.batchVerifyPolicies(
-                    bodies: [body],
-                    spec: spec,
-                    chainPath: chainPath,
-                    height: snapshot.tipHeight + 1,
-                    timestamp: nextTimestamp,
-                    fetcher: fetcher
-                  ) else {
+                  try TransactionBody.stateGrowthFloor(of: [body]).map({ $0 <= spec.maxStateGrowth }) ?? false else {
                 return result(.invalid, tipCID: tip.cid)
             }
 
@@ -163,6 +160,25 @@ public enum TransactionPreflight {
                 transactionBodies: [body],
                 fetcher: fetcher
             )
+            guard checksPolicies else { return result(.ready, tipCID: tip.cid) }
+
+            // The policies run last: a transaction the cheap checks above
+            // refuse never costs this node a policy evaluation. They see the
+            // block that would carry it next: the one above the tip, stamped
+            // no earlier than now.
+            let (afterTip, overflow) = snapshot.timestamp.addingReportingOverflow(1)
+            guard !overflow else { return result(.unavailable, tipCID: tip.cid) }
+            let nextTimestamp = max(afterTip, validationContext.nowMilliseconds)
+            guard try await TransactionBody.batchVerifyPolicies(
+                bodies: [body],
+                spec: spec,
+                chainPath: chainPath,
+                height: snapshot.tipHeight + 1,
+                timestamp: nextTimestamp,
+                fetcher: fetcher
+            ) else {
+                return result(.invalid, tipCID: tip.cid)
+            }
             return result(.ready, tipCID: tip.cid)
         } catch {
             return result(
