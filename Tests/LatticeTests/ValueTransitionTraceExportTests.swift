@@ -56,7 +56,8 @@ final class ValueTransitionTraceExportTests: XCTestCase {
         }
         for feature in ["valid:recipient", "valid:burn", "valid:spentMarker", "valid:netting",
                         "valid:nettedOverspend", "valid:zeroDeleted", "valid:withdrawal",
-                        "valid:receipt", "valid:deposit"] {
+                        "valid:receipt", "valid:deposit", "valid:nettingDebitFirst",
+                        "valid:nettingDebitFirstTwoTx", "valid:nettingCoinbase"] {
             XCTAssertGreaterThan(coverage[feature] ?? 0, 0, "no case shows \(feature)")
         }
     }
@@ -230,6 +231,11 @@ private final class ValueTrace {
     let users: [String]
     let sponsor: String
     var sponsorNonce: UInt64 = 0
+    /// Account actions the block carries in a second transaction (the same
+    /// sponsor, the next nonce), exported after the first transaction's.
+    var secondTransaction: [VAction] = []
+    /// Netting shapes the current valid block was generated to show.
+    var plannedFeatures: Set<String> = []
 
     var tip: Block
     var state = VState()
@@ -289,7 +295,7 @@ private final class ValueTrace {
         for _ in 0..<14 {
             evolveParentReceipts()
             let recipient = chance(1, in: 3) ? nil : pick(users)
-            let valid = generateValid()
+            let valid = generateValid(recipient: recipient)
             if chance(11, in: 20) {
                 try await step(actions: valid, recipient: recipient, violation: nil)
                 continue
@@ -304,7 +310,7 @@ private final class ValueTrace {
                       let extra = violationActions(kind, base: valid, recipient: recipient) else { continue }
                 let actions = valid + extra
                 let verdict = ModelMirror.apply(dir: Self.dir, parent: parentReceipts, state: state,
-                                                actions: actions, reward: reward, recipient: recipient)
+                                                actions: actions + secondTransaction, reward: reward, recipient: recipient)
                 if kind.labels(verdict.violations) { mutated = (kind, actions); break }
             }
             guard let (kind, actions) = mutated else {
@@ -320,7 +326,7 @@ private final class ValueTrace {
     /// Run one case through the validator, check it against the model, and
     /// record it; advance the tip when accepted.
     func step(actions unordered: [VAction], recipient: String?, violation: Violation?) async throws {
-        let actions = Self.applicationOrder(unordered)
+        let actions = Self.applicationOrder(unordered) + secondTransaction
         let reward = spec.rewardAtBlock(tip.height + 1)
         let expected = ModelMirror.apply(dir: Self.dir, parent: parentReceipts, state: state,
                                          actions: actions, reward: reward, recipient: recipient)
@@ -329,7 +335,7 @@ private final class ValueTrace {
         } else {
             XCTAssertEqual(expected.violations, [], "seed \(seed): generator labelled the case wrongly")
         }
-        let outcome = try await execute(actions: actions, recipient: recipient)
+        let outcome = try await execute(actions: unordered, recipient: recipient)
         if violation == nil {
             XCTAssertTrue(outcome.accepted, "seed \(seed) h\(tip.height + 1): valid block rejected: \(outcome.error ?? "")")
         } else {
@@ -368,12 +374,28 @@ private final class ValueTrace {
         if outcome.accepted, let block = outcome.block, let post = outcome.post {
             tip = block
             state = post
-            if !actions.isEmpty { sponsorNonce += 1 }
+            sponsorNonce += UInt64(transactionCount(unordered))
         }
     }
 
     func recordValidFeatures(actions: [VAction], recipient: String?, post: VState) {
         func mark(_ feature: String) { coverage["valid:" + feature, default: 0] += 1 }
+        // Applying the balance deltas one at a time in exported order (the
+        // coinbase last) overdraws some owner: valid only under netting.
+        var running = state.balances.mapValues { Int64($0) }
+        var sequentialFails = false
+        func apply(_ owner: String, _ delta: Int64) {
+            running[owner, default: 0] += delta
+            if running[owner]! < 0 { sequentialFails = true }
+        }
+        for action in actions {
+            if case let .account(owner, delta) = action { apply(owner, delta) }
+            if case let .receipt(w, _, dm, amount, _) = action { apply(w, -Int64(amount)); apply(dm, Int64(amount)) }
+        }
+        if let recipient { apply(recipient, Int64(spec.rewardAtBlock(tip.height + 1)) + ModelMirror.fee(actions)) }
+        if sequentialFails { mark("sequentialFails") }
+        // A planned shape counts only when the block really needs netting.
+        if sequentialFails { plannedFeatures.sorted().forEach(mark) }
         mark(recipient == nil ? "burn" : "recipient")
         var debited: [String: UInt64] = [:], credited = Set<String>()
         for case let .account(owner, delta) in actions {
@@ -396,13 +418,43 @@ private final class ValueTrace {
 
     // MARK: Generation
 
-    func generateValid() -> [VAction] {
+    func generateValid(recipient: String?) -> [VAction] {
+        secondTransaction = []
+        plannedFeatures = []
         var actions: [VAction] = []
         var available = state.balances
         var usedDeposits = Set<DKey>(), usedReceipts = Set<RKey>()
         func funded() -> String? { pick(users.filter { (available[$0] ?? 0) > 0 }) }
         for _ in 0..<Int.random(in: 1...4, using: &rng) {
-            switch Int.random(in: 0..<8, using: &rng) {
+            switch Int.random(in: 0..<11, using: &rng) {
+            case 8, 9: // debit before credit: the debit alone exceeds the balance
+                guard let source = funded(),
+                      let owner = pick(users.filter { $0 != source && available[$0] == state.balances[$0] })
+                else { continue }
+                let covered = amount(min(available[source]!, 20))
+                available[source]! -= covered
+                let spent = (available[owner] ?? 0) + covered
+                available[owner] = 0
+                let spend: [VAction] = [.account(owner: owner, delta: -Int64(spent)),
+                                        .account(owner: pick(users)!, delta: Int64(spent))]
+                let cover: [VAction] = [.account(owner: source, delta: -Int64(covered)),
+                                        .account(owner: owner, delta: Int64(covered))]
+                if Int.random(in: 0..<2, using: &rng) == 0 || !secondTransaction.isEmpty {
+                    actions = spend + cover + actions
+                    plannedFeatures.insert("nettingDebitFirst")
+                } else {
+                    actions = spend + actions
+                    secondTransaction = cover
+                    plannedFeatures.insert("nettingDebitFirstTwoTx")
+                }
+            case 10: // the recipient overspends, covered only by its coinbase
+                guard let recipient, available[recipient] == state.balances[recipient],
+                      !plannedFeatures.contains("nettingCoinbase") else { continue }
+                let spent = (available[recipient] ?? 0) + amount(spec.rewardAtBlock(tip.height + 1))
+                available[recipient] = 0
+                actions = [.account(owner: recipient, delta: -Int64(spent)),
+                           .account(owner: pick(users.filter { $0 != recipient })!, delta: Int64(spent))] + actions
+                plannedFeatures.insert("nettingCoinbase")
             case 0, 1: // transfer, possibly back to the payer, possibly leaving a fee
                 guard let payer = funded() else { continue }
                 let paid = amount(min(available[payer]!, 40))
@@ -477,7 +529,7 @@ private final class ValueTrace {
         case .overdraft:
             guard let owner = pick(users.filter { $0 != recipient }) else { return nil }
             let after = ModelMirror.apply(dir: Self.dir, parent: parentReceipts, state: state,
-                                          actions: base, reward: 0, recipient: nil).post?.balances[owner] ?? 0
+                                          actions: base + secondTransaction, reward: 0, recipient: nil).post?.balances[owner] ?? 0
             return [.account(owner: owner, delta: -Int64(after + amount(5)))]
         case .feeRule:
             return [.account(owner: pick(users)!, delta: max(ModelMirror.fee(base), 0) + Int64(amount(5)))]
@@ -585,7 +637,10 @@ private final class ValueTrace {
         let height = tip.height + 1
         let timestamp = Self.baseTimestamp + Int64(height) * 1_000
         var transactions: [Transaction] = []
-        if !actions.isEmpty { transactions.append(sign(body(actions))) }
+        if !actions.isEmpty { transactions.append(sign(body(actions, nonce: sponsorNonce))) }
+        if !secondTransaction.isEmpty {
+            transactions.append(sign(body(secondTransaction, nonce: sponsorNonce + UInt64(transactions.count))))
+        }
 
         let parentState = try await parentStateHeader()
         let built: Block
@@ -633,7 +688,11 @@ private final class ValueTrace {
         return Outcome(accepted: true, block: block, post: try await readBack(post), error: nil)
     }
 
-    func body(_ actions: [VAction]) -> TransactionBody {
+    func transactionCount(_ actions: [VAction]) -> Int {
+        (actions.isEmpty ? 0 : 1) + (secondTransaction.isEmpty ? 0 : 1)
+    }
+
+    func body(_ actions: [VAction], nonce: UInt64 = 0) -> TransactionBody {
         var accounts: [AccountAction] = [], deposits: [DepositAction] = []
         var receipts: [ReceiptAction] = [], withdrawals: [WithdrawalAction] = []
         var signers = Set<String>()
@@ -660,7 +719,7 @@ private final class ValueTrace {
             accountActions: accounts, actions: [], depositActions: deposits,
             receiptActions: receipts, withdrawalActions: withdrawals,
             signers: [sponsor] + signers.subtracting([sponsor]).sorted(),
-            nonce: sponsorNonce, chainPath: Self.chainPath
+            nonce: nonce, chainPath: Self.chainPath
         )
     }
 
