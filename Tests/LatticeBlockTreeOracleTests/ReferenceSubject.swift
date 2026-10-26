@@ -316,8 +316,9 @@ private struct NodeIndex {
     }
 
     func actOnTip(of tree: ChainTree) -> String {
-        let prefix = executedPrefix(of: tree)
-        guard var tip = prefix.isEmpty ? root(avoiding: [], in: tree) : Optional(prefix) else { return "" }
+        // From the genesis fork every time, with no canonical-prefix shortcut,
+        // so the live tree's shortcut is checked against the full rule.
+        guard var tip = root(avoiding: [], in: tree) else { return "" }
         while let next = byWeight((children[tip] ?? []).filter(tree.isExecuted(blockHash:)), in: tree).first {
             tip = next
         }
@@ -350,22 +351,5 @@ private struct NodeIndex {
             .map { (hash: $0, work: tree.forkChoiceWeight(of: $0) ?? .zero) }
             .sorted { $0.work != $1.work ? $0.work > $1.work : forkChoicePrefersBlock($0.hash, over: $1.hash) }
             .map(\.hash)
-    }
-
-    func executedPrefix(of tree: ChainTree) -> String {
-        guard let genesis = tree.canonicalBlockHash(atHeight: 0), tree.isExecuted(blockHash: genesis) else { return "" }
-        let tipHeight = tree.headerSnapshot(of: tree.canonicalTip)?.tipHeight ?? 0
-        var low: UInt64 = 0
-        var high = tipHeight
-        while low < high {
-            let middle = low + (high - low + 1) / 2
-            if let hash = tree.canonicalBlockHash(atHeight: middle),
-               tree.hasExecutedAncestry(blockHash: hash) {
-                low = middle
-            } else {
-                high = middle - 1
-            }
-        }
-        return tree.canonicalBlockHash(atHeight: low) ?? tree.canonicalTip
     }
 }

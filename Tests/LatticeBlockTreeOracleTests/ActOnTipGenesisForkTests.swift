@@ -97,4 +97,30 @@ final class ActOnTipGenesisForkTests: XCTestCase {
         XCTAssertEqual(tree.heaviestExecutedTip(avoiding: [hash("r1")]), hash("b"))
         XCTAssertEqual(tree.heaviestExecutedTip(avoiding: [hash("r1"), hash("r2")]), hash("r1"))
     }
+
+    /// Avoiding the act-on root while it is not the canonical one: the
+    /// descent moves to the next executed root.
+    func testAvoidingANonCanonicalActOnRoot() throws {
+        try admit("r1", work: 3)
+        try validate("r1")
+        try admit("r2", work: 1)
+        try validate("r2")
+        try admit("heavy", work: 9)
+
+        XCTAssertEqual(tree.canonicalTip, hash("heavy"))
+        XCTAssertEqual(tree.heaviestExecutedTip(), hash("r1"))
+        XCTAssertEqual(tree.heaviestExecutedTip(avoiding: [hash("r1")]), hash("r2"))
+    }
+
+    /// Executed roots of equal weight: fork choice's CID tie-break decides.
+    func testRootTieBreaksByCID() throws {
+        try admit("t1", work: 2)
+        try validate("t1")
+        try admit("t2", work: 2)
+        try validate("t2")
+        try admit("heavy", work: 9)
+
+        let preferred = forkChoicePrefersBlock(hash("t1"), over: hash("t2")) ? hash("t1") : hash("t2")
+        XCTAssertEqual(tree.heaviestExecutedTip(), preferred)
+    }
 }
