@@ -835,5 +835,15 @@ final class TransactionPreflightTests: XCTestCase {
             fetcher: fetcher
         )
         XCTAssertEqual(result.disposition, .unavailable)
+
+        // A parent state without the receipt: it may be a block away, so a
+        // retry, never a verdict.
+        try await LatticeState.emptyHeader.storeRecursively(storer: fetcher)
+        let unproven = await level.preflightTransaction(
+            withdrawal,
+            parentState: LatticeState.emptyHeader,
+            fetcher: fetcher
+        )
+        XCTAssertEqual(unproven.disposition, .unavailable)
     }
 }

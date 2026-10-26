@@ -167,12 +167,22 @@ public enum TransactionPreflight {
                 else {
                     return try await judged(.unavailable)
                 }
-                guard try await body.withdrawalsAreValid(
-                    directory: directory,
-                    prevState: state,
-                    parentState: parent,
-                    fetcher: fetcher
-                ) else {
+                // A receipt or deposit this state lacks may be one block
+                // away (the parent level here lags the wallet's), so a
+                // failed proof is a retry, never a verdict: the
+                // transaction is still not ready and is not pooled.
+                let proven: Bool
+                do {
+                    proven = try await body.withdrawalsAreValid(
+                        directory: directory,
+                        prevState: state,
+                        parentState: parent,
+                        fetcher: fetcher
+                    )
+                } catch {
+                    return result(.unavailable, tipCID: tip.cid)
+                }
+                guard proven else {
                     return result(.invalid, tipCID: tip.cid)
                 }
             }
