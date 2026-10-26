@@ -49,7 +49,20 @@ struct BlockEntry: Sendable {
     var nextProducer: UInt32 = BlockGraph.none
     var firstGrind: UInt32 = BlockGraph.none
     var spec: UInt32 = BlockGraph.none
+    /// The first of its child commitments in `BlockGraph.commitments`, or
+    /// `none` when it commits none. Held in what was the entry's padding.
+    var firstCommitment: UInt32 = BlockGraph.none
     var flags: Flags = []
+}
+
+/// One child commitment (§9.10): the directory, interned in
+/// `BlockGraph.directoryNames`, and the child block committed there. A
+/// block's commitments are one contiguous run in `BlockGraph.commitments`,
+/// from its `firstCommitment` through the entry marked `isLast`.
+struct Commitment: Sendable {
+    var child: BlockID
+    var directory: UInt32
+    var isLast: Bool
 }
 
 /// One contribution's one location: its block, its strongest work, and
@@ -100,8 +113,10 @@ final class BlockGraph: @unchecked Sendable {
     var states: OrderedSet<StateID> = []
     var firstProducer: ContiguousArray<UInt32> = []
     var specIDs: OrderedSet<CIDDigest> = []
-    /// Directory → child block CID, for the blocks that commit any.
-    var commitments: [UInt32: [String: String]] = [:]
+    /// Every directory a held block commits into, interned.
+    var directoryNames: OrderedSet<String> = []
+    /// Every held block's child commitments, each block's one run.
+    var commitments: ContiguousArray<Commitment> = []
     /// Blocks whose declared spec is not their root's, mapped to their root's
     /// spec (`ChainTree.scheduleSpec(underParent:)`).
     var offRootSpec: [UInt32: UInt32] = [:]
@@ -156,6 +171,7 @@ final class BlockGraph: @unchecked Sendable {
         copy.states = states
         copy.firstProducer = firstProducer
         copy.specIDs = specIDs
+        copy.directoryNames = directoryNames
         copy.commitments = commitments
         copy.offRootSpec = offRootSpec
         copy.roots = roots
@@ -263,8 +279,38 @@ final class BlockGraph: @unchecked Sendable {
             blockHash: hash(block),
             parentBlockHash: parentHash(of: block),
             blockHeight: self[block].height,
-            childCommitments: commitments[block] ?? [:]
+            childCommitments: childCommitments(of: block)
         )
+    }
+
+    // MARK: Child commitments
+
+    /// The positions of `block`'s commitments in `commitments`: O(its own).
+    func commitmentRange(of block: UInt32) -> Range<Int> {
+        let first = self[block].firstCommitment
+        guard first != Self.none else { return 0..<0 }
+        var last = Int(first)
+        while !commitments[last].isLast { last += 1 }
+        return Int(first)..<last + 1
+    }
+
+    /// The child block `block` commits into `directory`, or nil.
+    func committedChild(of block: UInt32, directory: String) -> BlockID? {
+        guard self[block].firstCommitment != Self.none,
+              let name = directoryNames.firstIndex(of: directory) else { return nil }
+        return commitments[commitmentRange(of: block)].first { $0.directory == UInt32(name) }?.child
+    }
+
+    /// Directory → child block CID, as `BlockMeta.childCommitments` states
+    /// it: built from the held run.
+    func childCommitments(of block: UInt32) -> [String: String] {
+        let range = commitmentRange(of: block)
+        var result: [String: String] = [:]
+        result.reserveCapacity(range.count)
+        for commitment in commitments[range] {
+            result[directoryNames[Int(commitment.directory)]] = commitment.child.string
+        }
+        return result
     }
 
     // MARK: Work
@@ -483,7 +529,15 @@ final class BlockGraph: @unchecked Sendable {
         self[block].flags.insert(.held)
         heldCount += 1
         if !childCommitments.isEmpty {
-            commitments[block] = childCommitments
+            self[block].firstCommitment = UInt32(commitments.count)
+            for (directory, child) in childCommitments {
+                guard let id = BlockID(child) else {
+                    preconditionFailure("a non-standard child reached the block graph: \(child)")
+                }
+                let name = UInt32(directoryNames.append(directory).index)
+                commitments.append(Commitment(child: id, directory: name, isLast: false))
+            }
+            commitments[commitments.count - 1].isLast = true
         }
         if let parent {
             guard let parentID = BlockID(parent) else {

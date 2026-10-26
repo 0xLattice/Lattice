@@ -96,7 +96,7 @@ public struct BlockMeta: Sendable {
         self.blockHash = graph.hash(block)
         self.parentBlockHash = graph.parentHash(of: block)
         self.blockHeight = graph[block].height
-        self.childCommitments = graph.commitments[block] ?? [:]
+        self.childCommitments = graph.childCommitments(of: block)
         self.childHashes = graph.children(of: block).map(graph.hash)
         self.workContributions = contributions
         self.attributedRuns = attributedRuns
