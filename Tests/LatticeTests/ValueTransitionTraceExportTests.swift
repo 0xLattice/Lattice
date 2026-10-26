@@ -340,16 +340,8 @@ private final class ValueTrace {
             XCTAssertTrue(outcome.accepted, "seed \(seed) h\(tip.height + 1): valid block rejected: \(outcome.error ?? "")")
         } else {
             XCTAssertFalse(outcome.accepted, "seed \(seed) h\(tip.height + 1): \(violation!) accepted")
-            if let violation, violation.isShapeRule {
-                // Refused by the shape rule itself: the body fails it, and the
-                // block is refused at transaction validation (a false verdict),
-                // not by a deposit or receipt proof (which throws).
-                let shaped = body(actions)
-                XCTAssertFalse(violation == .receiptZeroDemand
-                               ? shaped.receiptActionsAreValid() : shaped.withdrawalActionsAreValid())
-                XCTAssertEqual(outcome.error, "validateNexus returned false",
-                               "seed \(seed): \(violation) refused for another reason")
-            }
+            try await assertRejectionReason(violation!, actions: actions, recipient: recipient,
+                                            error: outcome.error ?? "")
         }
         if outcome.accepted, let post = outcome.post {
             XCTAssertEqual(post, expected.post, "seed \(seed) h\(tip.height + 1): post-state differs from the model")
@@ -375,6 +367,76 @@ private final class ValueTrace {
             tip = block
             state = post
             sponsorNonce += UInt64(transactionCount(unordered))
+        }
+    }
+
+    /// The validator refused `kind` at the stage that owns its rule: a false
+    /// verdict is located by running that stage's own check on the block, and
+    /// a thrown error by its type (and, for the withdrawal rules, by running
+    /// the deposit, parent-receipt and spend stages separately).
+    func assertRejectionReason(_ kind: Violation, actions: [VAction], recipient: String?, error: String) async throws {
+        let refused = "validateNexus returned false"
+        let label = "seed \(seed) h\(tip.height + 1): \(kind) refused as \(error)"
+        let body = body(actions)
+        let shapeHolds = body.accountActionsAreValid() && body.depositActionsAreValid()
+            && body.receiptActionsAreValid() && body.withdrawalActionsAreValid()
+        func failure(_ operation: () async throws -> Void) async -> String? {
+            do { try await operation(); return nil } catch { return String(describing: error) }
+        }
+        let resolvedPrev = try await tip.postState.resolve(fetcher: fetcher)
+        let prevState = try XCTUnwrap(resolvedPrev.node)
+        let parentHeader = try await parentStateHeader()
+        let parentState = try XCTUnwrap(parentHeader.node)
+        let depositStage = await failure {
+            _ = try await prevState.depositState.proveExistenceOfCorrespondingDeposit(
+                withdrawalActions: body.withdrawalActions, fetcher: self.fetcher)
+        }
+        let receiptStage = await failure {
+            _ = try await parentState.receiptState.proveExistenceAndVerifyWithdrawers(
+                directory: Self.dir, withdrawalActions: body.withdrawalActions, fetcher: self.fetcher)
+        }
+        let spendStage = await failure {
+            _ = try await prevState.depositState.proveAndSpendForWithdrawals(
+                allWithdrawalActions: body.withdrawalActions, fetcher: self.fetcher)
+        }
+        switch kind {
+        case .deltaZero:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertFalse(body.accountActionsAreValid(), label)
+        case .depositZero:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertFalse(body.depositActionsAreValid(), label)
+        case .receiptZeroDemand:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertFalse(body.receiptActionsAreValid(), label)
+        case .withdrawZeroDemand, .withdrawZeroAmount:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertFalse(body.withdrawalActionsAreValid(), label)
+        case .feeRule:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertTrue(shapeHolds, label)
+            let coinbase = Block.coinbaseCredit(
+                spec: spec, height: tip.height + 1, recipient: recipient,
+                accountActions: body.accountActions, depositActions: body.depositActions,
+                withdrawalActions: body.withdrawalActions)
+            if case .failure(.feeRuleViolated) = coinbase {} else { XCTFail(label) }
+        case .overdraft:
+            XCTAssertEqual(error, String(describing: StateErrors.insufficientBalance), label)
+        case .depositExists, .receiptExists:
+            XCTAssertTrue(error.hasPrefix("invalidProofType(\"insertion proof on existing value"), label)
+        case .withdrawNoReceipt:
+            XCTAssertNil(depositStage, label)
+            XCTAssertTrue(receiptStage?.hasPrefix("invalidProofType(\"deletion/mutation proof on non-existent") ?? false, label)
+            XCTAssertEqual(error, receiptStage, label)
+        case .withdrawWrongWithdrawer:
+            XCTAssertNil(depositStage, label)
+            XCTAssertEqual(receiptStage, String(describing: StateErrors.conflictingActions), label)
+            XCTAssertEqual(error, receiptStage, label)
+        case .withdrawSpent, .withdrawWrongAmount:
+            XCTAssertNil(depositStage, label)
+            XCTAssertNil(receiptStage, label)
+            XCTAssertEqual(spendStage, String(describing: StateErrors.conflictingActions), label)
+            XCTAssertEqual(error, spendStage, label)
         }
     }
 
