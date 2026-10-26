@@ -51,7 +51,7 @@ final class ValueTransitionTraceExportTests: XCTestCase {
             }
         }
         print("value traces: \(coverage.sorted { $0.key < $1.key })")
-        for kind in Violation.allCases {
+        for kind in Violation.randomKinds {
             XCTAssertGreaterThan(coverage[kind.rawValue] ?? 0, 0, "no case violates \(kind.rawValue)")
         }
         for feature in ["valid:recipient", "valid:burn", "valid:spentMarker", "valid:netting",
@@ -60,6 +60,44 @@ final class ValueTransitionTraceExportTests: XCTestCase {
                         "valid:nettingDebitFirstTwoTx", "valid:nettingCoinbase"] {
             XCTAssertGreaterThan(coverage[feature] ?? 0, 0, "no case shows \(feature)")
         }
+    }
+
+    /// Width bounds: a chain whose reward is 2^62, so a few coinbases put
+    /// balances near `Int64.max` and `UInt64.max`. Set
+    /// `LATTICE_VALUE_WIDTH_TRACE_DIR` to write `width-<seed>.json` for seeds
+    /// 1...`LATTICE_VALUE_WIDTH_TRACE_COUNT` (default 10).
+    func testWidthTracesCoverEveryBound() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        let count = environment["LATTICE_VALUE_WIDTH_TRACE_COUNT"].flatMap(UInt64.init) ?? 10
+        let directory = environment["LATTICE_VALUE_WIDTH_TRACE_DIR"].map { URL(fileURLWithPath: $0) }
+        if let directory {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        var coverage: [String: Int] = [:]
+        for seed in 1...max(count, 1) {
+            let trace = try await ValueTrace.make(seed: seed, reward: ValueTrace.widthReward)
+            try await trace.runWidth()
+            coverage.merge(trace.coverage, uniquingKeysWith: +)
+            if let directory {
+                try trace.json().write(to: directory.appendingPathComponent("width-\(seed).json"))
+            }
+        }
+        print("width traces: \(coverage.sorted { $0.key < $1.key })")
+        for kind in Violation.widthKinds {
+            XCTAssertGreaterThan(coverage[kind.rawValue] ?? 0, 0, "no case violates \(kind.rawValue)")
+        }
+        for feature in ["width:maxDebitCredit", "width:balanceAtUInt64Max",
+                        "width:coinbaseAtInt64Max", "width:burnAboveInt64Max"] {
+            XCTAssertGreaterThan(coverage[feature] ?? 0, 0, "no case shows \(feature)")
+        }
+    }
+
+    func testWidthTraceIsDeterministic() async throws {
+        let first = try await ValueTrace.make(seed: 1, reward: ValueTrace.widthReward)
+        try await first.runWidth()
+        let second = try await ValueTrace.make(seed: 1, reward: ValueTrace.widthReward)
+        try await second.runWidth()
+        XCTAssertEqual(try first.json(), try second.json())
     }
 
     func testValueTraceIsDeterministic() async throws {
@@ -85,6 +123,18 @@ private enum Violation: String, CaseIterable {
     /// Deposits a fresh key and withdraws it in the same block: valid only if
     /// deposits applied before withdrawals, which §6.4 orders the other way.
     case withdrawSameBlockDeposit
+    /// Width bounds the model leaves out (`Int64`/`UInt64`), traced by
+    /// `runWidth` on a chain with a 2^62 reward.
+    case deltaInt64Min, netCreditOverflow, balanceOverflow, coinbaseOverflow
+
+    /// The kinds the random value traces draw from, in their original order.
+    static let randomKinds: [Violation] = [
+        .overdraft, .feeRule, .deltaZero, .depositExists, .depositZero,
+        .withdrawWrongAmount, .withdrawNoReceipt, .withdrawWrongWithdrawer, .withdrawSpent,
+        .receiptExists, .receiptZeroDemand, .withdrawZeroDemand, .withdrawZeroAmount,
+        .withdrawSameBlockDeposit,
+    ]
+    static let widthKinds: [Violation] = [.deltaInt64Min, .netCreditOverflow, .balanceOverflow, .coinbaseOverflow]
 
     /// The model-level rules a case of this kind breaks as a consequence.
     var implied: Set<Violation> {
@@ -149,19 +199,20 @@ private enum ModelMirror {
     static func apply(dir: String, parent: [RKey: String], state: VState, actions: [VAction],
                       reward: UInt64, recipient: String?) -> (violations: Set<Violation>, post: VState?) {
         var violations = Set<Violation>()
-        var deltas: [(String, Int64)] = []
-        var credits: Int64 = 0, debits: Int64 = 0, deposited: Int64 = 0, withdrawn: Int64 = 0
+        var deltas: [(String, Int128)] = []
+        var credits: Int128 = 0, debits: Int128 = 0, deposited: Int128 = 0, withdrawn: Int128 = 0
         for action in actions {
             switch action {
             case let .account(owner, delta):
                 if delta == 0 { violations.insert(.deltaZero) }
-                if delta > 0 { credits += delta } else { debits -= delta }
-                deltas.append((owner, delta))
+                if delta == .min { violations.insert(.deltaInt64Min) }
+                if delta > 0 { credits += Int128(delta) } else { debits -= Int128(delta) }
+                deltas.append((owner, Int128(delta)))
             case let .receipt(w, _, dm, amount, _):
-                credits += Int64(amount); debits += Int64(amount)
-                deltas.append((w, -Int64(amount))); deltas.append((dm, Int64(amount)))
-            case let .deposit(_, _, _, amount): deposited += Int64(amount)
-            case let .withdrawal(_, _, _, _, amount): withdrawn += Int64(amount)
+                credits += Int128(amount); debits += Int128(amount)
+                deltas.append((w, -Int128(amount))); deltas.append((dm, Int128(amount)))
+            case let .deposit(_, _, _, amount): deposited += Int128(amount)
+            case let .withdrawal(_, _, _, _, amount): withdrawn += Int128(amount)
             }
         }
         if credits + deposited > debits + withdrawn { violations.insert(.feeRule) }
@@ -198,24 +249,32 @@ private enum ModelMirror {
             receipts[key] = w
         }
         if let recipient {
-            deltas.append((recipient, Int64(reward) + debits + withdrawn - credits - deposited))
+            let minted = Int128(reward) + debits + withdrawn - credits - deposited
+            if minted > Int128(Int64.max) { violations.insert(.coinbaseOverflow) }
+            deltas.append((recipient, minted))
         }
         var balances = state.balances
         for owner in Set(deltas.map(\.0)) {
-            let value = Int64(state.balances[owner] ?? 0) + deltas.filter { $0.0 == owner }.reduce(0) { $0 + $1.1 }
+            let net = deltas.filter { $0.0 == owner }.reduce(Int128(0)) { $0 + $1.1 }
+            let value = Int128(state.balances[owner] ?? 0) + net
             if value < 0 { violations.insert(.overdraft) }
-            balances[owner] = value > 0 ? UInt64(value) : nil
+            if net.magnitude > UInt128(UInt64.max) {
+                violations.insert(.netCreditOverflow)
+            } else if value > Int128(UInt64.max) {
+                violations.insert(.balanceOverflow)
+            }
+            balances[owner] = value > 0 && value <= Int128(UInt64.max) ? UInt64(value) : nil
         }
         guard violations.isEmpty else { return (violations, nil) }
         return ([], VState(balances: balances, deposits: deposits, receipts: receipts))
     }
 
-    static func fee(_ actions: [VAction]) -> Int64 {
-        actions.reduce(0) { total, action in
+    static func fee(_ actions: [VAction]) -> Int128 {
+        actions.reduce(Int128(0)) { total, action in
             switch action {
-            case let .account(_, delta): return total - delta
-            case let .deposit(_, _, _, amount): return total - Int64(amount)
-            case let .withdrawal(_, _, _, _, amount): return total + Int64(amount)
+            case let .account(_, delta): return total - Int128(delta)
+            case let .deposit(_, _, _, amount): return total - Int128(amount)
+            case let .withdrawal(_, _, _, _, amount): return total + Int128(amount)
             case .receipt: return total
             }
         }
@@ -233,7 +292,7 @@ private final class ValueTrace {
     let seed: UInt64
     var rng: SeededRNG
     let fetcher = StorableFetcher()
-    let spec = ChainSpec.test(initialReward: 100)
+    let spec: ChainSpec
     var keys: [String: (privateKey: String, publicKey: String)] = [:]
     let users: [String]
     let sponsor: String
@@ -255,8 +314,9 @@ private final class ValueTrace {
     var cases: [[String: Any]] = []
     var coverage: [String: Int] = [:]
 
-    private init(seed: UInt64, genesis: Block, keys: [String: (String, String)], users: [String], sponsor: String) {
+    private init(seed: UInt64, spec: ChainSpec, genesis: Block, keys: [String: (String, String)], users: [String], sponsor: String) {
         self.seed = seed
+        self.spec = spec
         rng = SeededRNG(seed: seed &* 0x9E37_79B9)
         tip = genesis
         self.keys = keys.mapValues { (privateKey: $0.0, publicKey: $0.1) }
@@ -264,7 +324,8 @@ private final class ValueTrace {
         self.sponsor = sponsor
     }
 
-    static func make(seed: UInt64) async throws -> ValueTrace {
+    static func make(seed: UInt64, reward: UInt64 = 100) async throws -> ValueTrace {
+        let spec = ChainSpec.test(initialReward: reward)
         var keys: [String: (String, String)] = [:]
         func key(_ name: String) throws -> String {
             let raw = Data(SHA256.hash(data: Data("lattice-value-trace/\(seed)/\(name)".utf8)))
@@ -278,11 +339,11 @@ private final class ValueTrace {
         let sponsor = try key("sponsor")
         let fetcher = StorableFetcher()
         let genesis = try await BlockBuilder.buildChildGenesis(
-            spec: ChainSpec.test(initialReward: 100),
+            spec: spec,
             parentState: LatticeState.emptyHeader,
             timestamp: baseTimestamp, target: .max, fetcher: fetcher
         )
-        let trace = ValueTrace(seed: seed, genesis: genesis, keys: keys, users: users, sponsor: sponsor)
+        let trace = ValueTrace(seed: seed, spec: spec, genesis: genesis, keys: keys, users: users, sponsor: sponsor)
         try await storeBuiltBlock(genesis, in: trace.fetcher)
         return trace
     }
@@ -292,6 +353,63 @@ private final class ValueTrace {
     }
     func pick<T>(_ items: [T]) -> T? { items.isEmpty ? nil : items[Int.random(in: 0..<items.count, using: &rng)] }
     func amount(_ upTo: UInt64) -> UInt64 { UInt64.random(in: 1...max(upTo, 1), using: &rng) }
+
+    // MARK: Width bounds
+
+    static let widthReward: UInt64 = 1 << 62
+
+    /// One scripted pass over the width bounds; the seed permutes the users
+    /// and picks how the balance overflow is reached. Rejected cases do not
+    /// move the chain, so each valid step's arithmetic below is exact.
+    func runWidth() async throws {
+        let max = Int64.max, quarter = Int64(Self.widthReward)   // 2^62
+        var order = users
+        order.shuffle(using: &rng)
+        let (a, b, c, d) = (order[0], order[1], order[2], order[3])
+        func mark(_ feature: String) { coverage["width:" + feature, default: 0] += 1 }
+        // a, b, c each 2^63.
+        for owner in [a, a, b, b, c, c] {
+            try await step(actions: [], recipient: owner, violation: nil)
+        }
+        // Funded for 2^63, so only the Int64.min shape rule refuses it.
+        try await step(actions: [.account(owner: a, delta: .min),
+                                 .account(owner: d, delta: quarter), .account(owner: d, delta: quarter)],
+                       recipient: nil, violation: .deltaInt64Min)
+        // d's net credit 3 * Int64.max exceeds UInt64.max.
+        try await step(actions: [.account(owner: a, delta: -max), .account(owner: b, delta: -max),
+                                 .account(owner: c, delta: -max), .account(owner: d, delta: max),
+                                 .account(owner: d, delta: max), .account(owner: d, delta: max)],
+                       recipient: nil, violation: .netCreditOverflow)
+        // The widest debit and credit.
+        try await step(actions: [.account(owner: a, delta: -max), .account(owner: d, delta: max)],
+                       recipient: b, violation: nil)
+        XCTAssertEqual(state.balances[a], 1); XCTAssertEqual(state.balances[d], UInt64(max))
+        mark("maxDebitCredit")
+        // d to exactly UInt64.max.
+        try await step(actions: [.account(owner: c, delta: -quarter), .account(owner: b, delta: -quarter),
+                                 .account(owner: d, delta: quarter), .account(owner: d, delta: quarter)],
+                       recipient: nil, violation: nil)
+        XCTAssertEqual(state.balances[d], UInt64.max)
+        mark("balanceAtUInt64Max")
+        // One more unit for d: by a transfer, or by d's own coinbase.
+        if chance(1, in: 2) {
+            let extra = Int64(amount(1_000))
+            try await step(actions: [.account(owner: b, delta: -extra), .account(owner: d, delta: extra)],
+                           recipient: nil, violation: .balanceOverflow)
+        } else {
+            try await step(actions: [], recipient: d, violation: .balanceOverflow)
+        }
+        // M = 2^62 + Int64.max for c (whose balance would land on UInt64.max).
+        try await step(actions: [.account(owner: b, delta: -max)], recipient: c, violation: .coinbaseOverflow)
+        // M = Int64.max exactly.
+        try await step(actions: [.account(owner: b, delta: -(quarter - 1))], recipient: c, violation: nil)
+        XCTAssertEqual(state.balances[c], UInt64(quarter) + UInt64(max))
+        mark("coinbaseAtInt64Max")
+        // Burning M = 2^62 + Int64.max: no recipient, no bound.
+        try await step(actions: [.account(owner: c, delta: -max)], recipient: nil, violation: nil)
+        XCTAssertEqual(state.balances[c], UInt64(quarter))
+        mark("burnAboveInt64Max")
+    }
 
     // MARK: Driving the chain
 
@@ -314,7 +432,7 @@ private final class ValueTrace {
             for _ in 0..<40 {
                 // Weighted toward the withdrawal rules, which need a live deposit.
                 let withdrawalRules: [Violation] = [.withdrawWrongAmount, .withdrawNoReceipt, .withdrawWrongWithdrawer]
-                guard let kind = pick(Violation.allCases + withdrawalRules + withdrawalRules),
+                guard let kind = pick(Violation.randomKinds + withdrawalRules + withdrawalRules),
                       let extra = violationActions(kind, base: valid, recipient: recipient) else { continue }
                 let actions = valid + extra
                 let verdict = ModelMirror.apply(dir: Self.dir, parent: parentReceipts, state: state,
@@ -360,7 +478,7 @@ private final class ValueTrace {
             "prev": stateJSON(state),
             "block": [
                 "actions": actions.map(actionJSON),
-                "reward": Int(reward),
+                "reward": NSNumber(value: reward),
                 "recipient": recipient as Any? ?? NSNull(),
             ] as [String: Any],
             "result": outcome.post.map(stateJSON) as Any? ?? NSNull(),
@@ -440,6 +558,35 @@ private final class ValueTrace {
             XCTAssertNil(depositStage, label)
             XCTAssertEqual(receiptStage, String(describing: StateErrors.conflictingActions), label)
             XCTAssertEqual(error, receiptStage, label)
+        case .deltaInt64Min:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertFalse(body.accountActionsAreValid(), label)
+        case .coinbaseOverflow:
+            XCTAssertEqual(error, refused, label)
+            XCTAssertTrue(shapeHolds, label)
+            let coinbase = Block.coinbaseCredit(
+                spec: spec, height: tip.height + 1, recipient: recipient,
+                accountActions: body.accountActions, depositActions: body.depositActions,
+                withdrawalActions: body.withdrawalActions)
+            if case .failure(.amountOverflow) = coinbase {} else { XCTFail(label) }
+        case .netCreditOverflow, .balanceOverflow:
+            // Both throw balanceOverflow: the net delta from netBalanceDeltas,
+            // or the balance from the account-state transition's add.
+            XCTAssertEqual(error, String(describing: StateErrors.balanceOverflow), label)
+            guard case .success(let coinbase) = Block.coinbaseCredit(
+                spec: spec, height: tip.height + 1, recipient: recipient,
+                accountActions: body.accountActions, depositActions: body.depositActions,
+                withdrawalActions: body.withdrawalActions) else { return XCTFail(label) }
+            let netting = await failure {
+                _ = try TransactionBody.netBalanceDeltas(
+                    accountActions: body.accountActions + (coinbase.map { [$0] } ?? []),
+                    receiptActions: body.receiptActions)
+            }
+            if kind == .netCreditOverflow {
+                XCTAssertEqual(netting, String(describing: StateErrors.balanceOverflow), label)
+            } else {
+                XCTAssertNil(netting, label)
+            }
         case .withdrawSameBlockDeposit:
             // Refused where the withdrawal proves its deposit in prevState,
             // before the block's own deposit is inserted.
@@ -458,17 +605,17 @@ private final class ValueTrace {
         func mark(_ feature: String) { coverage["valid:" + feature, default: 0] += 1 }
         // Applying the balance deltas one at a time in exported order (the
         // coinbase last) overdraws some owner: valid only under netting.
-        var running = state.balances.mapValues { Int64($0) }
+        var running = state.balances.mapValues { Int128($0) }
         var overdrawn = Set<String>()
-        func apply(_ owner: String, _ delta: Int64) {
+        func apply(_ owner: String, _ delta: Int128) {
             running[owner, default: 0] += delta
             if running[owner]! < 0 { overdrawn.insert(owner) }
         }
         for action in actions {
-            if case let .account(owner, delta) = action { apply(owner, delta) }
-            if case let .receipt(w, _, dm, amount, _) = action { apply(w, -Int64(amount)); apply(dm, Int64(amount)) }
+            if case let .account(owner, delta) = action { apply(owner, Int128(delta)) }
+            if case let .receipt(w, _, dm, amount, _) = action { apply(w, -Int128(amount)); apply(dm, Int128(amount)) }
         }
-        if let recipient { apply(recipient, Int64(spec.rewardAtBlock(tip.height + 1)) + ModelMirror.fee(actions)) }
+        if let recipient { apply(recipient, Int128(spec.rewardAtBlock(tip.height + 1)) + ModelMirror.fee(actions)) }
         if !overdrawn.isEmpty { mark("sequentialFails") }
         // A planned shape counts only when its own owner needs netting.
         for (feature, owner) in plannedFeatures.sorted(by: { $0.key < $1.key }) where overdrawn.contains(owner) {
@@ -477,7 +624,7 @@ private final class ValueTrace {
         mark(recipient == nil ? "burn" : "recipient")
         var debited: [String: UInt64] = [:], credited = Set<String>()
         for case let .account(owner, delta) in actions {
-            if delta < 0 { debited[owner, default: 0] += UInt64(-delta) } else { credited.insert(owner) }
+            if delta < 0 { debited[owner, default: 0] += delta.magnitude } else { credited.insert(owner) }
         }
         if let recipient { credited.insert(recipient) }
         if debited.keys.contains(where: credited.contains) { mark("netting") }
@@ -610,7 +757,7 @@ private final class ValueTrace {
                                           actions: base + secondTransaction, reward: 0, recipient: nil).post?.balances[owner] ?? 0
             return [.account(owner: owner, delta: -Int64(after + amount(5)))]
         case .feeRule:
-            return [.account(owner: pick(users)!, delta: max(ModelMirror.fee(base), 0) + Int64(amount(5)))]
+            return [.account(owner: pick(users)!, delta: Int64(max(ModelMirror.fee(base), 0)) + Int64(amount(5)))]
         case .deltaZero:
             return [.account(owner: pick(users)!, delta: 0)]
         case .depositExists:
@@ -667,6 +814,8 @@ private final class ValueTrace {
             guard let key = pick(deposits.filter { state.deposits[$0]! > 0 && parentReceipts[receiptKey(for: $0)] != nil })
             else { return nil }
             return [withdraw(key, by: parentReceipts[receiptKey(for: key)]!, 0)]
+        case .deltaInt64Min, .netCreditOverflow, .balanceOverflow, .coinbaseOverflow:
+            return nil
         case .receiptExists:
             guard let key = pick(state.receipts.keys.sorted()) else { return nil }
             return [.receipt(withdrawer: pick(users)!, nonce: key.nonce, demander: key.demander,
@@ -743,7 +892,7 @@ private final class ValueTrace {
             // validator never reaches.
             let header = try await BlockBuilder.buildBlockWithTransition(
                 previous: tip, timestamp: timestamp, target: .max,
-                rewardRecipient: recipient, fetcher: fetcher
+                rewardRecipient: nil, fetcher: fetcher
             ).block
             built = Block(
                 version: header.version, parent: header.parent,
@@ -865,15 +1014,15 @@ private final class ValueTrace {
 
     func receiptKeyJSON(_ key: RKey) -> [String: Any] {
         ["directory": key.directory, "demander": key.demander,
-         "amountDemanded": Int(key.amountDemanded), "nonce": Int(key.nonce)]
+         "amountDemanded": NSNumber(value: key.amountDemanded), "nonce": NSNumber(value: key.nonce)]
     }
 
     func stateJSON(_ state: VState) -> [String: Any] {
         [
-            "balances": state.balances.keys.sorted().map { [$0, Int(state.balances[$0]!)] as [Any] },
+            "balances": state.balances.keys.sorted().map { [$0, NSNumber(value: state.balances[$0]!)] as [Any] },
             "deposits": state.deposits.keys.sorted().map { key -> [Any] in
-                [["demander": key.demander, "amountDemanded": Int(key.amountDemanded), "nonce": Int(key.nonce)],
-                 Int(state.deposits[key]!)]
+                [["demander": key.demander, "amountDemanded": NSNumber(value: key.amountDemanded), "nonce": NSNumber(value: key.nonce)],
+                 NSNumber(value: state.deposits[key]!)]
             },
             "receipts": state.receipts.keys.sorted().map { [receiptKeyJSON($0), state.receipts[$0]!] as [Any] },
         ]
