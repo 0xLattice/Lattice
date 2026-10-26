@@ -328,6 +328,8 @@ final class ParentRunAttributionTests: XCTestCase {
         XCTAssertNil(junk, "an unserved directory keeps no run, even though the block commits into it")
         let served = await run(chain, at: "p1")
         XCTAssertEqual(served, sum(5, 3))
+        let recorded = await chain.recordedChildCommitments(of: h("p1"))
+        XCTAssertEqual(recorded, commits, "every commitment is held exactly, served or not")
     }
 
     /// Serving a directory late settles exactly the table serving it first

@@ -78,10 +78,11 @@ extension BlockGraph {
     /// the UNFILTERED graph. Idempotent.
     func serve(_ directory: String) {
         guard served.insert(directory).inserted else { return }
+        let names = servedNames([directory])
         var stack = roots
         while let block = stack.popLast() {
             guard isRouted(block) else { continue }
-            settle(block, directories: [directory])
+            settle(block, directories: [directory], names: names)
             stack.append(contentsOf: children(of: block))
         }
     }
@@ -92,9 +93,10 @@ extension BlockGraph {
     /// before — a block never routes under an unrouted parent. Unfiltered on
     /// purpose: an excluded descendant is still connected and still credited.
     func connect(rootedAt root: UInt32) {
+        let names = servedNames(served)
         var stack = [root]
         while let block = stack.popLast() {
-            settle(block, directories: served)
+            settle(block, directories: served, names: names)
             stack.append(contentsOf: children(of: block))
         }
     }
@@ -106,16 +108,23 @@ extension BlockGraph {
     /// Used both by live connection (every served directory) and by `serve`
     /// (one directory over the whole graph), so a run has exactly one
     /// definition.
-    private func settle(_ block: UInt32, directories: Set<String>) {
+    ///
+    /// `names` is `directories` by interned name, for those any block commits
+    /// into (`servedNames`): one pass over the block's own commitments finds
+    /// the served ones, so a step is O(served + commitments).
+    private func settle(_ block: UInt32, directories: Set<String>, names: [UInt32: String]) {
         let parent = self[block].parent
-        let committed = commitments[block]
+        var committed: [String: BlockID] = [:]
+        if !names.isEmpty {
+            for commitment in commitments[commitmentRange(of: block)] {
+                if let directory = names[commitment.directory] { committed[directory] = commitment.child }
+            }
+        }
         var credited: [(directory: String, committer: UInt32)] = []
         for directory in directories {
-            let child = committed?[directory]
+            let child = committed[directory]
             if let child {
-                committers[directory, default: [:]][
-                    CIDIdentity.canonicalString(child) ?? child, default: []
-                ].insert(block)
+                committers[directory, default: [:]][child.string, default: []].insert(block)
             }
             let committer = child != nil
                 ? block
@@ -125,6 +134,16 @@ extension BlockGraph {
             credited.append((directory, committer))
         }
         credit(work(of: block), to: credited)
+    }
+
+    /// The interned name of each of `directories` that some block commits
+    /// into; a directory nothing commits into has none and is never found.
+    private func servedNames(_ directories: Set<String>) -> [UInt32: String] {
+        var names: [UInt32: String] = [:]
+        for directory in directories {
+            if let name = directoryNames.firstIndex(of: directory) { names[UInt32(name)] = directory }
+        }
+        return names
     }
 
     /// A connected block's own work rose by `delta`: its runs rise by exactly
@@ -242,8 +261,7 @@ extension ChainTree {
         var raised: [String] = []
         for (committerHash, committer) in scope.map({ (source.hash($0), $0) }).sorted(by: { $0.0 < $1.0 }) {
             guard let run = parentRuns[committer],
-                  let childBlock = source.commitments[committer]?[directory],
-                  let hash = CIDIdentity.canonicalString(childBlock),
+                  let hash = source.committedChild(of: committer, directory: directory)?.string,
                   let block = graph.handle(hash),
                   let value = run.subtracting(source.grindWork(of: committer))?.uint256Value,
                   let id = AttributedRunIdentity(
@@ -273,6 +291,6 @@ extension ChainTree {
     /// The commitments recorded for a held block (§9.10), or nil when the
     /// block is unknown.
     public func recordedChildCommitments(of blockHash: String) -> [String: String]? {
-        CIDIdentity.canonicalString(blockHash).flatMap(graph.handle).map { graph.commitments[$0] ?? [:] }
+        CIDIdentity.canonicalString(blockHash).flatMap(graph.handle).map(graph.childCommitments(of:))
     }
 }
