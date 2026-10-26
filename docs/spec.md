@@ -620,9 +620,15 @@ This operation:
 
 ### 6.2 Account State Transitions
 
-For each `AccountAction(owner, delta)`:
+A block's account deltas are netted per owner before any balance moves: the
+explicit `AccountAction`s of all its transactions, the debit and credit each
+receipt derives (§6.5), and the coinbase credit (§8.2). Each owner's balance
+then moves once, by its net delta, so an owner debited and credited in the
+same block needs only the net amount, never an intermediate balance. An owner
+whose deltas cancel is untouched. For each owner with a nonzero net delta:
 - **Proof**: Verify `prevState.accountState[owner]` exists (or does not, for new accounts)
-- **Update**: Apply `delta` to balance. Positive delta = credit, negative = debit.
+- **Update**: Apply the net delta to the balance. Positive = credit, negative = debit.
+  - If resulting balance < 0: the block is invalid
   - If resulting balance > 0: set `accountState[owner] = newBalance`
   - If resulting balance == 0: delete `accountState[owner]`
 
@@ -654,7 +660,7 @@ For each `DepositAction`:
 For each `WithdrawalAction`:
 - **Key**: `DepositKey(demander, amountDemanded, nonce)`
 - **Proof**: Verify key exists in `depositState` with a nonzero value
-- **Validation**: Stored `amountDeposited` must equal `amountWithdrawn`
+- **Validation**: `amountWithdrawn > 0` and `amountDemanded > 0`; stored `amountDeposited` must equal `amountWithdrawn`
 - **Update**: Set `depositState[key] = 0` as a permanent spent marker
 
 Withdrawals are processed before new deposits within the same block. Since
@@ -666,6 +672,7 @@ prevents both replayed withdrawal and recreation of the same deposit identity.
 For each `ReceiptAction`:
 - **Key**: `ReceiptKey(directory, demander, amountDemanded, nonce)`
 - **Proof**: Verify key does NOT exist in `prevState.receiptState` (insertion proof -- prevents duplicate receipts)
+- **Validation**: `amountDemanded > 0`
 - **Update**: `receiptState[key] = CID(withdrawer's PublicKey)`
 
 Receipt actions also derive account actions: the `withdrawer` is debited `amountDemanded` and the `demander` is credited `amountDemanded`.
