@@ -54,3 +54,4 @@ Terms are defined in the [glossary](https://lattice.build/docs/learn/glossary/).
 - [Consensus simulator](consensus-simulator.md)
 - [Nexus tokenomics](economics/nexus-tokenomics.md)
 - [Fee policy and majority-reorg model](economics/fee-market-and-51pct.md)
+- [Merged-mining security of a child chain](economics/merged-mining-security.md)
