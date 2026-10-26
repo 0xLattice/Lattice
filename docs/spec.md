@@ -528,7 +528,8 @@ Every accepting level establishes the conservative work bound
 `workForTarget(target(B))`. Because proof validity is inclusive (`hash <= target`,
 so `target + 1` hashes qualify), this is `floor(2^256 / (target + 1))`, computed as
 Bitcoin's chainwork `(~target / (target + 1)) + 1` in 256-bit arithmetic (edge
-cases: `target 0 -> 0`, `target max -> 1`). The exclusive `U256_MAX / target` form
+cases: `target max -> 1`; `target 0 -> 0` by convention, outside the formula;
+a target of 0 accepts no hash, `h = 0` included). The exclusive `U256_MAX / target` form
 over-credits by up to ~2x at tiny targets — exploitable now that a miner may
 select any `target <= parent.nextTarget` — so it is not used. For one root CID the
 root-most verified bound along its proof is credited (§9.5); a larger target is
@@ -545,15 +546,14 @@ B.target <= parent.nextTarget      // smaller target = harder = more work
 
 A larger (easier) target is rejected; there is no minimum-target floor. Mining
 harder than scheduled only adds weight at proportional cost and cannot lower
-difficulty: `B.nextTarget` is recomputed from the *actual* `B.target` (below), so
-overachieving ratchets the schedule harder, never easier — self-penalizing, not
-gameable. A miner wanting the easiest future difficulty therefore mines exactly at
-the scheduled `parent.nextTarget`.
+difficulty: `B.nextTarget` is scheduled from the branch's anchor (below), not
+from `B.target`, so a harder block is more work on the same schedule. Only at
+height 1, where the block is its own anchor, does its target set the schedule.
 
 Genesis has no parent-derived target. The `GenesisCeremony` commits the canonical
 maximum (easiest) target by convention — every hash satisfies it, so genesis needs
-no grinding, block 1's schedule is `max`, and the chain self-calibrates as early
-miners voluntarily mine harder. What a genesis's target must satisfy is §5.1
+no grinding, block 1's schedule is `max`, and the chain calibrates at block 1,
+whose committed target anchors the schedule. What a genesis's target must satisfy is §5.1
 rule 5. Each non-genesis block's
 `nextTarget` is **absolutely scheduled from an anchor (ASERT)**: a pure function
 of one anchor block and the block being targeted, with no window and no
@@ -571,10 +571,15 @@ nextTarget = anchor.target · 2^(drift / halfLife)
 ```
 
 Behind schedule (`drift > 0`) eases; ahead hardens; exactly on schedule holds the
-anchor's target at any depth. One half-life of drift is exactly one doubling.
-The exponential is evaluated in 16.16 fixed point with a cubic approximation over
-the fractional part — the same shape Bitcoin Cash's `aserti3-2d` uses — so every
-node computes the identical target from identical inputs. No floating point
+anchor's target at any depth. A whole number of half-lives of drift is an exact
+power of two while the result is within range, the drift is within its
+`2^47 - 1` ms clamp, and the hardening is at most 224 halvings; past that, the
+result is the saturated bound or falls short of the exact power. The
+exponential is evaluated in 16.16 fixed point, the exponent truncated toward
+zero (a drift of magnitude less than `halfLife / 2^16` holds the anchor's
+target), with a cubic approximation over the fractional part — the same shape
+Bitcoin Cash's `aserti3-2d` uses — so every node computes the identical target
+from identical inputs. No floating point
 appears on the path. The result saturates at both ends: it never exceeds the
 maximum target and never reaches zero (a zero target would reject every hash).
 
@@ -593,7 +598,7 @@ decades in the past and saturate every later target.
 
 `spec.halfLife` is the chain's committed responsiveness, in blocks: one
 half-life of block time of drift is one doubling. It is the only difficulty
-parameter besides `targetBlockTime`; there is no window and no clamp.
+parameter besides `targetBlockTime`; there is no window and no per-block clamp.
 
 **The anchor is per-branch and inherited, never chain-wide.** A block imported at
 height 1 anchors itself; every other block inherits its parent's anchor. Two
@@ -616,7 +621,7 @@ schedule a timestamp buys much less than it did under a window:
   one successor by `2^(Δ / halfLife)`. It does not compound, because the schedule
   is absolute: the next block's target is measured from the anchor, not from this
   block. A miner cannot walk the target up by repeating the trick.
-- Mining **harder** than `parent.nextTarget` no longer bends the schedule at all.
+- Mining **harder** than `parent.nextTarget` no longer bends the schedule past block 1.
   Under the windowed retarget `nextTarget` was recomputed from the block's own
   `B.target`, so the level a miner chose became the chain's new floor. Under ASERT
   the schedule derives from the anchor, so a harder block is simply more work on
@@ -656,15 +661,16 @@ This operation:
 2. For each sub-state, independently (`depositState` applies withdrawals, then
    deposits, §6.4):
    a. Resolves from `prevState` the trie nodes on the path of every touched
-      key, each checked against the CID that links it, and reads the current
-      values
+      key and, wherever a deletion can leave a node with no value and one
+      child, that child's node (the collapse merges it into the node), each
+      checked against the CID that links it, and reads the current values
    b. Checks each precondition of §6.2–6.5: an insertion requires no value at
       its key; an update or deletion requires one
    c. Applies the insertions, updates, and deletions in canonical form
       (§3.4.1) and recomputes CIDs bottom-up to a new root
 3. Assembles the four new roots into a new `LatticeState`
 
-There is no separate proof object: the resolved path nodes are the witness. A
+There is no separate proof object: the resolved nodes are the witness. A
 failed precondition makes the block invalid. A needed node that cannot be
 obtained leaves the transition unexecuted: the block is unavailable, not
 invalid (§9.9).
