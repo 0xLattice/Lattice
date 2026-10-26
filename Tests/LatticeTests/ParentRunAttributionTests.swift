@@ -994,6 +994,51 @@ final class ParentRunAttributionTests: XCTestCase {
         XCTAssertEqual(weight(bare, "b1"), sum(5))
     }
 
+    /// An attributed run is an exact sum (§9.2, §9.10): a run past 256 bits
+    /// is credited in full, never skipped or clamped, so live derivation
+    /// after each arrival equals restore of the same facts. Before, the
+    /// value that no longer fit was skipped and the run stayed at the value
+    /// credited one arrival earlier, which restore never credits at all.
+    func testAttributedRunPast256BitsIsExactAndHistoryIndependent() throws {
+        let huge = UInt256.max - UInt256(UInt64(10))
+        func hugeBatch(_ name: String, parent: String, height: UInt64) -> BlockImportBatch {
+            let small = batch(name, parent: parent, height: height, work: 1)
+            return BlockImportBatch(facts: small.facts.map { fact in
+                guard case .work(let work) = fact else { return fact }
+                return .work(ChainWorkFact(
+                    blockHash: work.blockHash,
+                    contribution: VerifiedWorkContribution(id: work.contribution.id, work: huge)
+                ))
+            })
+        }
+        let parentFacts = [
+            batch("g", parent: nil, height: 0, work: 1, commits: [d: h("c")]),
+            hugeBatch("b1", parent: "g", height: 1),
+            hugeBatch("b2", parent: "b1", height: 2),
+        ]
+        let childFacts = [batch("c", parent: nil, height: 0, work: 1)]
+        let context = testChainContext(path: [DEFAULT_ROOT_DIRECTORY, d])
+
+        var parent = try ChainTree.restoreWithoutContext(replaying: [parentFacts[0]])
+        parent.serveRuns(for: d)
+        var child = try ChainTree.restore(replaying: childFacts, context: context, parent: parent)
+        for fact in parentFacts.dropFirst() {
+            let reported = try parent.apply(fact)?.weighed ?? []
+            child.applyParentRun(from: parent, directory: d, parentBlocks: Set(reported))
+        }
+        var restoredParent = try ChainTree.restoreWithoutContext(replaying: parentFacts)
+        restoredParent.serveRuns(for: d)
+        let restored = try ChainTree.restore(replaying: childFacts, context: context, parent: restoredParent)
+
+        // c's own 1 plus g's run beyond g: b1 and b2, past 256 bits.
+        let expected = WorkSum(UInt256(UInt64(1))) + WorkSum(huge) + WorkSum(huge)
+        XCTAssertNil(expected.uint256Value, "fixture: the run must exceed 256 bits")
+        XCTAssertEqual(weight(child, "c"), expected)
+        XCTAssertEqual(weight(restored, "c"), expected)
+        XCTAssertEqual(child.forkChoiceWeight(of: h("c")), expected)
+        XCTAssertEqual(restored.getConsensusBlock(hash: h("c"))?.work, WorkSum(huge) + WorkSum(huge) + WorkSum(UInt256(UInt64(1))))
+    }
+
     // MARK: - Cost, as counters
 
     /// Run bookkeeping is O(#directories with a nearest committer) per
