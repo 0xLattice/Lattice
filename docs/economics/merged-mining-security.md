@@ -113,16 +113,27 @@ hashSpend ~= c * h_m * t * a / (a - h_m)  ->  c * h_m * t   as a grows
 ```
 
 **Span committed, attack long enough to average over many commitments**:
-when `u >> kappa * (a + h_m)`,
 
 ```text
-hashSpend ~= c * t * (1 + kappa * h_m / u) * a (a + h_m) / (a - h_m)
-          >= (3 + 2 sqrt 2) * c * h_m * t     at a = (1 + sqrt 2) * h_m
+hashSpend = c * a * (kappa * h_m * t + u * t_c) * (a + h_m)
+            / ((a - h_m) * (u + kappa * (a + h_m)))
+```
+
+To first order in `1/u` this is
+
+```text
+hashSpend ~= c * (t_c - kappa * a * t / u) * a (a + h_m) / (a - h_m)
+```
+
+with minimum near `a = (1 + sqrt 2) * h_m`:
+
+```text
+hashSpend_min ~= (3 + 2 sqrt 2) * c * h_m * t_c * (1 - (1 + sqrt 2) * kappa * h_m / u)
 ```
 
 The deficit grows with `u`, but so does the closing rate, and the two cancel to
 first order. In both regimes the price of a child span is proportional to
-`h_m * t`, the subscribed hashrate times the span's age, never to `H * t`.
+`h_m` times the span's age (`t`, or `t_c` once committed), never to `H * t`.
 
 The attacker's parent blocks are ordinary parent blocks, so the hash spend
 above also earns parent rewards at the attacker's parent share. This estimate
@@ -144,12 +155,14 @@ Honest commitments into the child arrive every `D_p / h_m = 3.6e5` s, about
 - **60 child blocks (one hour), uncommitted.** `W = 7.2e20`. Replacing it costs
   about `h_m * t = 3.6e20` hashes, about 108 at `c`. One Nexus block costs
   `c * D_p ~= 10,800`.
-- **12,000 child blocks (200 hours), committed.** `W ~= 7.3e24`. Outworking it
+- **12,000 child blocks (200 hours), committed throughout** (`t_c = t`).
+  `W ~= 7.3e24`. Outworking it
   with grinds alone would need more than `W / 2 = 3.6e24` hashes (1.09 million
   at `c`), since the honest branch keeps gaining `u`; 200 Nexus blocks cost
   2.16 million. Capturing runs, the
   cheapest attacker runs at `a ~= 2.5 h_m` (2.5% of Nexus) for about 445 hours,
-  spending about `4.0e23` hashes, about 120,000, while earning about 2.4% of
+  spending about `4.0e23` hashes, about 120,000 (exact form; the first-order
+  minimum gives 119,800), while earning about 2.4% of
   Nexus rewards. It wins about 11 parent blocks in that time, so this is an
   average with wide variance.
 
@@ -166,8 +179,9 @@ lower fork, followed level by level to the root, never backs the other side,
 genesis forks included) and `PhysicalWorkOnce` (a child or grandchild block's
 weight is the sum over the distinct physical grinds it rests on).
 
-Merged mining therefore has nothing at stake in the proof-of-stake sense: to
-back two branches, a miner splits its hashrate between them. What remains is
+Merged mining therefore does not have the proof-of-stake nothing-at-stake
+problem: backing a branch costs hashes, and to back two branches a miner splits
+its hashrate between them. What remains is
 the weaker property derived above: unsubscribed parent work backs one side,
 chosen by the last committer.
 
@@ -219,8 +233,14 @@ reorganization would hurt it.
   holds, stands. Honest child miners cannot extend that withdrawal (anchors
   only advance, §5.3 step 6); they must outweigh it from below, and its
   existing weight, including runs attributed from the abandoned parent branch,
-  still counts (§9.10). The withdrawal is undone only once the honest child
-  branch is heavier (§8.1, "Receipt canonicity"). The demander does not choose
+  still counts (§9.10). Runs can also come from the canonical parent branch:
+  nothing binds a child block's `parentState` to the `prevState` of the
+  carrier whose run credits it, so a canonical parent block that commits a
+  block of the withdrawal branch directs its run, unsubscribed parent work
+  included, to that branch, which stays selectable while its anchor was
+  executed (§9.5). The race is the one above, with threshold `a > h_m`. The
+  withdrawal is undone only once the honest child branch is heavier (§8.1,
+  "Receipt canonicity"). The demander does not choose
   when the withdrawal happens, so it cannot wait its way out of this exposure;
   it can only size the transfer against the parent's reorg cost at the depth
   it expects the receipt to reach.
