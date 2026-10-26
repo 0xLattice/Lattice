@@ -159,8 +159,8 @@ from the map alone:
   with none is removed.
 - The root never collapses. The empty map is `{count: 0, children: []}`.
 
-Every committed state, genesis included, is derived from the empty state by
-section 6.1, so it is in canonical form.
+Every state a valid block commits, genesis included, is derived from the empty
+state by section 6.1, so it is in canonical form.
 
 ### 3.5 ChainSpec
 
