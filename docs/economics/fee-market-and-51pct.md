@@ -97,6 +97,8 @@ This estimates the hash spend needed to outwork an honest branch. It does not
 price hardware scarcity, market impact, opportunity cost, varying targets,
 network position, proof-derived work on nested child paths, or the deterministic
 CID tie-break. Those inputs must be modeled separately.
+[Merged-Mining Security](merged-mining-security.md) prices a child chain
+secured by merged mining.
 
 ## Not A Complete Security Threshold
 
