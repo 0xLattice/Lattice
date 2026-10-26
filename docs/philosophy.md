@@ -92,8 +92,8 @@ Validation deterministically applies the actions to `prevState` and requires the
 derived root to equal `postState`. `parentState` lets the child prove parent-state
 facts, but it is not a backlink to a parent block and cannot be inverted into one.
 
-State is partitioned into independent Sparse Merkle Trees for accounts, general
-data, deposits, receipts, and child-genesis anchors. Inclusion and exclusion
+State is partitioned into independent content-addressed radix tries for
+accounts, general data, deposits, and receipts. Inclusion and exclusion
 proofs make absence, uniqueness, and exact mutation protocol facts rather than
 database assumptions.
 
