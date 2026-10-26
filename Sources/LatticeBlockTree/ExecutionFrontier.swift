@@ -486,19 +486,22 @@ extension ChainTree {
         graph.handle(blockHash).map(graph.isAnchored) ?? false
     }
 
-    /// The tip a node acts on: the heaviest executed tip, or empty while the
-    /// canonical genesis root is not executed. From genesis, at each fork the
-    /// heaviest child that is executed is the step taken — fork choice's own
-    /// weight and tie-break — and the descent stops where no child is
-    /// executed. A block with no verdict is never stepped into: it weighs,
-    /// and is taken once it executes. Up to the executed prefix of the
-    /// canonical chain this is fork choice's own descent, so the walk starts
-    /// there.
+    /// The tip a node acts on: the heaviest executed tip, or empty while no
+    /// genesis root is executed. At each fork the heaviest child that is
+    /// executed is the step taken — fork choice's own weight and tie-break —
+    /// and the descent stops where no child is executed. The genesis roots
+    /// are a fork like any other: the descent starts at the heaviest executed
+    /// root that is not excluded, so a heavier root whose body is withheld
+    /// weighs without stalling it (§9.4, §9.9). A block with no verdict is
+    /// never stepped into: it weighs, and is taken once it executes. Up to the
+    /// executed prefix of the canonical chain this is fork choice's own
+    /// descent, so when the canonical root is executed the walk starts there.
     ///
     /// With `avoided` blocks, they and all they lead to are left out: from
     /// the parent of the deepest avoided block on the act-on chain, the
-    /// heaviest executed step at each fork that is not avoided. The act-on
-    /// tip when none of them is on its chain, or the deepest is a root.
+    /// heaviest executed step at each fork that is not avoided — at the
+    /// genesis fork when that block is a root. The act-on tip when none of
+    /// them is on its chain, or no other root is executed.
     public func heaviestExecutedTip(avoiding avoided: Set<String> = []) -> String {
         let graph = self.graph
         let skipped = Set(avoided.compactMap(graph.handle))
@@ -511,8 +514,12 @@ extension ChainTree {
             }
             return tip
         }
-        guard let prefix = executedPrefix() else { return "" }
-        let tip = descend(from: prefix, skipping: [])
+        // The genesis fork: a root is anchored when executed and not excluded.
+        func root(skipping skipped: Set<UInt32>) -> UInt32? {
+            graph.preferred(among: graph.roots.filter { graph.isAnchored($0) && !skipped.contains($0) })
+        }
+        guard let start = executedPrefix() ?? root(skipping: []) else { return "" }
+        let tip = descend(from: start, skipping: [])
         guard let floor = skipped.map({ graph[$0].height }).min() else { return graph.hash(tip) }
         var deepest: UInt32?
         var block = tip
@@ -521,12 +528,17 @@ extension ChainTree {
             block = graph[block].parent
             guard block != BlockGraph.none else { break }
         }
-        guard let deepest, graph[deepest].parent != BlockGraph.none else { return graph.hash(tip) }
-        return graph.hash(descend(from: graph[deepest].parent, skipping: skipped))
+        guard let deepest else { return graph.hash(tip) }
+        let parent = graph[deepest].parent
+        guard parent != BlockGraph.none else {
+            return root(skipping: skipped).map { graph.hash(descend(from: $0, skipping: skipped)) } ?? graph.hash(tip)
+        }
+        return graph.hash(descend(from: parent, skipping: skipped))
     }
 
     /// The deepest block on the canonical chain whose ancestry is executed
-    /// from genesis; nil while the canonical genesis root is not executed.
+    /// from genesis; nil while the canonical genesis root is not executed
+    /// (the act-on descent then starts at another root, if one is).
     /// The executed blocks on one path are a prefix of it, so this is a
     /// binary search over heights.
     private func executedPrefix() -> UInt32? {

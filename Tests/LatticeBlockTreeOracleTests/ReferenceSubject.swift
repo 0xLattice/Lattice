@@ -256,11 +256,11 @@ struct ReferenceSubject: OracleSubject {
 extension ReferenceSubject {
     /// The graph queries 50.0.1 did not have, answered from its API: the
     /// held block's parent, height and children, and the act-on tip by the
-    /// node's own algorithm (lattice-node `ChainSelection.actOnTip`) over the
-    /// index its boot walk builds. The live twin asks the new API directly.
+    /// spec's descent (`NodeIndex`) over every held root. The live twin asks
+    /// the new API directly.
     mutating func observeGraphQueries(_ probe: OracleProbe) -> [String: String] {
         var seen: [String: String] = [:]
-        let index = NodeIndex(tree: &tree)
+        let index = NodeIndex(tree: &tree, blocks: probe.hashes)
         var avoided: Set<String> = []
         var tips: [String] = []
         for _ in 0..<4 {
@@ -281,16 +281,23 @@ extension ReferenceSubject {
     }
 }
 
-/// The node's `WeighedIndex` as `ChainCore.init` builds it — the best
-/// chain's genesis root and everything under it — and its act-on descent,
-/// transcribed from lattice-node `ChainSelection.swift`.
+/// Every held genesis root and everything under it, and the act-on descent
+/// of spec §9.4/§9.9 over it: from the heaviest executed root that is not
+/// excluded, at each fork the heaviest executed child. The genesis roots are
+/// a fork like any other.
 private struct NodeIndex {
     var parent: [String: String] = [:]
     var height: [String: UInt64] = [:]
     var children: [String: [String]] = [:]
+    var roots: [String] = []
 
-    init(tree: inout ChainTree) {
-        var stack = tree.canonicalBlockHash(atHeight: 0).map { [$0] } ?? []
+    /// `blocks`: every block the stream planned; the held ones without a
+    /// parent are the roots.
+    init(tree: inout ChainTree, blocks: [String]) {
+        roots = blocks.filter {
+            tree.getConsensusBlock(hash: $0).map { $0.parentBlockHash == nil } ?? false
+        }
+        var stack = roots
         while let hash = stack.popLast() {
             guard let meta = tree.getConsensusBlock(hash: hash) else { continue }
             if height.updateValue(meta.blockHeight, forKey: hash) == nil, let parent = meta.parentBlockHash {
@@ -301,9 +308,17 @@ private struct NodeIndex {
         }
     }
 
+    /// The heaviest executed root that is not excluded nor avoided.
+    func root(avoiding avoided: Set<String>, in tree: ChainTree) -> String? {
+        byWeight(roots.filter {
+            tree.isExecuted(blockHash: $0) && !tree.isExcludedRoot($0) && !avoided.contains($0)
+        }, in: tree).first
+    }
+
     func actOnTip(of tree: ChainTree) -> String {
-        var tip = executedPrefix(of: tree)
-        guard !tip.isEmpty else { return tip }
+        // From the genesis fork every time, with no canonical-prefix shortcut,
+        // so the live tree's shortcut is checked against the full rule.
+        guard var tip = root(avoiding: [], in: tree) else { return "" }
         while let next = byWeight((children[tip] ?? []).filter(tree.isExecuted(blockHash:)), in: tree).first {
             tip = next
         }
@@ -319,7 +334,8 @@ private struct NodeIndex {
             if avoided.contains(block) { deepest = block }
             cid = parent[block]
         }
-        guard let deepest, let base = parent[deepest] else { return tip }
+        guard let deepest else { return tip }
+        guard let base = parent[deepest] ?? root(avoiding: avoided, in: tree) else { return tip }
         tip = base
         while let next = byWeight((children[tip] ?? []).filter {
             tree.isExecuted(blockHash: $0) && !avoided.contains($0)
@@ -335,22 +351,5 @@ private struct NodeIndex {
             .map { (hash: $0, work: tree.forkChoiceWeight(of: $0) ?? .zero) }
             .sorted { $0.work != $1.work ? $0.work > $1.work : forkChoicePrefersBlock($0.hash, over: $1.hash) }
             .map(\.hash)
-    }
-
-    func executedPrefix(of tree: ChainTree) -> String {
-        guard let genesis = tree.canonicalBlockHash(atHeight: 0), tree.isExecuted(blockHash: genesis) else { return "" }
-        let tipHeight = tree.headerSnapshot(of: tree.canonicalTip)?.tipHeight ?? 0
-        var low: UInt64 = 0
-        var high = tipHeight
-        while low < high {
-            let middle = low + (high - low + 1) / 2
-            if let hash = tree.canonicalBlockHash(atHeight: middle),
-               tree.hasExecutedAncestry(blockHash: hash) {
-                low = middle
-            } else {
-                high = middle - 1
-            }
-        }
-        return tree.canonicalBlockHash(atHeight: low) ?? tree.canonicalTip
     }
 }

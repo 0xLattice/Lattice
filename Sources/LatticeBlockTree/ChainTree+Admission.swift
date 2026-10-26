@@ -42,6 +42,12 @@ extension ChainTree {
         )
     }
 
+    /// This chain's genesis roots: the children of the genesis fork, which
+    /// the act-on descent takes like any other fork (`heaviestExecutedTip`).
+    public var genesisRoots: [String] {
+        graph.roots.map(graph.hash)
+    }
+
     /// Whether `blockHash` is a proven-invalid subtree root. Its work still
     /// weighs; the fork-choice descent never steps into it.
     public func isExcludedRoot(_ blockHash: String) -> Bool {

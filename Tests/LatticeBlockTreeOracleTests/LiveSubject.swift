@@ -241,8 +241,8 @@ struct LiveSubject: OracleSubject {
 
 extension LiveSubject {
     /// The graph queries 50.0.1 did not have, asked directly. The reference
-    /// twin answers the same keys from the 50.0.1 API and the node's own
-    /// act-on algorithm, so these are the one place the twins differ.
+    /// twin answers the same keys from the 50.0.1 API and the spec's act-on
+    /// descent, so these are the one place the twins differ.
     mutating func observeGraphQueries(_ probe: OracleProbe) -> [String: String] {
         var seen: [String: String] = [:]
         // The node's retry loop: each tip refused is avoided in turn.
