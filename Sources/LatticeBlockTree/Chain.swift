@@ -895,6 +895,14 @@ public struct ChainTree: Sendable {
         graph.handle(blockHash) != nil
     }
 
+    /// A held block's handle: its index among the blocks this tree has
+    /// interned. It never changes while the tree lives, and a copy shares
+    /// it; a restore numbers afresh. Nil for a block the tree does not hold.
+    /// Lets a caller keep per-block state in a dense array or bitset.
+    public func handle(of blockHash: String) -> UInt32? {
+        graph.handle(blockHash)
+    }
+
     /// The parent CID a held block names, held or not; nil for a root or an
     /// unknown block.
     public func parent(of blockHash: String) -> String? {
