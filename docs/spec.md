@@ -1449,8 +1449,9 @@ attributed(C, P, d) = runWork(P, d) − grindWork(P)
 ```
 
 credited at `C` under the contribution ID `CID(AttributedRunIdentity(P, d))`,
-separate from any grind, and only ever raised. `grindWork(P)` is the credited
-work of `P`'s own grinds — never an attributed run. Subtracting all of it
+separate from any grind, and only ever raised. Like every sum of work (§9.2), the
+attributed quantity is exact: never wrapped, saturated, or skipped past `U256`.
+`grindWork(P)` is the credited work of `P`'s own grinds — never an attributed run. Subtracting all of it
 keeps the value monotone (a stronger grind at `P` raises both terms alike) and
 never counts a grind the child may already hold at `C` twice; a run that `P`'s
 OWN parent attributed at `P` is in `runWork(P, d)` and not in
