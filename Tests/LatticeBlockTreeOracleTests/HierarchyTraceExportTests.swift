@@ -21,8 +21,12 @@ import LatticePrimitives
 /// tree one level up. A non-genesis block's header rules (§9.9: `spec` and
 /// `prevState` against its parent) are decided by header admission's own
 /// `Block.headerAdmission`; a block it excludes is admitted with its
-/// exclusion and never validated. After every apply, attributed runs are
-/// re-derived level by level, parents first, as the node's
+/// exclusion and never validated. Every non-genesis block is admitted by the
+/// tree's own header admission (`ChainTree.insertHeader`), and an admit's
+/// `headerExcluded` is what that tree then reports of the block
+/// (`isExcludedRoot`), checked against the header rule generated for it.
+/// After every apply, attributed runs are re-derived level by level,
+/// parents first, as the node's
 /// `NodeCore.attributeRuns` does: a level's scope is the weighed blocks one
 /// level up plus the blocks that level's own derivation raised.
 ///
@@ -180,7 +184,7 @@ private final class HierarchyTrace {
     var trees: [Level: ChainTree] = [:]
     /// Every batch each tree took without a throw, in order: what a restart
     /// replays.
-    var logs: [Level: [OracleBatch]] = [:]
+    var logs: [Level: [BlockImportBatch]] = [:]
     var held: [Level: [String]] = [.P: [], .C: [], .G: []]
     var executed: Set<String> = []
     var excluded: Set<String> = []
@@ -429,16 +433,22 @@ private final class HierarchyTrace {
             parentState: LatticeStateHeader(rawCID: parentState[label] ?? empty),
             prevState: LatticeStateHeader(rawCID: fact.prevState),
             postState: LatticeStateHeader(rawCID: fact.postState),
-            children: HeaderImpl(rawCID: placeholder),
+            children: try! HeaderImpl(node: childIndex(label)),
             height: fact.height, timestamp: fact.timestamp, rewardRecipient: nil, nonce: 0
         )
+    }
+
+    /// The blocks `label` commits, by directory: the child index its header
+    /// binds.
+    func childIndex(_ label: String) -> FlatDictionary<BlockHeader> {
+        FlatDictionary((facts[label]!.childCommitments ?? [:]).mapValues { BlockHeader(rawCID: $0) })
     }
 
     /// Header admission's own decision (§9.9) for a non-genesis header
     /// whose work verified and whose parent is held: `Block.headerAdmission`
     /// called with this exporter's own linkage (the parent's fact) and
-    /// difficulty anchor (`heightOneAnchor`); the tree's private
-    /// `insertHeader`, which makes the same call, is not driven. `.excluded`
+    /// difficulty anchor (`heightOneAnchor`), decided before any tree holds
+    /// the block: the expectation `admitHeader` must then meet. `.excluded`
     /// is the block weighed and excluded at once; it names which rule by the
     /// two predicates it applies.
     func classifyHeader(_ label: String) {
@@ -551,27 +561,13 @@ private final class HierarchyTrace {
                         )
                     if let below = lower(chain) { tree.serveRuns(for: directory(below)) }
                     trees[chain] = tree
-                    logs[chain] = [batch]
+                    logs[chain] = [LiveSubject.batch(batch)]
                 } catch {
                     unexpectedRefusals.append("admit \(label): \(error)")
                 }
                 accepted = trees[chain] != nil
-            } else if headerBad[label] != nil {
-                // Weighed and excluded the moment it is weighed: the block's
-                // batch and its exclusion, one turn (§9.9).
-                let block = applyFacts(chain, batch)
-                accepted = block.accepted
-                var weighed = block.weighed
-                if accepted {
-                    let exclusion = applyFacts(chain, OracleBatch(facts: [.exclusion(facts[label]!.hash)]))
-                    weighed.formUnion(exclusion.weighed)
-                    if exclusion.accepted {
-                        excluded.insert(label)
-                    } else {
-                        unexpectedRefusals.append("header exclusion \(label) refused")
-                    }
-                }
-                attributeRuns([chain: weighed])
+            } else if !isRoot(label) {
+                accepted = admitHeader(label)
             } else {
                 accepted = apply(chain, batch)
             }
@@ -580,7 +576,16 @@ private final class HierarchyTrace {
                 "kind": "admit", "ch": chain.rawValue, "block": label,
                 "grind": firstGrind[label]!, "qty": quantity, "accepted": accepted,
             ]
-            if headerBad[label] != nil, accepted { event["headerExcluded"] = true }
+            // What the tree itself reports right after the admission; the
+            // generated header rule is only the expectation it must meet.
+            let headerExcluded = accepted && trees[chain]!.isExcludedRoot(facts[label]!.hash)
+            if accepted, headerExcluded != (headerBad[label] != nil) {
+                unexpectedRefusals.append("admit \(label): tree excluded \(headerExcluded), header rule \(headerBad[label] ?? "none")")
+            }
+            if headerExcluded {
+                excluded.insert(label)
+                event["headerExcluded"] = true
+            }
         case .observe(let label):
             // Mostly the block's own grind; one in five times, when there is
             // one, a grind already located at another held block of the chain.
@@ -652,6 +657,26 @@ private final class HierarchyTrace {
         return event
     }
 
+    /// A non-genesis block through the tree's own header admission (§9.9):
+    /// its block and first-grind work weighed, and a block breaking a header
+    /// rule excluded in the same step. Whatever the tree emitted is logged
+    /// for the restart; then the runs it can have moved are re-derived.
+    func admitHeader(_ label: String) -> Bool {
+        let chain = level(label)
+        let admission = trees[chain]!.insertHeader(
+            header(label), blockHash: facts[label]!.hash, childIndex: childIndex(label),
+            work: VerifiedWorkContribution(id: grindID(firstGrind[label]!), work: UInt256(initialQuantity[label]!)),
+            validationContext: ValidationContext(nowMilliseconds: 1_000_000)
+        )
+        guard let update = admission.update else {
+            unexpectedRefusals.append("admit \(label): \(admission)")
+            return false
+        }
+        logs[chain, default: []].append(contentsOf: update.batches)
+        attributeRuns([chain: Set(update.weighed)])
+        return true
+    }
+
     /// Whether the chain's tree took the batch, as the single-chain
     /// exporter judges it; then the runs it can have moved are re-derived.
     func apply(_ chain: Level, _ batch: OracleBatch, mayRefuse: Bool = false) -> Bool {
@@ -678,7 +703,7 @@ private final class HierarchyTrace {
             unexpectedRefusals.append("\(chain.rawValue) \(batch.facts): \(error)")
             return (false, [], true)
         }
-        logs[chain, default: []].append(batch)
+        logs[chain, default: []].append(LiveSubject.batch(batch))
         let weighed = Set(result?.weighed ?? [])
         switch batch.facts.first {
         case .validation: return (true, weighed, false)
@@ -771,9 +796,9 @@ private final class HierarchyTrace {
         for chain in chains {
             do {
                 var tree = chain == .P
-                    ? try ChainTree.restoreWithoutContext(replaying: logs[chain]!.map(LiveSubject.batch), specs: [spec])
+                    ? try ChainTree.restoreWithoutContext(replaying: logs[chain]!, specs: [spec])
                     : try ChainTree.restore(
-                        replaying: logs[chain]!.map(LiveSubject.batch), context: contexts[chain]!,
+                        replaying: logs[chain]!, context: contexts[chain]!,
                         specs: [spec], parent: restored[upper(chain)]!
                     )
                 if let below = lower(chain) { tree.serveRuns(for: directory(below)) }
