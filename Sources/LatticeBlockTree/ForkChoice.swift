@@ -289,10 +289,18 @@ extension ChainTree {
         id: String,
         at blockHash: String
     ) -> VerifiedWorkContribution? {
+        grindHandle(of: id, at: blockHash).map(graph.contribution)
+    }
+
+    /// The handle of grind `id` credited at `blockHash`: its index among the
+    /// grinds this tree has interned, fixed like a block's (`handle(of:)`).
+    /// A grind has one location, so distinct pairs never share a handle.
+    /// Nil when the tree does not credit `id` there.
+    public func grindHandle(of id: String, at blockHash: String) -> UInt32? {
         guard let block = graph.handle(blockHash),
               let grind = graph.grindHandle(id),
               graph.grinds[Int(grind)].block == block else { return nil }
-        return graph.contribution(grind)
+        return grind
     }
 
     /// Whether `blockHash` belongs to a complete accepted path ending at one of
