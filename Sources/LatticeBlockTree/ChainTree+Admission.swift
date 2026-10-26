@@ -85,7 +85,7 @@ extension ChainTree {
         guard let block = graph.handle(blockHash) else { return nil }
         return graph.grinds(at: block)
             .filter { !graph.grinds[Int($0)].isAttributed }
-            .map(graph.contribution)
+            .compactMap(graph.contribution)
             .max {
                 $0.work != $1.work ? $0.work < $1.work : $0.id > $1.id
             }

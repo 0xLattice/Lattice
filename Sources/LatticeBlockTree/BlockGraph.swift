@@ -109,6 +109,10 @@ final class BlockGraph: @unchecked Sendable {
     var grinds: ContiguousArray<Grind> = []
     /// Direct work past 320 bits, for blocks flagged `spilledWork`.
     var spilledDirectWork: [UInt32: WorkSum] = [:]
+    /// A contribution's work past 256 bits: only an attributed run's can be
+    /// (§9.10, an exact sum like every other, §9.2). Its `Grind.work` is
+    /// then zero and unread.
+    var spilledGrindWork: [UInt32: WorkSum] = [:]
     /// Declared states, and the head of each one's producer list.
     var states: OrderedSet<StateID> = []
     var firstProducer: ContiguousArray<UInt32> = []
@@ -168,6 +172,7 @@ final class BlockGraph: @unchecked Sendable {
         copy.grindIDs = grindIDs
         copy.grinds = grinds
         copy.spilledDirectWork = spilledDirectWork
+        copy.spilledGrindWork = spilledGrindWork
         copy.states = states
         copy.firstProducer = firstProducer
         copy.specIDs = specIDs
@@ -330,10 +335,17 @@ final class BlockGraph: @unchecked Sendable {
         GrindID(id).flatMap { grindIDs.firstIndex(of: $0) }.map(UInt32.init)
     }
 
-    func contribution(_ grind: UInt32) -> VerifiedWorkContribution {
-        VerifiedWorkContribution(
-            heldID: grindIDs[Int(grind)].string, work: grinds[Int(grind)].work.uint256
-        )
+    /// The contribution as a fixed-width value, or nil when its work is past
+    /// 256 bits (an attributed run's can be; see `exactWork(of:)`).
+    func contribution(_ grind: UInt32) -> VerifiedWorkContribution? {
+        exactWork(of: grind).uint256Value.map {
+            VerifiedWorkContribution(heldID: grindIDs[Int(grind)].string, work: $0)
+        }
+    }
+
+    /// A contribution's credited work, exactly.
+    func exactWork(of grind: UInt32) -> WorkSum {
+        spilledGrindWork[grind] ?? WorkSum(grinds[Int(grind)].work.uint256)
     }
 
     /// The block's credited work: every contribution, exactly.
@@ -355,23 +367,30 @@ final class BlockGraph: @unchecked Sendable {
     /// Credit `work` under `id` at `block`: a new location, or a strictly
     /// stronger observation at the grind's one location. The caller has
     /// checked the location and the ratchet.
-    func setWork(_ id: GrindID, _ work: Fixed256, attributed: Bool, at block: UInt32) {
+    func setWork(_ id: GrindID, _ work: WorkSum, attributed: Bool, at block: UInt32) {
         let (inserted, index) = grindIDs.append(id)
         let grind = UInt32(index)
-        let old: Fixed256
+        // Past 256 bits the work is held spilled, exactly: never clamped.
+        let fixed = work.uint256Value.map(Fixed256.init) ?? .zero
+        let old: WorkSum
         if inserted {
             grinds.append(Grind(
-                work: work, block: block, nextAtBlock: self[block].firstGrind, isAttributed: attributed
+                work: fixed, block: block, nextAtBlock: self[block].firstGrind, isAttributed: attributed
             ))
             self[block].firstGrind = grind
             old = .zero
         } else {
-            precondition(grinds[index].block == block && grinds[index].work < work)
-            old = grinds[index].work
-            grinds[index].work = work
+            old = exactWork(of: grind)
+            precondition(grinds[index].block == block && old < work)
+            grinds[index].work = fixed
             if attributed { grinds[index].isAttributed = true }
         }
-        let (rise, _) = Work320(work).subtractingReportingOverflow(Work320(old))
+        if work.uint256Value == nil {
+            spilledGrindWork[grind] = work
+        } else if !spilledGrindWork.isEmpty {
+            spilledGrindWork.removeValue(forKey: grind)
+        }
+        let rise = work.subtracting(old)!
         var total = WorkTotal()
         addDirectWork(of: block, to: &total)
         total.add(rise)

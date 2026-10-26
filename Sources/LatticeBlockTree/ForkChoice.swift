@@ -267,11 +267,11 @@ extension ChainTree {
     // the actor exactly as before.
 
     func workContribution(id: String) -> WorkContributionRecord? {
-        guard let grind = graph.grindHandle(id) else { return nil }
+        guard let grind = graph.grindHandle(id), let contribution = graph.contribution(grind) else { return nil }
         let block = graph.grinds[Int(grind)].block
         return WorkContributionRecord(
             blockHash: graph.hash(block),
-            contribution: graph.contribution(grind),
+            contribution: contribution,
             isRouted: graph.isRouted(block)
         )
     }
@@ -283,13 +283,15 @@ extension ChainTree {
 #endif
 
     /// The grind `id` as credited at `blockHash`, or nil if it is not credited
-    /// there. Reads the grind's one location, never the derived totals, so
-    /// asking whether a proof is already credited costs nothing as the tree grows.
+    /// there (or is an attributed run past 256 bits, which no fixed-width
+    /// contribution can carry). Reads the grind's one location, never the
+    /// derived totals, so asking whether a proof is already credited costs
+    /// nothing as the tree grows.
     public func workContribution(
         id: String,
         at blockHash: String
     ) -> VerifiedWorkContribution? {
-        grindHandle(of: id, at: blockHash).map(graph.contribution)
+        grindHandle(of: id, at: blockHash).flatMap(graph.contribution)
     }
 
     /// The handle of grind `id` credited at `blockHash`: its index among the
@@ -418,13 +420,13 @@ extension ChainTree {
     /// Credit one contribution at a held block whose location the caller
     /// checked, and fold the rise into the weights when the block is routed.
     mutating func applyLocalContribution(
-        _ contribution: VerifiedWorkContribution,
+        _ id: GrindID,
+        _ work: WorkSum,
         to block: UInt32,
         attributed: Bool
     ) {
-        guard let id = GrindID(contribution.id) else { return }
         let graph = mutableGraph
-        graph.setWork(id, Fixed256(contribution.work), attributed: attributed, at: block)
+        graph.setWork(id, work, attributed: attributed, at: block)
         if graph.isRouted(block) {
             graph.directWorkChanged(at: block)
         }

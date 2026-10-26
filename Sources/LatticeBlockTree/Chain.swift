@@ -44,6 +44,8 @@ public struct BlockMeta: Sendable {
     public let difficultyAnchor: DifficultyAnchor?
     public let work: WorkSum
     public var childHashes: [String]
+    /// Every contribution here with its fixed-width value. An attributed run
+    /// past 256 bits has none: it is in `attributedRuns` and in `work` only.
     public let workContributions: [String: VerifiedWorkContribution]
     /// The contribution IDs here that are a parent's attributed runs (§9.10),
     /// not grinds. A child's derivation subtracts the committer's GRINDS —
@@ -89,9 +91,11 @@ public struct BlockMeta: Sendable {
         var contributions: [String: VerifiedWorkContribution] = [:]
         var attributedRuns: Set<String> = []
         for grind in graph.grinds(at: block) {
-            let contribution = graph.contribution(grind)
-            contributions[contribution.id] = contribution
-            if graph.grinds[Int(grind)].isAttributed { attributedRuns.insert(contribution.id) }
+            let id = graph.grindIDs[Int(grind)].string
+            if graph.grinds[Int(grind)].isAttributed { attributedRuns.insert(id) }
+            // An attributed run past 256 bits has no fixed-width form: it is
+            // in `attributedRuns` and in `work`, exactly.
+            if let contribution = graph.contribution(grind) { contributions[id] = contribution }
         }
         self.blockHash = graph.hash(block)
         self.parentBlockHash = graph.parentHash(of: block)
@@ -530,7 +534,7 @@ public struct ChainTree: Sendable {
                     throw ChainStateRestoreError.corruptConsensusGraph
                 }
                 graph.setWork(
-                    id, Fixed256(contribution.work),
+                    id, WorkSum(contribution.work),
                     attributed: meta.attributedRuns.contains(contribution.id), at: block
                 )
             }
@@ -1134,7 +1138,8 @@ public struct ChainTree: Sendable {
         for contribution in contributions {
             // A block arrives with its grinds; attributed runs are derived
             // later (`applyParentRun`).
-            applyLocalContribution(contribution, to: block, attributed: false)
+            guard let id = GrindID(contribution.id) else { continue }
+            applyLocalContribution(id, WorkSum(contribution.work), to: block, attributed: false)
         }
         // Every connected block routes, a descendant of an excluded root
         // included: work weighs unconditionally, and validity is applied by the
@@ -1229,27 +1234,36 @@ public struct ChainTree: Sendable {
     ) -> SubmissionResult {
         // A contribution ID is computed from content this node holds, so it
         // is a canonical CID: any other shape is refused here.
-        guard let id = GrindID(contribution.id),
-              graph.acceptsLocation(of: id, at: block) else {
-            return .discarded()
-        }
-        let existing = graph.grindIDs.firstIndex(of: id).map { graph.grinds[$0].work.uint256 }
-        if let existing, existing >= contribution.work {
+        guard let id = GrindID(contribution.id) else { return .discarded() }
+        return credit(id, WorkSum(contribution.work), to: block, attributed: attributed)
+    }
+
+    /// Credit `work` under `id` at `block`: a new location, or a strictly
+    /// stronger value at its one location. Exact (§9.2): an attributed run
+    /// (§9.10) may exceed any fixed width and is credited in full.
+    mutating func credit(
+        _ id: GrindID,
+        _ work: WorkSum,
+        to block: UInt32,
+        attributed: Bool
+    ) -> SubmissionResult {
+        guard graph.acceptsLocation(of: id, at: block) else { return .discarded() }
+        let existing = graph.grindIDs.firstIndex(of: id).map { graph.exactWork(of: UInt32($0)) }
+        if let existing, existing >= work {
             return .discarded()
         }
         guard hasUnreservedMutationCapacity else { return .discarded() }
         // A stronger observation on an excluded block weighs like any other: it
         // raises every ancestor, and the descent still never steps into the
         // excluded root, so no invalid block is resurrected by piling on work.
-        applyLocalContribution(contribution, to: block, attributed: attributed)
+        applyLocalContribution(id, work, to: block, attributed: attributed)
         // A strengthening raises this block's own work, so its run (§9.10)
         // rises by exactly that delta — once the block is connected. An
         // orphan's work is credited in full at the moment it connects. The
         // delta is this one contribution's rise, strictly positive by the
         // guard above: O(1), never a re-sum of the block's contributions.
         if graph.isRouted(block), !graph.served.isEmpty {
-            let delta = WorkSum(contribution.work)
-                .subtracting(WorkSum(existing ?? .zero))!
+            let delta = work.subtracting(existing ?? .zero)!
             mutableGraph.credit(delta, at: block)
         }
         mutationGeneration += 1

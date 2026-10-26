@@ -260,17 +260,18 @@ extension ChainTree {
         deferProjectionForReplay = true
         var raised: [String] = []
         for (committerHash, committer) in scope.map({ (source.hash($0), $0) }).sorted(by: { $0.0 < $1.0 }) {
+            // Exact (§9.2): a run past 256 bits is credited in full, never
+            // skipped or clamped, so the value is the parent graph's alone.
             guard let run = parentRuns[committer],
                   let hash = source.committedChild(of: committer, directory: directory)?.string,
                   let block = graph.handle(hash),
-                  let value = run.subtracting(source.grindWork(of: committer))?.uint256Value,
+                  let value = run.subtracting(source.grindWork(of: committer)),
                   let id = AttributedRunIdentity(
                       carrierBlockHash: committerHash, directory: directory
-                  ).contributionID,
-                  value > (workContribution(id: id, at: hash)?.work ?? .zero) else { continue }
-            let submission = addWorkContribution(
-                VerifiedWorkContribution(id: id, work: value), to: block, attributed: true
-            )
+                  ).contributionID.flatMap(GrindID.init),
+                  value > (graph.grindHandle(id.string).map(graph.exactWork(of:)) ?? .zero)
+            else { continue }
+            let submission = credit(id, value, to: block, attributed: true)
             // A strict increase at a held block, at the one location its ID
             // can have, is refused only when revisions are exhausted: never
             // drop a derivation silently.
