@@ -963,9 +963,15 @@ It does not stand against honest miners: anchors only move forward (§5.3 step
 from the abandoned branch, and so no honest miner can extend that child
 block. Only work anchored on the abandoned branch extends it, and once the
 honest child branch is heavier the child chain reorganizes and the withdrawal
-is undone with it. Keeping the withdrawal takes a majority of the child's
-hashrate, as reversing any confirmed child transaction does. The demander
-can wait for the withdrawal to be confirmed on the child, as for any payment.
+is undone with it. Extending is not weighing: nothing binds a committed child
+block's `parentState` to the `prevState` of the carrier whose attributed run
+credits it (§9.10; §5.3 step 3 binds only the carriers on a proof path), so
+parent work on the canonical branch may still add weight to that child block. Keeping the withdrawal takes more hashrate committing its branch than honest
+hashrate committing the child (`a > h_m`,
+[merged-mining security](economics/merged-mining-security.md)), as reversing
+any confirmed child transaction does. The demander does not choose when the
+withdrawal happens, so it cannot wait out this exposure; it sizes the transfer
+against the parent's reorganization cost at the receipt's depth.
 
 ### 8.2 Balance Conservation with Cross-Chain Transfers
 
@@ -1043,6 +1049,27 @@ same party may have chosen:
    as an unverified claim, so an unverified claim is never attestable.
 
 Receipt admission itself does not assert that a child deposit exists.
+
+**Atomicity under reorganization**: A swap is atomic relative to the parent
+branch its withdrawal anchors to, not relative to either chain's canonical tip.
+A withdrawal accepts a receipt only from its block's `parentState`, a state on
+the parent's executed-from-genesis frontier, so on every parent branch
+containing that state the withdrawer paid the demander, whichever branch is
+canonical (§5.3 step 6, §9.5). On any one child branch a deposit is released at
+most once. Canonicity decides exposure, not validity:
+
+- The demander is paid while the canonical parent chain contains the receipt; the residual exposure is §8.1 "Receipt
+  canonicity".
+- The withdrawer pays first, and the parent does not check the deposit. A
+  withdrawer waits for the deposit to be confirmed on the child before paying,
+  and for the withdrawal to be confirmed after.
+- A child reorganization that drops the withdrawal but keeps the deposit leaves
+  the deposit live and the receipt redeemable again by a child block whose
+  anchor reaches a parent state containing the receipt; one that also drops the
+  deposit leaves nothing to redeem until the deposit is mined again. While the
+  canonical child tip anchors on an abandoned parent branch, no block anchored
+  on the canonical parent chain extends it, so a withdrawal there confirms only
+  once the child reorganizes.
 
 **Cross-chain replay protection**: Each transaction declares a `chainPath` targeting the exact chain hierarchy path. Transactions are rejected if the `chainPath` doesn't match the validating chain.
 
