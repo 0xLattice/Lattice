@@ -174,8 +174,11 @@ let package = Package(
                 "LatticePoW",
                 "LatticeBlockTree",
                 // HierarchyTraceExportTests decides child continuity through
-                // the connect path's own `BlockImport.validateParentFacts`.
+                // the connect path's own `BlockImport.validateParentFacts`,
+                // and header rules through header admission's own
+                // `Block.headerAdmission`.
                 "LatticeImport",
+                "LatticeValidation",
                 "LatticeBlockTreeReference",
                 .product(name: "cashew", package: "cashew"),
                 .product(name: "CID", package: "swift-cid"),
