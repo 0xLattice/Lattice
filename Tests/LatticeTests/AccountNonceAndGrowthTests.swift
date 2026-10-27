@@ -101,6 +101,42 @@ final class AccountNonceAndGrowthTests: XCTestCase {
         XCTAssertEqual(changed, 0)
     }
 
+    func testGrowthCeilingBoundsTheMeasuredGrowthAndAddsUpPerBody() async throws {
+        let fetcher = StorableFetcher()
+        let empty = try AccountStateHeader(node: AccountState())
+        try await empty.storeRecursively(storer: fetcher)
+        let write = Action(key: "k", oldValue: nil, newValue: "v")  // +2
+        func tx(_ accountActions: [AccountAction], _ actions: [Action] = [], signer: String, nonce: UInt64 = 0) -> TransactionBody {
+            TransactionBody(
+                accountActions: accountActions, actions: actions, depositActions: [], receiptActions: [],
+                withdrawalActions: [], signers: [signer], nonce: nonce, chainPath: ["Nexus"]
+            )
+        }
+        // Creates "ab" (2 + 8) and "_nonce_ab" (9 + 8), and writes "k" (+2): exact.
+        let first = tx([AccountAction(owner: "ab", delta: 5)], [write], signer: "ab")
+        let (funded, _, created) = try await empty.proveAndUpdateStateMeasuringGrowth(
+            allAccountActions: first.accountActions, transactionBodies: [first], fetcher: fetcher
+        )
+        XCTAssertEqual(try TransactionBody.stateGrowthCeiling(of: [first]), 2 + created)
+        try await funded.storeRecursively(storer: fetcher)
+
+        // "ab" pays "cdef", which is new; "ab" is neither new nor its nonce: the
+        // ceiling takes both as new, and never credits a removal.
+        let pay = tx([AccountAction(owner: "ab", delta: -1), AccountAction(owner: "cdef", delta: 1)], signer: "ab", nonce: 1)
+        let (_, _, paid) = try await funded.proveAndUpdateStateMeasuringGrowth(
+            allAccountActions: pay.accountActions, transactionBodies: [pay], fetcher: fetcher
+        )
+        XCTAssertEqual(paid, 12)
+        XCTAssertEqual(try TransactionBody.stateGrowthCeiling(of: [pay]), 12 + 17)
+
+        // A block's ceiling is each body's plus the recipient's.
+        let other = tx([AccountAction(owner: "x", delta: -1), AccountAction(owner: "ab", delta: 1)], [write], signer: "x")
+        let each = try XCTUnwrap(TransactionBody.stateGrowthCeiling(of: [pay])) + XCTUnwrap(TransactionBody.stateGrowthCeiling(of: [other]))
+        XCTAssertEqual(try TransactionBody.stateGrowthCeiling(of: [pay, other], rewardRecipient: "miner"), each + 5 + 8)
+        // A deletion lowers it.
+        XCTAssertEqual(try TransactionBody.stateGrowthCeiling(of: [tx([], [Action(key: "k", oldValue: "v", newValue: nil)], signer: "ab", nonce: 1)]), -2 + 17)
+    }
+
     func testGrowthFloorCreditsOnlyNetDebitedOwners() throws {
         let write = Action(key: "k", oldValue: nil, newValue: "v")  // +2
         func floor(_ accountActions: [AccountAction]) throws -> Int? {

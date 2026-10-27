@@ -265,6 +265,30 @@ extension TransactionBody {
         return try stateGrowth(of: bodies, accountGrowth: -removable)
     }
 
+    /// A ceiling on `stateGrowth`, known from the bodies alone: the action
+    /// deltas, plus, for each body, every owner it nets a credit to taken as a
+    /// new balance and its first signer's nonce entry taken as new, plus the
+    /// `rewardRecipient`'s balance taken as new. Each body's share adds up:
+    /// the ceiling of a block's bodies is the sum of each body's (with no
+    /// recipient) and the recipient's, so a template builder can charge each
+    /// transaction its own. Removals only lower the growth, so none are
+    /// credited. Negative when deletions outweigh what may be created; nil
+    /// on overflow.
+    public static func stateGrowthCeiling(of bodies: [TransactionBody], rewardRecipient: String? = nil) throws -> Int? {
+        var created = rewardRecipient.map { $0.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES } ?? 0
+        for body in bodies {
+            let deltas = try netBalanceDeltas(accountActions: body.accountActions, receiptActions: body.receiptActions)
+            for (owner, delta) in deltas {
+                if case .credit = delta, !addStateDelta(owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES, to: &created) { return nil }
+            }
+            if let signer = body.signers.first,
+               !addStateDelta(AccountStateHeader.nonceTrackingKey(signer).utf8.count + ACCOUNT_ENTRY_VALUE_BYTES, to: &created) {
+                return nil
+            }
+        }
+        return try stateGrowth(of: bodies, accountGrowth: created)
+    }
+
     public static func batchVerifyPolicies(
         bodies: [TransactionBody],
         spec: ChainSpec,
