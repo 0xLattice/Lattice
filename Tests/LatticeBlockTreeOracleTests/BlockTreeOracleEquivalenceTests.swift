@@ -188,6 +188,7 @@ final class OracleRun {
                 block.parent = block.parent.map(spell)
                 block.postState = spell(block.postState)
                 block.prevState = spell(block.prevState)
+                block.parentState = block.parentState.map(spell)
                 return .block(block)
             case .work(let hash, let grind, let work):
                 return .work(blockHash: spell(hash), grindID: spell(grind), work: work)
@@ -227,14 +228,26 @@ final class OracleRun {
         } else {
             spec = specCIDs[int(specCIDs.count)]
         }
+        // Mostly the parent's post-state; sometimes a state mismatch.
+        let prevState = parent.flatMap { chance(85) ? $0.postState : nil } ?? states[int(states.count)]
         var commitments: [String: String]?
+        var parentState: String?
         if side == .parent {
             if chance(25) {
-                commitments = [childDirectory: element(childPlan.order) ?? foreignHash]
+                // Mostly a child block anchored at this block's entering state,
+                // which takes its run; sometimes any, which may not (§9.10).
+                let anchoredHere = childPlan.order.filter { childPlan.planned[$0]?.parentState == prevState }
+                let committed = chance(85) ? element(anchoredHere) : nil
+                commitments = [childDirectory: committed ?? element(childPlan.order) ?? foreignHash]
             }
             if chance(5) {
                 commitments = (commitments ?? [:]).merging([otherDirectory: freshCID("other-child")]) { a, _ in a }
             }
+        } else if parent != nil {
+            // Anchored at some parent block's entering state, or any state.
+            parentState = chance(80)
+                ? element(parentPlan.order).flatMap { parentPlan.planned[$0]?.prevState }
+                : states[int(states.count)]
         }
         let timestamp = (parent?.timestamp ?? 1_000_000) + Int64(int(2_000)) - 100
         return OracleBlockFact(
@@ -242,13 +255,13 @@ final class OracleRun {
             parent: parent?.hash,
             height: height ?? parent.map { $0.height + 1 } ?? 0,
             postState: states[int(states.count)],
-            // Mostly the parent's post-state; sometimes a state mismatch.
-            prevState: parent.flatMap { chance(85) ? $0.postState : nil } ?? states[int(states.count)],
+            prevState: prevState,
             spec: spec,
             target: target(),
             nextTarget: target(),
             timestamp: timestamp,
-            childCommitments: commitments
+            childCommitments: commitments,
+            parentState: parentState
         )
     }
 

@@ -214,8 +214,9 @@ extension ChainTree {
 
     /// Credit this chain with its parent's attributed runs into `directory`
     /// (§9.10): for each committer `P` of `parent` into `directory` whose
-    /// committed block `C = P.childCommitments[directory]` this chain holds,
-    /// `C` is credited `runWork(P, d) − grindWork(P)` under
+    /// committed block `C = P.childCommitments[directory]` this chain holds
+    /// and that anchors at `P`'s entering state (`C.parentState ==
+    /// P.prevState`), `C` is credited `runWork(P, d) − grindWork(P)` under
     /// `AttributedRunIdentity(P, d)` when that is a strict increase.
     ///
     /// A DERIVATION, never a fact: nothing here is persisted, and a restore
@@ -223,8 +224,9 @@ extension ChainTree {
     /// — a run only grows, and a stronger grind at `P` raises both terms
     /// alike — so the credited value is the ratchet of a non-decreasing
     /// function of the parent, and the fixed point depends on neither weigh
-    /// order nor replay order. Crediting is unconditional: exclusion or
-    /// validity on either level changes no run (§9.9).
+    /// order nor replay order. Crediting reads only header fields:
+    /// exclusion, validity or canonicity on either level changes no run
+    /// (§9.9).
     ///
     /// `parent` must serve `directory` (`serveRuns(for:)`); a host applies
     /// parent levels first, so a run attributed at `P` by ITS parent is in
@@ -265,6 +267,15 @@ extension ChainTree {
             guard let run = parentRuns[committer],
                   let hash = source.committedChild(of: committer, directory: directory)?.string,
                   let block = graph.handle(hash),
+                  // The run's counterpart of §5.3 step 3 (§9.10): a run credits
+                  // the committed block only when that block anchors at the
+                  // committer's own entering state. Both are declared header
+                  // fields, so this reads neither validity nor canonicity; a
+                  // block anchored elsewhere — on a branch the committer's
+                  // history abandoned — takes no work from this run. Either
+                  // header unrecorded credits nothing.
+                  let anchor = graph.parentStateID(of: block),
+                  anchor == source.prevStateID(of: committer),
                   let value = run.subtracting(source.grindWork(of: committer)),
                   let id = AttributedRunIdentity(
                       carrierBlockHash: committerHash, directory: directory

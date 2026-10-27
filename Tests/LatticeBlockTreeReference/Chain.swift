@@ -189,15 +189,17 @@ public struct ChainCommit: Sendable, Equatable {
 public struct TipBlockSnapshot: Sendable, Equatable {
     public let postStateCID: String
     public let prevStateCID: String
+    public let parentStateCID: String
     public let specCID: String
     public let target: UInt256
     public let nextTarget: UInt256
     public let tipHeight: UInt64
     public let timestamp: Int64
 
-    public init(postStateCID: String, prevStateCID: String, specCID: String, target: UInt256, nextTarget: UInt256, tipHeight: UInt64, timestamp: Int64) {
+    public init(postStateCID: String, prevStateCID: String, parentStateCID: String, specCID: String, target: UInt256, nextTarget: UInt256, tipHeight: UInt64, timestamp: Int64) {
         self.postStateCID = postStateCID
         self.prevStateCID = prevStateCID
+        self.parentStateCID = parentStateCID
         self.specCID = specCID
         self.target = target
         self.nextTarget = nextTarget
@@ -227,6 +229,7 @@ private struct ConsensusBlockInput: Sendable {
         snapshot = TipBlockSnapshot(
             postStateCID: block.postState.rawCID,
             prevStateCID: block.prevState.rawCID,
+            parentStateCID: block.parentState.rawCID,
             specCID: block.spec.rawCID,
             target: block.target,
             nextTarget: block.nextTarget,
@@ -239,6 +242,9 @@ private struct ConsensusBlockInput: Sendable {
         guard let blockHash = CIDIdentity.canonicalString(fact.blockHash),
               let postStateCID = CIDIdentity.canonicalString(fact.postStateCID),
               let prevStateCID = CIDIdentity.canonicalString(fact.prevStateCID),
+              let parentStateCID = CIDIdentity.canonicalString(
+                  fact.parentStateCID ?? LatticeState.emptyHeader.rawCID
+              ),
               let specCID = CIDIdentity.canonicalString(fact.specCID),
               let target = UInt256.fromHexDigits(fact.target),
               let nextTarget = UInt256.fromHexDigits(fact.nextTarget),
@@ -259,6 +265,7 @@ private struct ConsensusBlockInput: Sendable {
         snapshot = TipBlockSnapshot(
             postStateCID: postStateCID,
             prevStateCID: prevStateCID,
+            parentStateCID: parentStateCID,
             specCID: specCID,
             target: target,
             nextTarget: nextTarget,
@@ -787,6 +794,7 @@ public struct ChainTree: Sendable {
         TipBlockSnapshot(
             postStateCID: block.postState.rawCID,
             prevStateCID: block.prevState.rawCID,
+            parentStateCID: block.parentState.rawCID,
             specCID: block.spec.rawCID,
             target: block.target,
             nextTarget: block.nextTarget,

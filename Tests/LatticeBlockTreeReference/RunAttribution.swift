@@ -256,6 +256,10 @@ extension ChainTree {
                   let childBlock = parent.graph[committer]?.childCommitments[directory],
                   let hash = CIDIdentity.canonicalString(childBlock),
                   graph.contains(hash),
+                  // The run's counterpart of §5.3 step 3: only a block anchored
+                  // at the committer's entering state takes its run.
+                  let anchor = frontier.snapshot(of: hash)?.parentStateCID,
+                  anchor == parent.frontier.snapshot(of: committer)?.prevStateCID,
                   let own = parent.graph.work(of: committer)?.grindWork,
                   let value = run.subtracting(own)?.uint256Value,
                   let id = AttributedRunIdentity(

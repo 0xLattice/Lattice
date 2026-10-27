@@ -26,7 +26,10 @@ import LatticePoW
 /// `LATTICE_SPEC_DIFF_SEEDS` more; `LATTICE_SPEC_DIFF_STEPS` steps per seed
 /// (default 120). Replay one with `LATTICE_SPEC_DIFF_SEED`.
 final class ForkChoiceSpecDifferentialTests: XCTestCase {
-    static let seeds: [UInt64] = Array(1...16)
+    /// 32: a run is credited only to a child block anchored at its
+    /// committer's entering state, so fewer runs land, and 16 seeds no longer
+    /// reach one past 256 bits.
+    static let seeds: [UInt64] = Array(1...32)
 
     func testIncrementalForkChoiceMatchesSpecRecomputation() {
         let environment = ProcessInfo.processInfo.environment
@@ -59,6 +62,7 @@ final class ForkChoiceSpecDifferentialTests: XCTestCase {
                 "strengthened", "duplicate", "conflicting location refused",
                 "orphan connected", "exclusion", "act-on ≠ canonical tip",
                 "sum past 256 bits", "attributed run raised", "attributed run past 256 bits", "restart",
+                "attributed run withheld: anchored elsewhere",
             ] {
                 XCTAssertGreaterThan(coverage[shape] ?? 0, 0, "never exercised: \(shape)")
             }
@@ -186,6 +190,9 @@ struct SpecChain {
         /// The header fields a repeated block fact must match.
         var snapshot: [String]
         var commitments: [String: String]
+        var prevState: String
+        /// The parent-chain state it anchors to (§9.10).
+        var parentState: String
     }
 
     enum Verdict: Equatable {
@@ -305,6 +312,7 @@ struct SpecChain {
         guard let hash = standard(fact.hash),
               let post = standard(fact.postState),
               let prev = standard(fact.prevState),
+              let anchor = standard(fact.parentState ?? LatticeState.emptyHeader.rawCID),
               let spec = standard(fact.spec),
               (fact.childCommitments ?? [:]).values.allSatisfy(CIDIdentity.isStandard),
               let target = UInt256.fromHexDigits(fact.target), target > .zero,
@@ -317,8 +325,10 @@ struct SpecChain {
         }
         return Block(
             hash: hash, parent: parent, height: fact.height,
-            snapshot: [post, prev, spec, Exact(target).hex, Exact(next).hex, "\(fact.timestamp)"],
-            commitments: fact.childCommitments ?? [:]
+            snapshot: [post, prev, anchor, spec, Exact(target).hex, Exact(next).hex, "\(fact.timestamp)"],
+            commitments: fact.childCommitments ?? [:],
+            prevState: prev,
+            parentState: anchor
         )
     }
 
@@ -466,24 +476,33 @@ struct SpecChain {
     }
 
     /// `attributed(C, P, d) = runWork(P, d) − grindWork(P)` for every
-    /// carrier P whose committed C `child` holds, keyed by C then by
+    /// carrier P whose committed C `child` holds and that anchors at P's
+    /// entering state (`C.parentState == P.prevState`), keyed by C then by
     /// `AttributedRunIdentity(P, d)`: exact, however wide (§9.2).
-    func attributions(into directory: String, child: SpecChain) -> [String: [String: Exact]] {
+    /// `withheld` counts the positive runs a mismatched anchor kept back.
+    func attributions(
+        into directory: String, child: SpecChain
+    ) -> (values: [String: [String: Exact]], withheld: Int) {
         var runWork: [String: Exact] = [:]
         for (block, carrier) in carriers(into: directory) {
             runWork[carrier, default: .zero] = runWork[carrier, default: .zero] + SpecMeasure(entries: own(block)).total
         }
         var result: [String: [String: Exact]] = [:]
+        var withheld = 0
         for (carrier, run) in runWork {
             guard let committed = blocks[carrier]?.commitments[directory],
-                  child.blocks[committed] != nil,
+                  let held = child.blocks[committed],
                   let id = AttributedRunIdentity(carrierBlockHash: carrier, directory: directory).contributionID
             else { continue }
             let value = run - SpecMeasure(entries: grinds[carrier] ?? [:]).total
             guard value > .zero else { continue }
+            guard held.parentState == blocks[carrier]?.prevState else {
+                withheld += 1
+                continue
+            }
             result[committed, default: [:]][id] = value
         }
-        return result
+        return (result, withheld)
     }
 }
 
@@ -508,7 +527,8 @@ struct SpecDifferential {
     /// (carrier, child) values rose, or nil when one would have to fall.
     mutating func deriveRuns() -> Int? {
         var child = model[.child]!
-        let derived = model[.parent]!.attributions(into: childDirectory, child: child)
+        let (derived, withheld) = model[.parent]!.attributions(into: childDirectory, child: child)
+        if withheld > 0 { coverage["attributed run withheld: anchored elsewhere", default: 0] += 1 }
         var raised = 0
         for (block, values) in child.attributed {
             for (id, old) in values where derived[block]?[id].map({ $0 < old }) ?? true {

@@ -57,7 +57,8 @@ credited less per hit. Neither mints weight.
 A parent block that commits child block `C` into directory `d` starts a run.
 Every parent block that descends from it, by parent pointer, until the next
 block committing into `d`, is in that run, and the run's work less the
-carrier's own grind is credited at `C` (§9.10). This holds whoever mined those
+carrier's own grind is credited at `C`, provided `C` anchors at the carrier's
+entering state (`C.parentState == prevState`, §9.10). This holds whoever mined those
 blocks: **unsubscribed parent hashrate does secure the child**. Two
 consequences follow from the same rule.
 
@@ -172,7 +173,7 @@ One grind cannot back both sides of a child fork. Its sparse proof has exactly
 one terminal block in each chain it reaches, and placing one grind at two
 blocks of a chain is rejected (§9.1, §12.5.3). Attributed runs partition the
 parent graph: each parent block is in at most one run per directory, so its
-work is credited at exactly one committed child block (§9.10). The
+work is credited at no more than one committed child block (§9.10). The
 [lattice-formal](https://github.com/adalinxx/lattice-formal) Hierarchy model
 checks this as `NoDoubleBacking` (the work above that reaches one side of a
 lower fork, followed level by level to the root, never backs the other side,
@@ -233,14 +234,30 @@ reorganization would hurt it.
   holds, stands. Honest child miners cannot extend that withdrawal (anchors
   only advance, §5.3 step 6); they must outweigh it from below, and its
   existing weight, including runs attributed from the abandoned parent branch,
-  still counts (§9.10). Runs can also come from the canonical parent branch:
-  nothing binds a child block's `parentState` to the `prevState` of the
-  carrier whose run credits it, so a canonical parent block that commits a
-  block of the withdrawal branch directs its run, unsubscribed parent work
-  included, to that branch, which stays selectable while its anchor was
-  executed (§9.5). The race is the one above, with threshold `a > h_m`. The
-  withdrawal is undone only once the honest child branch is heavier (§8.1,
-  "Receipt canonicity"). The demander does not choose
+  still counts (§9.10). No run on the canonical parent branch reaches it: a
+  run credits only a child block anchored at its carrier's entering state,
+  and a canonical carrier's entering state does not descend from the
+  abandoned branch. The withdrawal branch therefore gathers only the work
+  `a_w` committed on parent branches containing its anchor, which earns no
+  canonical reward. The honest branch gathers its commitments and its share
+  of the unsubscribed canonical work, which the attacker can shrink only by
+  committing decoy child blocks, anchored at canonical states, from canonical
+  parent blocks at a total rate `a_d`, spread over decoy branches each
+  committed no faster than the honest one (a faster decoy would itself
+  outweigh the withdrawal):
+
+  ```text
+  withdrawal branch:  a_w * kappa_A
+  honest branch:      h_m * kappa + u * h_m / (h_m + a_d)
+  ```
+
+  With no decoys the honest branch keeps all of `u`. At `kappa_A = kappa = 1`
+  the cheapest split, `h_m + a_d ~= sqrt(h_m * u)`, keeps the withdrawal for
+  `a = a_w + a_d ~= 2 * sqrt(h_m * u)`: roughly a fifth of `H` for `h_m = 1%`,
+  against `h_m` itself were canonical runs able to credit the withdrawal
+  branch. When nearly every parent miner commits the child (`u` near 0) the
+  two coincide. The withdrawal is undone once the honest child branch is
+  heavier (§8.1, "Receipt canonicity"). The demander does not choose
   when the withdrawal happens, so it cannot wait its way out of this exposure;
   it can only size the transfer against the parent's reorg cost at the depth
   it expects the receipt to reach.
