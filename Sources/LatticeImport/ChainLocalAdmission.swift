@@ -1318,14 +1318,15 @@ func classifyValidationFailure(_ error: Error) -> BlockImportError {
 /// What the outcome of a Wasm policy evaluation says about the input it was
 /// evaluated on. Anything that is a function of the module and the input on
 /// the pinned engine is a completed verdict; only what depends on this node
-/// is not. Block import classifies through this one function and transaction
-/// preflight classifies through import, so the two paths cannot drift apart:
+/// is not. Block import classifies through this one function, transaction
+/// preflight through import, and a node's template filter calls it directly
+/// (it is public for that), so the paths cannot drift apart:
 /// a transaction preflight evicts is one import would exclude, and one import
 /// retries stays pooled. The switch is exhaustive with no `default`, so a new
 /// `WasmPolicyError` case fails to compile until it is given a verdict here.
 /// An error that is not listed is not classified here (`nil`): the caller
 /// retries it, so a failure of this node can never become a verdict.
-enum WasmPolicyErrorVerdict: Sendable, Equatable {
+public enum WasmPolicyErrorVerdict: Sendable, Equatable {
     /// No verdict: retry, never exclude.
     case unavailable
     /// A completed, deterministic verdict on the input.
@@ -1344,7 +1345,7 @@ private let wasmModuleDefectErrorTypes: Set<String> = [
     "WasmKit.ImportError",
 ]
 
-func wasmPolicyErrorVerdict(_ error: Error) -> WasmPolicyErrorVerdict? {
+public func wasmPolicyErrorVerdict(_ error: Error) -> WasmPolicyErrorVerdict? {
     // A trap (unreachable, an out-of-bounds access, an integer divide trap, a
     // bad indirect call, call stack exhaustion) is a function of the module
     // and the input on the pinned engine, so every node reaches it: a
