@@ -769,6 +769,13 @@ earlier on a floor known before the transition: the action deltas less
 account removals could free. A floor over the limit is over it from any
 starting state.
 
+A template builder can bound it from above, from the bodies alone: the action
+deltas, plus, for each transaction, `len(owner) + 8` for every owner it nets a
+credit to and `len("_nonce_" + signer) + 8` for its first signer, plus the
+reward recipient's `len(owner) + 8`. Each transaction's share adds up, so a
+builder charges each its own and what it takes is within the limit from any
+starting state (`TransactionBody.stateGrowthCeiling`).
+
 A chain's `maxStateGrowth` must leave room for these entries. A signer's first
 transaction creates its nonce entry, and a credit to a new address creates a
 balance entry: for a canonical address each is on the order of 70 bytes. A
