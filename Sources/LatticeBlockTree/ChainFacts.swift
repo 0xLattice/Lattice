@@ -19,6 +19,9 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
     public let blockHeight: UInt64
     public let postStateCID: String
     public let prevStateCID: String
+    /// The parent-chain state the block anchors to. Absent means the empty
+    /// header, as for every root-chain block.
+    public let parentStateCID: String?
     public let specCID: String
     public let target: String
     public let nextTarget: String
@@ -37,6 +40,7 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
         blockHeight: UInt64,
         postStateCID: String,
         prevStateCID: String,
+        parentStateCID: String? = nil,
         specCID: String,
         target: String,
         nextTarget: String,
@@ -49,6 +53,7 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
         self.blockHeight = blockHeight
         self.postStateCID = postStateCID
         self.prevStateCID = prevStateCID
+        self.parentStateCID = parentStateCID
         self.specCID = specCID
         self.target = target
         self.nextTarget = nextTarget

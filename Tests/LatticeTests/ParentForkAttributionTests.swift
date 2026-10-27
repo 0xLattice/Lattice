@@ -32,6 +32,8 @@ final class ParentForkAttributionTests: XCTestCase {
         let work: UInt64
         /// directory → child block name
         var commits: [String: String] = [:]
+        /// The label of the state it was applied to (`prevState`).
+        var state = "s"
     }
 
     private struct ChildBlock {
@@ -39,6 +41,9 @@ final class ParentForkAttributionTests: XCTestCase {
         let parent: String?
         /// The child's own price for every carrier grind credited here.
         let price: UInt64
+        /// The label of the parent state it anchors to (`parentState`): only
+        /// a committer applied to that state credits it its run (§9.10).
+        var anchor = "s"
     }
 
     private struct Scenario {
@@ -57,7 +62,8 @@ final class ParentForkAttributionTests: XCTestCase {
     ///   own price × #committers of Y (each carrier grind, at the child's price;
     ///   an uncommitted block — genesis — carries one own grind at its price)
     /// + Σ work(Q) over connected parent blocks Q that are NOT themselves
-    ///   committers into `d` and whose nearest committer into `d` commits Y.
+    ///   committers into `d` and whose nearest committer into `d` commits Y
+    ///   from the state Y anchors to.
     /// Then sum over the child subtree.
     private func oracle(_ s: Scenario) -> [String: WorkSum] {
         let parentByName = Dictionary(uniqueKeysWithValues: s.parent.map { ($0.name, $0) })
@@ -78,9 +84,12 @@ final class ParentForkAttributionTests: XCTestCase {
             return nil
         }
         // Attributed work landing at each child block, by the committer's target.
+        let childByName = Dictionary(uniqueKeysWithValues: s.child.map { ($0.name, $0) })
         var attributedAt: [String: UInt64] = [:]
         for q in s.parent where connected(q.name) && q.commits[s.directory] == nil {
-            if let p = nearestCommitter(q.name), let target = parentByName[p]?.commits[s.directory] {
+            if let p = nearestCommitter(q.name), let committer = parentByName[p],
+               let target = committer.commits[s.directory],
+               childByName[target]?.anchor == committer.state {
                 attributedAt[target, default: 0] += q.work
             }
         }
@@ -109,7 +118,7 @@ final class ParentForkAttributionTests: XCTestCase {
         BlockImportBatch(facts: [
             .block(ChainBlockFact(
                 blockHash: h(b.name), parentBlockHash: b.parent.map(h), blockHeight: height,
-                postStateCID: testCID("post:\(b.name)"), prevStateCID: testCID("prev:\(b.name)"),
+                postStateCID: testCID("post:\(b.name)"), prevStateCID: testCID("prev:\(b.state)"),
                 specCID: testCID("spec"), target: "1", nextTarget: "1",
                 timestamp: Int64(1_000 + height), stateDiff: .empty,
                 childCommitments: b.commits.mapValues(h)
@@ -166,7 +175,13 @@ final class ParentForkAttributionTests: XCTestCase {
                     VerifiedWorkContribution(id: $0, work: UInt256(c.price))
                 }
             )
-        })
+        }, snapshots: Dictionary(uniqueKeysWithValues: s.child.map { c in
+            (h(c.name), TipBlockSnapshot(
+                postStateCID: testCID("cpost:\(c.name)"), prevStateCID: testCID("cprev:\(c.name)"),
+                parentStateCID: testCID("prev:\(c.anchor)"), specCID: testCID("cspec"),
+                target: UInt256(1), nextTarget: UInt256(1), tipHeight: ch[c.name]!, timestamp: Int64(ch[c.name]!)
+            ))
+        }))
 
         var strengthened = 0
         let parentTree = await parent.tree
@@ -290,6 +305,28 @@ final class ParentForkAttributionTests: XCTestCase {
         XCTAssertEqual(oracle(s)["c1"], sum(22))
     }
 
+    /// Two carriers of one child block from different states: only the one
+    /// applied to the state the block anchors to credits it its run. The
+    /// other's run reaches no child block at all (§9.10).
+    func testCommitterFromAnotherStateCreditsNothing() async throws {
+        //  parent:   g ─ p1 ─ p2            p1 commits c1, from c1's anchor
+        //            └─ x1 ─ x2 ─ x3        x1 commits c1 too, from another state
+        let s = Scenario(directory: d, parent: [
+            ParentBlock(name: "g", parent: nil, work: 1),
+            ParentBlock(name: "p1", parent: "g", work: 5, commits: [d: "c1"]),
+            ParentBlock(name: "p2", parent: "p1", work: 3),
+            ParentBlock(name: "x1", parent: "g", work: 4, commits: [d: "c1"], state: "t"),
+            ParentBlock(name: "x2", parent: "x1", work: 9),
+            ParentBlock(name: "x3", parent: "x2", work: 6),
+        ], child: [
+            ChildBlock(name: "cg", parent: nil, price: 1),
+            ChildBlock(name: "c1", parent: "cg", price: 2),
+        ])
+        try await assertMatchesOracle(s, "carrier from another state")
+        // 2 carriers × 2 + p2(3); x2 and x3 sit in x1's run, which credits nothing.
+        XCTAssertEqual(oracle(s)["c1"], sum(7))
+    }
+
     /// The committer sits on the parent's LOSING branch. Canonicity is not an
     /// input: its run still counts in full.
     func testCommitterOnANonCanonicalParentBranchStillCounts() async throws {
@@ -389,7 +426,8 @@ final class ParentForkAttributionTests: XCTestCase {
             var child: [ChildBlock] = [ChildBlock(name: "cg", parent: nil, price: 1)]
             for i in 1..<childCount {
                 let parent = child[Int(rng.next() % UInt64(child.count))].name
-                child.append(ChildBlock(name: "c\(i)", parent: parent, price: 1 + rng.next() % 5))
+                child.append(ChildBlock(name: "c\(i)", parent: parent, price: 1 + rng.next() % 5,
+                                        anchor: rng.next() % 4 == 0 ? "t" : "s"))
             }
             let parentCount = 4 + Int(rng.next() % 24)
             var parent: [ParentBlock] = [ParentBlock(name: "g", parent: nil, work: 1)]
@@ -399,7 +437,8 @@ final class ParentForkAttributionTests: XCTestCase {
                 let roll = rng.next() % 10
                 if roll < 3 { commits[d] = child[1 + Int(rng.next() % UInt64(child.count - 1))].name }
                 if roll == 3 || roll == 4 { commits["Markets"] = "m\(i)" }
-                parent.append(ParentBlock(name: "p\(i)", parent: up, work: 1 + rng.next() % 20, commits: commits))
+                parent.append(ParentBlock(name: "p\(i)", parent: up, work: 1 + rng.next() % 20, commits: commits,
+                                          state: rng.next() % 4 == 0 ? "t" : "s"))
             }
             // A child block needs at least one carrier to exist; drop child
             // blocks nobody committed — but only leaves, so the tree stays a tree.
@@ -430,8 +469,13 @@ final class ParentForkAttributionTests: XCTestCase {
             // ... and at least one non-committing descendant under a committer,
             // so at least one run is larger than its committer's own work and
             // the credit path is exercised, not just refused.
-            let firstCommitter = s.parent.first { $0.commits[d] != nil }!.name
-            s = Scenario(directory: d, parent: s.parent + [
+            // Its committer is applied to the state its block anchors to, so
+            // the run is credited; other committers may not be.
+            let firstIndex = s.parent.firstIndex { $0.commits[d] != nil }!
+            let firstCommitter = s.parent[firstIndex].name
+            var anchored = s.parent
+            anchored[firstIndex].state = s.child.first { $0.name == anchored[firstIndex].commits[d] }!.anchor
+            s = Scenario(directory: d, parent: anchored + [
                 ParentBlock(name: "tail", parent: firstCommitter, work: 1 + rng.next() % 20),
             ], child: s.child)
             let order = Array(s.parent.indices).shuffled(using: &rng)
@@ -463,6 +507,7 @@ final class ParentForkAttributionTests: XCTestCase {
                 .block(ChainBlockFact(
                     blockHash: h(name), parentBlockHash: parentName.map(h), blockHeight: height,
                     postStateCID: testCID("cpost:\(name)"), prevStateCID: testCID("cprev:\(name)"),
+                    parentStateCID: testCID("prev:s"),
                     specCID: testCID("cspec"), target: "1", nextTarget: "1",
                     timestamp: Int64(height), stateDiff: .empty
                 )),

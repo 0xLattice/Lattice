@@ -44,6 +44,8 @@ struct BlockEntry: Sendable {
     var anchor: UInt32 = BlockGraph.none
     var postState: UInt32 = BlockGraph.none
     var prevState: UInt32 = BlockGraph.none
+    /// The parent-chain state it anchors to, in `BlockGraph.parentStates`.
+    var parentState: UInt32 = BlockGraph.none
     /// The next block declaring the same post-state, among those whose
     /// transition changes state.
     var nextProducer: UInt32 = BlockGraph.none
@@ -117,6 +119,10 @@ final class BlockGraph: @unchecked Sendable {
     var states: OrderedSet<StateID> = []
     var firstProducer: ContiguousArray<UInt32> = []
     var specIDs: OrderedSet<CIDDigest> = []
+    /// Declared parent-chain anchors (`parentState`), interned apart from
+    /// `states`: those are this chain's own states, and every query over them
+    /// means "declared by a block of this chain".
+    var parentStates: OrderedSet<StateID> = []
     /// Every directory a held block commits into, interned.
     var directoryNames: OrderedSet<String> = []
     /// Every held block's child commitments, each block's one run.
@@ -176,6 +182,7 @@ final class BlockGraph: @unchecked Sendable {
         copy.states = states
         copy.firstProducer = firstProducer
         copy.specIDs = specIDs
+        copy.parentStates = parentStates
         copy.directoryNames = directoryNames
         copy.commitments = commitments
         copy.offRootSpec = offRootSpec
@@ -469,12 +476,27 @@ final class BlockGraph: @unchecked Sendable {
         return TipBlockSnapshot(
             postStateCID: stateString(entry.postState),
             prevStateCID: stateString(entry.prevState),
+            parentStateCID: parentStates[Int(entry.parentState)].string,
             specCID: specString(entry.spec),
             target: entry.target.uint256,
             nextTarget: entry.nextTarget.uint256,
             tipHeight: entry.height,
             timestamp: entry.timestamp
         )
+    }
+
+    /// The parent-chain state `block` anchors to, or nil without its header
+    /// fields recorded.
+    func parentStateID(of block: UInt32) -> StateID? {
+        let entry = self[block]
+        return entry.flags.contains(.hasSnapshot) ? parentStates[Int(entry.parentState)] : nil
+    }
+
+    /// The state `block` was applied to, or nil without its header fields
+    /// recorded.
+    func prevStateID(of block: UInt32) -> StateID? {
+        let entry = self[block]
+        return entry.flags.contains(.hasSnapshot) ? states[Int(entry.prevState)] : nil
     }
 
     /// Record a held block's header fields, once: a block's committed fields
@@ -485,6 +507,10 @@ final class BlockGraph: @unchecked Sendable {
         let prev = internState(snapshot.prevStateCID)
         self[block].postState = post
         self[block].prevState = prev
+        guard let parentState = StateID(snapshot.parentStateCID) else {
+            preconditionFailure("a non-standard parent state reached the block graph: \(snapshot.parentStateCID)")
+        }
+        self[block].parentState = UInt32(parentStates.append(parentState).index)
         self[block].spec = internSpec(snapshot.specCID)
         self[block].target = Fixed256(snapshot.target)
         self[block].nextTarget = Fixed256(snapshot.nextTarget)

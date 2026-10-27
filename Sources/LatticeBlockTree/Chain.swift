@@ -180,15 +180,20 @@ public struct ChainCommit: Sendable, Equatable {
 public struct TipBlockSnapshot: Sendable, Equatable {
     public let postStateCID: String
     public let prevStateCID: String
+    /// The parent-chain state the block anchors to: the empty header for a
+    /// root chain's blocks; a child genesis commits its carrier's
+    /// `prevState` (§5.1 rule 4).
+    public let parentStateCID: String
     public let specCID: String
     public let target: UInt256
     public let nextTarget: UInt256
     public let tipHeight: UInt64
     public let timestamp: Int64
 
-    public init(postStateCID: String, prevStateCID: String, specCID: String, target: UInt256, nextTarget: UInt256, tipHeight: UInt64, timestamp: Int64) {
+    public init(postStateCID: String, prevStateCID: String, parentStateCID: String, specCID: String, target: UInt256, nextTarget: UInt256, tipHeight: UInt64, timestamp: Int64) {
         self.postStateCID = postStateCID
         self.prevStateCID = prevStateCID
+        self.parentStateCID = parentStateCID
         self.specCID = specCID
         self.target = target
         self.nextTarget = nextTarget
@@ -200,7 +205,7 @@ public struct TipBlockSnapshot: Sendable, Equatable {
 extension TipBlockSnapshot {
     /// Whether its states and spec are standard CIDs in canonical spelling.
     var namesStandardCIDs: Bool {
-        [postStateCID, prevStateCID, specCID].allSatisfy { CIDDigest($0) != nil }
+        [postStateCID, prevStateCID, parentStateCID, specCID].allSatisfy { CIDDigest($0) != nil }
     }
 }
 
@@ -225,6 +230,7 @@ private struct ConsensusBlockInput: Sendable {
         snapshot = TipBlockSnapshot(
             postStateCID: block.postState.rawCID,
             prevStateCID: block.prevState.rawCID,
+            parentStateCID: block.parentState.rawCID,
             specCID: block.spec.rawCID,
             target: block.target,
             nextTarget: block.nextTarget,
@@ -239,6 +245,9 @@ private struct ConsensusBlockInput: Sendable {
         guard let blockHash = standardCID(fact.blockHash),
               let postStateCID = standardCID(fact.postStateCID),
               let prevStateCID = standardCID(fact.prevStateCID),
+              let parentStateCID = standardCID(
+                  fact.parentStateCID ?? LatticeState.emptyHeader.rawCID
+              ),
               let specCID = standardCID(fact.specCID),
               (fact.childCommitments ?? [:]).values.allSatisfy({ BlockID($0) != nil }),
               let target = UInt256.fromHexDigits(fact.target),
@@ -260,6 +269,7 @@ private struct ConsensusBlockInput: Sendable {
         snapshot = TipBlockSnapshot(
             postStateCID: postStateCID,
             prevStateCID: prevStateCID,
+            parentStateCID: parentStateCID,
             specCID: specCID,
             target: target,
             nextTarget: nextTarget,
@@ -280,6 +290,7 @@ private struct ConsensusBlockInput: Sendable {
     /// the standard CID: it is not a Lattice block (`nonStandardLink`).
     static func namesNonStandardLink(_ fact: ChainBlockFact) -> Bool {
         let links = [fact.postStateCID, fact.prevStateCID, fact.specCID]
+            + (fact.parentStateCID.map { [$0] } ?? [])
             + (fact.parentBlockHash.map { [$0] } ?? [])
         // Children are held as committed, so only the canonical spelling.
         return links.contains { standardCID($0) == nil }
@@ -885,6 +896,7 @@ public struct ChainTree: Sendable {
         TipBlockSnapshot(
             postStateCID: block.postState.rawCID,
             prevStateCID: block.prevState.rawCID,
+            parentStateCID: block.parentState.rawCID,
             specCID: block.spec.rawCID,
             target: block.target,
             nextTarget: block.nextTarget,

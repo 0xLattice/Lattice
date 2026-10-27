@@ -218,8 +218,9 @@ extension ChainTree {
     /// — a run only grows, and a stronger grind at `P` raises both terms
     /// alike — so the credited value is the ratchet of a non-decreasing
     /// function of the parent, and the fixed point depends on neither weigh
-    /// order nor replay order. Crediting is unconditional: exclusion or
-    /// validity on either level changes no run (§9.9).
+    /// order nor replay order. Exclusion or validity on either level changes
+    /// no run (§9.9); a run credits the committed block only when its
+    /// `parentState` is the carrier's `prevState` (§9.10).
     ///
     /// `parent` must serve `directory` (`serveRuns(for:)`); a host applies
     /// parent levels first, so a run attributed at `P` by ITS parent is in
@@ -256,6 +257,10 @@ extension ChainTree {
                   let childBlock = parent.graph[committer]?.childCommitments[directory],
                   let hash = CIDIdentity.canonicalString(childBlock),
                   graph.contains(hash),
+                  // The run's counterpart of §5.3 step 3: only a block anchored
+                  // at the committer's entering state takes its run.
+                  let anchor = frontier.snapshot(of: hash)?.parentStateCID,
+                  anchor == parent.frontier.snapshot(of: committer)?.prevStateCID,
                   let own = parent.graph.work(of: committer)?.grindWork,
                   let value = run.subtracting(own)?.uint256Value,
                   let id = AttributedRunIdentity(

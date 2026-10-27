@@ -32,7 +32,8 @@ func makeBlockMeta(
 
 func makeChain(
     blocks: [BlockMeta],
-    canonicalHashes: Set<String>? = nil
+    canonicalHashes: Set<String>? = nil,
+    snapshots: [String: TipBlockSnapshot] = [:]
 ) -> ChainState {
     let tip = blocks.max(by: { a, b in
         if canonicalHashes != nil {
@@ -60,7 +61,8 @@ func makeChain(
         canonicalTip: tip.blockHash,
         canonicalHashes: mainHashes,
         indexToBlockHash: indexMap,
-        hashToBlock: hashMap
+        hashToBlock: hashMap,
+        tipSnapshotsByHash: snapshots
     )
 }
 

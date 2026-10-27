@@ -29,6 +29,8 @@ struct OracleBlockFact: Equatable {
     var nextTarget: String
     var timestamp: Int64
     var childCommitments: [String: String]?
+    /// The parent-chain state it anchors to; nil is the empty header.
+    var parentState: String? = nil
 }
 
 extension OracleBlockFact {
@@ -36,6 +38,7 @@ extension OracleBlockFact {
     /// standard CID (spec §3.1), whatever its spelling.
     var namesNonStandardLink: Bool {
         let links = [postState, prevState, spec] + (parent.map { [$0] } ?? [])
+            + (parentState.map { [$0] } ?? [])
         // A child is held as committed, so only in its canonical spelling.
         return links.contains {
             LatticePrimitives.CIDIdentity.canonicalString($0)

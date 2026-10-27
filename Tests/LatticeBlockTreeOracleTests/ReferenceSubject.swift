@@ -23,6 +23,7 @@ struct ReferenceSubject: OracleSubject {
                     blockHeight: block.height,
                     postStateCID: block.postState,
                     prevStateCID: block.prevState,
+                    parentStateCID: block.parentState,
                     specCID: block.spec,
                     target: block.target,
                     nextTarget: block.nextTarget,

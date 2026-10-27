@@ -395,7 +395,10 @@ private final class HierarchyTrace {
             target: target,
             nextTarget: height == 0 ? rootTarget : scheduledNextTarget(label, height: height, timestamp: timestamp, target: target),
             timestamp: timestamp,
-            childCommitments: committed.map { [directory(level($0)): hash($0)] }
+            childCommitments: committed.map { [directory(level($0)): hash($0)] },
+            // The header's anchor (`chooseAnchor`), on the block fact as
+            // admission records it; the empty header is the fact's default.
+            parentState: parentState[label].flatMap { $0 == empty ? nil : $0 }
         )
         facts[label] = fact
         labelOfHash[fact.hash] = label

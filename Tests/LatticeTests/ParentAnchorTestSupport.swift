@@ -205,7 +205,8 @@ struct AnchorModel {
                 workContributions: [VerifiedWorkContribution(id: block.grind, work: 1)]
             )
             snapshots[block.hash] = TipBlockSnapshot(
-                postStateCID: block.post, prevStateCID: block.prev, specCID: AnchorCIDPool.spec,
+                postStateCID: block.post, prevStateCID: block.prev,
+                parentStateCID: LatticeState.emptyHeader.rawCID, specCID: AnchorCIDPool.spec,
                 target: .max, nextTarget: .max, tipHeight: block.height, timestamp: Int64(block.height)
             )
             if block.executed { validated.insert(block.hash) }

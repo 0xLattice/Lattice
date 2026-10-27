@@ -856,6 +856,10 @@ enum BlockImport {
                 blockHeight: block.height,
                 postStateCID: block.postState.rawCID,
                 prevStateCID: block.prevState.rawCID,
+                // Absent for the empty header, so root-chain facts keep
+                // their encoding.
+                parentStateCID: block.parentState.rawCID == LatticeState.emptyHeader.rawCID
+                    ? nil : block.parentState.rawCID,
                 specCID: block.spec.rawCID,
                 target: block.target.toHexString(),
                 nextTarget: block.nextTarget.toHexString(),

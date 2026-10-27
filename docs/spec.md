@@ -427,7 +427,8 @@ this order:
 2. Require the proof path to equal the runtime path below the outer root, consume
    every supplied proof entry, and require its terminal CID to equal `CID(B)`.
 3. At every vertical edge, require the nested child's `parentState` to equal the
-   carrier's committed `prevState`.
+   carrier's committed `prevState`. An attributed run is bound the same way
+   (§9.10).
 4. Require `h <= B.target`. Credit the target-derived quantity of the
    ROOT-MOST content-bound block on the path whose target is beaten by `h`,
    raised if greater by `B`'s own target (§9.5). Not the strongest such
@@ -969,15 +970,17 @@ It does not stand against honest miners: anchors only move forward (§5.3 step
 from the abandoned branch, and so no honest miner can extend that child
 block. Only work anchored on the abandoned branch extends it, and once the
 honest child branch is heavier the child chain reorganizes and the withdrawal
-is undone with it. Extending is not weighing: nothing binds a committed child
-block's `parentState` to the `prevState` of the carrier whose attributed run
-credits it (§9.10; §5.3 step 3 binds only the carriers on a proof path), so
-parent work on the canonical branch may still add weight to that child block. Keeping the withdrawal takes more hashrate committing its branch than honest
-hashrate committing the child (`a > h_m`,
-[merged-mining security](economics/merged-mining-security.md)), as reversing
-any confirmed child transaction does. The demander does not choose when the
-withdrawal happens, so it cannot wait out this exposure; it sizes the transfer
-against the parent's reorganization cost at the receipt's depth.
+is undone with it. Weighing is bound the same way: an attributed run credits
+a committed child block only when that block anchors at its carrier's
+entering state (§9.10), so no run on the canonical parent branch weighs a
+block anchored on the abandoned one. Keeping the withdrawal takes work
+committed on parent branches that contain its anchor, which earns no
+canonical parent reward, at a greater rate than the honest child branch
+gathers its own commitments and the unsubscribed canonical parent work in
+their runs ([merged-mining security](economics/merged-mining-security.md)).
+The demander does not choose when the withdrawal happens, so it cannot wait
+out this exposure; it sizes the transfer against the parent's reorganization
+cost at the receipt's depth.
 
 ### 8.2 Balance Conservation with Cross-Chain Transfers
 
@@ -1448,7 +1451,7 @@ including when a block in it is later excluded: proof-of-work is a physical
 fact and exclusion is a judgment about state (§9.5, §9.9).
 
 **The rule.** For every parent block `P` that commits `C = P.children[d]`,
-where the child chain holds `C`:
+where the child chain holds `C` and `C.parentState == P.prevState`:
 
 ```text
 attributed(C, P, d) = runWork(P, d) − grindWork(P)
@@ -1464,6 +1467,16 @@ OWN parent attributed at `P` is in `runWork(P, d)` and not in
 `grindWork(P)`, so it reaches the child, and the recursion Nexus → A → B
 holds level by level. `trueCumWork` of a child block is then its subtree total
 as always.
+
+The anchor condition is the run's counterpart of §5.3 step 3: a run credits
+only a block anchored at its carrier's entering state, the state every block
+in the run descends from. It compares two declared header fields and reads
+neither validity nor canonicity. A committed block anchored anywhere else
+takes no work from `P`'s run; it is not excluded, and every other credit it
+holds stands. Without the condition, runs on the canonical parent branch
+could weigh a child block anchored on a branch the parent abandoned, which no
+honest miner on the canonical branch can extend (§8.1, "Receipt
+canonicity").
 
 Attributed values are DERIVED, never facts: a node applies the rule from its
 own copy of the parent level, parent levels first, live and again at restore.
