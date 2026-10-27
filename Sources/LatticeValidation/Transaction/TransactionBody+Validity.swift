@@ -273,10 +273,12 @@ extension TransactionBody {
     /// recipient) and the recipient's, so a template builder can charge each
     /// transaction its own. Removals only lower the growth, so none are
     /// credited. Negative when deletions outweigh what may be created; nil
-    /// on overflow.
+    /// on overflow or a malformed action (`actionsAreValid`), so it is safe
+    /// on unvalidated bodies.
     public static func stateGrowthCeiling(of bodies: [TransactionBody], rewardRecipient: String? = nil) throws -> Int? {
         var created = rewardRecipient.map { $0.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES } ?? 0
         for body in bodies {
+            guard body.actionsAreValid() else { return nil }
             let deltas = try netBalanceDeltas(accountActions: body.accountActions, receiptActions: body.receiptActions)
             for (owner, delta) in deltas {
                 if case .credit = delta, !addStateDelta(owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES, to: &created) { return nil }
