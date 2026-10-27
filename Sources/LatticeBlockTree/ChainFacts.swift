@@ -20,7 +20,7 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
     public let postStateCID: String
     public let prevStateCID: String
     /// The parent-chain state the block anchors to. Absent means the empty
-    /// header, as for every root-chain block and a child genesis.
+    /// header, as for every root-chain block.
     public let parentStateCID: String?
     public let specCID: String
     public let target: String

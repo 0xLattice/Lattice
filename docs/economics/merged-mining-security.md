@@ -68,7 +68,8 @@ consequences follow from the same rule.
   `D_p / h_m ~= B_p * H / h_m` seconds.
 - **It backs whichever child block was committed last.** The unsubscribed
   miner does not choose. A run is credited at the block its carrier commits,
-  and only if the child chain holds that block (§9.10), so whoever wins the
+  only if the child chain holds that block and the block anchors at the
+  carrier's entering state (`parentState == prevState`, §9.10), so whoever wins the
   latest parent block committing into `d` directs the parent work that follows
   it. If committers of two child branches win parent blocks at rates `a` and
   `h_m`, the unsubscribed work divides `a : h_m`.

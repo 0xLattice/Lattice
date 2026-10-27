@@ -218,8 +218,9 @@ extension ChainTree {
     /// — a run only grows, and a stronger grind at `P` raises both terms
     /// alike — so the credited value is the ratchet of a non-decreasing
     /// function of the parent, and the fixed point depends on neither weigh
-    /// order nor replay order. Crediting is unconditional: exclusion or
-    /// validity on either level changes no run (§9.9).
+    /// order nor replay order. Exclusion or validity on either level changes
+    /// no run (§9.9); a run credits the committed block only when its
+    /// `parentState` is the carrier's `prevState` (§9.10).
     ///
     /// `parent` must serve `directory` (`serveRuns(for:)`); a host applies
     /// parent levels first, so a run attributed at `P` by ITS parent is in

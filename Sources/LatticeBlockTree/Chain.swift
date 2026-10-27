@@ -181,7 +181,8 @@ public struct TipBlockSnapshot: Sendable, Equatable {
     public let postStateCID: String
     public let prevStateCID: String
     /// The parent-chain state the block anchors to: the empty header for a
-    /// root chain's blocks and a child genesis.
+    /// root chain's blocks; a child genesis commits its carrier's
+    /// `prevState` (§5.1 rule 4).
     public let parentStateCID: String
     public let specCID: String
     public let target: UInt256
