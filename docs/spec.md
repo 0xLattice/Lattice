@@ -914,6 +914,15 @@ block. Preflight rejects a transaction that fails its policies (it is not held
 for later), so a transaction valid only from some height or time on, including
 one returned to the pool by a reorg, must be resubmitted once it is valid.
 
+A policy SHOULD let height and timestamp only make a transaction valid, never
+invalid: "from height h on", not "until height h". A transaction a pool
+admitted then stays valid for every later block, as Bitcoin's lock times do.
+One that expires can win a pool conflict (a state key, a deposit, a receipt)
+at admission and fail the template's re-evaluation a block later, so it
+displaces another sender's transaction and is never mined or charged. A
+chain whose policies expire transactions accepts that its pools can be
+churned this way.
+
 ### 7.5 Context-Specific Rules
 
 | Context | Deposits | Receipts | Withdrawals |

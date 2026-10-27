@@ -133,6 +133,8 @@ final class AccountNonceAndGrowthTests: XCTestCase {
         let other = tx([AccountAction(owner: "x", delta: -1), AccountAction(owner: "ab", delta: 1)], [write], signer: "x")
         let each = try XCTUnwrap(TransactionBody.stateGrowthCeiling(of: [pay])) + XCTUnwrap(TransactionBody.stateGrowthCeiling(of: [other]))
         XCTAssertEqual(try TransactionBody.stateGrowthCeiling(of: [pay, other], rewardRecipient: "miner"), each + 5 + 8)
+        // A malformed action (neither value) has no ceiling, rather than trapping.
+        XCTAssertNil(try TransactionBody.stateGrowthCeiling(of: [tx([], [Action(key: "k", oldValue: nil, newValue: nil)], signer: "ab")]))
         // A deletion lowers it.
         XCTAssertEqual(try TransactionBody.stateGrowthCeiling(of: [tx([], [Action(key: "k", oldValue: "v", newValue: nil)], signer: "ab", nonce: 1)]), -2 + 17)
     }
