@@ -191,7 +191,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
             )
         }
 
-        // The last of the three columns in adalinxx/lattice-node#64, and the
+        // The last of the three columns in 0xLattice/lattice-node#64, and the
         // one no change to the descent could reach: it is paid before any
         // projection runs. The ancestor walk is not faster here, it is GONE.
         // Subtree work is a range over an Euler order, so recording work walks
