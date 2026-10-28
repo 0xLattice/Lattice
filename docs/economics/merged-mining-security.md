@@ -175,7 +175,7 @@ one terminal block in each chain it reaches, and placing one grind at two
 blocks of a chain is rejected (§9.1, §12.5.3). Attributed runs partition the
 parent graph: each parent block is in at most one run per directory, so its
 work is credited at no more than one committed child block (§9.10). The
-[lattice-formal](https://github.com/adalinxx/lattice-formal) Hierarchy model
+[lattice-formal](https://github.com/0xLattice/lattice-formal) Hierarchy model
 checks this as `NoDoubleBacking` (the work above that reaches one side of a
 lower fork, followed level by level to the root, never backs the other side,
 genesis forks included) and `PhysicalWorkOnce` (a child or grandchild block's

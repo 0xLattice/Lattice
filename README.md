@@ -41,7 +41,7 @@ bridge is part of consensus.
 
 This repository is the consensus library. Networking, process supervision,
 durability, pruning, and RPC belong to node software such as
-[`lattice-node`](https://github.com/adalinxx/lattice-node).
+[`lattice-node`](https://github.com/0xLattice/lattice-node).
 
 ## Mental Model
 
@@ -83,7 +83,7 @@ swift run LatticeDemo
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/adalinxx/Lattice.git", branch: "main")
+    .package(url: "https://github.com/0xLattice/Lattice.git", branch: "main")
 ]
 ```
 
@@ -177,7 +177,7 @@ Sources/
 `import Lattice` brings in all six modules.
 
 Important dependencies are
-[`cashew`](https://github.com/adalinxx/cashew) for content-addressed structures,
+[`cashew`](https://github.com/0xLattice/cashew) for content-addressed structures,
 [`swift-crypto`](https://github.com/apple/swift-crypto) for Ed25519 and SHA-256,
 and [`WasmKit`](https://github.com/swiftwasm/WasmKit) for deterministic policy
 execution.

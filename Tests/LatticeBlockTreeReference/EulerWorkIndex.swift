@@ -16,7 +16,7 @@ import LatticePoW
 /// The structure this replaces stored one subtree total per segment base and
 /// kept those totals true by walking from the mutated block to the root on
 /// every admission — O(depth) per event, and depth is chain length, which is
-/// the quadratic in adalinxx/lattice-node#64.
+/// the quadratic in 0xLattice/lattice-node#64.
 ///
 /// Here no ancestor total is stored at all. Each block contributes two elements
 /// to one sequence, an OPEN carrying its direct work and a CLOSE carrying zero,

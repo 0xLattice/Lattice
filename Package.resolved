@@ -1,5 +1,5 @@
 {
-  "originHash" : "81f242871ac2462b3977cf5fa34207969b200d3348d982467d82b72d63a24cb2",
+  "originHash" : "5d7c8169344c48749033884243d7388f2b70b2523baf8d9be76fdddbcbe18f61",
   "pins" : [
     {
       "identity" : "arraytrie",
@@ -13,7 +13,7 @@
     {
       "identity" : "cashew",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/adalinxx/cashew.git",
+      "location" : "https://github.com/0xLattice/cashew.git",
       "state" : {
         "revision" : "5daec3cdfd3d572d9437daa7a84242f7ae5a96d5",
         "version" : "5.0.3"
@@ -40,7 +40,7 @@
     {
       "identity" : "multikey",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/adalinxx/Multikey.git",
+      "location" : "https://github.com/0xLattice/Multikey.git",
       "state" : {
         "revision" : "413c70e96c4de9af573e16b58ffc6a107911eb9f",
         "version" : "1.0.0"
@@ -184,7 +184,7 @@
     {
       "identity" : "uint256",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/adalinxx/UInt256.git",
+      "location" : "https://github.com/0xLattice/UInt256.git",
       "state" : {
         "revision" : "19e20ada50f87beb33f1f073f9c3fba786a4564e",
         "version" : "1.1.0"
