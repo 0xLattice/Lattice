@@ -167,7 +167,8 @@ func storeBuiltBlock(
     // reader of the block; it is stored even when it commits nothing.
     var childPaths = ArrayTrie<ResolutionStrategy>()
     childPaths.set([CHILDREN_PROPERTY], value: .targeted)
-    for directory in block.children.node?.entries.keys ?? [:].keys {
+    // A child committed by CID alone has no content here to store.
+    for (directory, child) in block.children.node?.entries ?? [:] where child.node != nil {
         childPaths.set([CHILDREN_PROPERTY, directory], value: .targeted)
     }
     try await header.store(paths: childPaths, storer: fetcher)
@@ -259,6 +260,8 @@ func buildAndStoreBlock(
     }
     let result: BlockBuildResult
     do {
+        // The builder fills committed children itself; forging keeps `children` as given.
+        if allowChildCommitmentMismatch { throw BlockBuilderError.unmatchedChildCommitment("") }
         result = try await build(transactions)
     } catch where forgeable(error) {
         let header = try await build([]).block

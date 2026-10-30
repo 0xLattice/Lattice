@@ -18,8 +18,9 @@ public enum BlockBuilderError: Error {
     case invalidCoinbase(CoinbaseError)
     /// A child is carried under a name that is not a directory atom.
     case invalidChildDirectory(String)
-    /// A transaction commits `child/<directory>` to a child the block does
-    /// not carry there (see `Block.validateChildCommitments`).
+    /// A transaction's `child/<directory>` commitment is malformed, names a
+    /// child other than the one the block carries there, or names a parent
+    /// state the block does not enter (see `Block.validateChildCommitments`).
     case unmatchedChildCommitment(String)
 }
 
@@ -154,7 +155,7 @@ public struct BlockBuilder {
             transactions,
             fetcher: fetcher
         )
-        try requireChildCommitmentsMatch(transactionBodies, children: children)
+        let committed = try committedChildren(transactionBodies, children: children, entering: prevState)
         let (postState, stateDiff) = try await computePostState(
             prevState: prevState,
             transactionBodies: transactionBodies,
@@ -173,7 +174,7 @@ public struct BlockBuilder {
             parentState: parentState.removingNode(),
             prevState: prevState.removingNode(),
             postState: postState,
-            children: try buildChildren(children),
+            children: try buildChildren(children, committed: committed),
             height: 0,
             timestamp: timestamp,
             rewardRecipient: nil,
@@ -284,7 +285,7 @@ public struct BlockBuilder {
             transactions,
             fetcher: fetcher
         )
-        try requireChildCommitmentsMatch(transactionBodies, children: children)
+        let committed = try committedChildren(transactionBodies, children: children, entering: prevState)
         // The same rule the validator applies: the fee rule always holds, and
         // a recipient is credited exactly the reward plus fees (nil burns it).
         let coinbase: AccountAction?
@@ -317,7 +318,7 @@ public struct BlockBuilder {
             parentState: parentState,
             prevState: prevState.removingNode(),
             postState: postState,
-            children: try buildChildren(children),
+            children: try buildChildren(children, committed: committed),
             height: height,
             timestamp: timestamp,
             rewardRecipient: rewardRecipient,
@@ -330,15 +331,36 @@ public struct BlockBuilder {
         )
     }
 
-    /// Builds only what validation accepts: every `child/X` = C commitment
-    /// needs C at `children[X]`.
-    private static func requireChildCommitmentsMatch(_ bodies: [TransactionBody], children: [String: Block]) throws {
+    /// Builds only what validation accepts: every `child/X` = `C@P` commitment
+    /// needs C at `children[X]` and the block entering P. A directory
+    /// `children` leaves empty is filled with C by CID alone: the carrier's
+    /// validity reads only the index, so the builder never needs C itself.
+    private static func committedChildren(
+        _ bodies: [TransactionBody], children: [String: Block], entering prevState: LatticeStateHeader
+    ) throws -> [String: BlockHeader] {
+        var committed: [String: BlockHeader] = [:]
         for commitment in Block.childCommitments(in: bodies) {
-            guard let child = children[commitment.directory],
-                  try BlockHeader(node: child).rawCID.utf8.elementsEqual(commitment.child.utf8) else {
+            guard isValidChildDirectory(commitment.directory),
+                  let value = Block.childCommitmentValue(commitment.value),
+                  value.parentState.elementsEqual(prevState.rawCID.utf8) else {
                 throw BlockBuilderError.unmatchedChildCommitment(commitment.directory)
             }
+            let carried = try children[commitment.directory].map { try BlockHeader(node: $0).rawCID }
+                ?? committed[commitment.directory]?.rawCID
+            if let carried {
+                guard carried.utf8.elementsEqual(value.child) else {
+                    throw BlockBuilderError.unmatchedChildCommitment(commitment.directory)
+                }
+            } else {
+                // A non-standard CID would leave `children` malformed.
+                let child = String(decoding: value.child, as: UTF8.self)
+                guard CIDIdentity.isStandard(child) else {
+                    throw BlockBuilderError.unmatchedChildCommitment(commitment.directory)
+                }
+                committed[commitment.directory] = BlockHeader(rawCID: child)
+            }
         }
+        return committed
     }
 
     private static func validatedTransactionBodies(
@@ -546,14 +568,16 @@ public struct BlockBuilder {
     /// The block's `children`: every key a valid child directory. The count needs no
     /// check here: the DAG-CBOR encoder refuses a map longer than
     /// `DagCBOR.maxCollectionCount`, so no CID names one no node could decode.
+    /// `committed` adds children named by CID only, at directories
+    /// `children` leaves empty.
     static func buildChildren(
-        _ children: [String: Block]
+        _ children: [String: Block], committed: [String: BlockHeader] = [:]
     ) throws -> HeaderImpl<FlatDictionary<BlockHeader>> {
-        if let invalid = children.keys.first(where: { !isValidChildDirectory($0) }) {
+        var headers = try children.mapValues { try BlockHeader(node: $0) }
+        headers.merge(committed) { own, _ in own }
+        if let invalid = headers.keys.first(where: { !isValidChildDirectory($0) }) {
             throw BlockBuilderError.invalidChildDirectory(invalid)
         }
-        return try HeaderImpl(node: FlatDictionary(
-            try children.mapValues { try BlockHeader(node: $0) }
-        ))
+        return try HeaderImpl(node: FlatDictionary(headers))
     }
 }

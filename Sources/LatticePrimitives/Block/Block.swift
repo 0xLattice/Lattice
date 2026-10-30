@@ -12,9 +12,12 @@ let PREV_STATE_PROPERTY = "prevState"
 let POST_STATE_PROPERTY = "postState"
 package let CHILDREN_PROPERTY = "children"
 /// General-state key prefix of a transaction child commitment:
-/// `child/<directory>` = the child block CID the carrying block must hold at
-/// `children[<directory>]`.
+/// `child/<directory>` = `<child block CID>@<parent state CID>`. The carrying
+/// block must hold the child at `children[<directory>]` and enter the parent
+/// state.
 public let CHILD_COMMITMENT_KEY_PREFIX = "child/"
+/// Separates the child block CID from the parent state CID in a commitment.
+public let CHILD_COMMITMENT_PARENT_STATE_SEPARATOR = UInt8(ascii: "@")
 
 let BLOCK_PROPERTIES = Set([
     TRANSACTIONS_PROPERTY,
