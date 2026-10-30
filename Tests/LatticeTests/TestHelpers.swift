@@ -233,12 +233,14 @@ func buildAndStoreBlock(
     rewardRecipient: String? = nil,
     allowFeeRuleViolation: Bool = false,
     allowStateGrowthViolation: Bool = false,
+    allowChildCommitmentMismatch: Bool = false,
     fetcher: Fetcher
 ) async throws -> Block {
     func forgeable(_ error: Error) -> Bool {
         guard rewardRecipient == nil else { return false }
         if case BlockBuilderError.invalidCoinbase(.feeRuleViolated) = error { return allowFeeRuleViolation }
         if case StateErrors.stateGrowthExceeded = error { return allowStateGrowthViolation }
+        if case BlockBuilderError.unmatchedChildCommitment = error { return allowChildCommitmentMismatch }
         return false
     }
     func build(_ transactions: [Transaction]) async throws -> BlockBuildResult {
