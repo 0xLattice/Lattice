@@ -6,7 +6,8 @@ import UInt256
 import cashew
 import Foundation
 
-/// A `child/X` = C action is valid only in a block whose `children[X]` is C.
+/// A `child/X` = `C@P` action is valid only in a block whose `children[X]` is
+/// C and whose `prevState` is P.
 final class TransactionChildCommitmentTests: XCTestCase {
 
     private let directory = "Payments"
@@ -35,13 +36,18 @@ final class TransactionChildCommitmentTests: XCTestCase {
         return (block, try! BlockHeader(node: block).rawCID)
     }
 
+    /// The value committing `cid` on the state a block after `previous` enters.
+    private func value(_ cid: String, after previous: Block) -> String {
+        cid + "@" + previous.postState.rawCID
+    }
+
     func testMatchingChildEntryIsValid() async throws {
         let fetcher = StorableFetcher()
         let g = try await genesis(fetcher)
         let kp = CryptoUtils.generateKeyPair()
         let c = child(1)
         let block = try await buildAndStoreBlock(
-            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: c.cid, nonce: 0, by: kp)],
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: value(c.cid, after: g), nonce: 0, by: kp)],
             children: [directory: c.block], timestamp: g.timestamp + 1_000, fetcher: fetcher
         )
         let valid = try await block.validateNexus(fetcher: fetcher).0
@@ -53,7 +59,7 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let g = try await genesis(fetcher)
         let kp = CryptoUtils.generateKeyPair()
         let block = try await buildAndStoreBlock(
-            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: child(1).cid, nonce: 0, by: kp)],
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: value(child(1).cid, after: g), nonce: 0, by: kp)],
             children: [directory: child(2).block], timestamp: g.timestamp + 1_000,
             allowChildCommitmentMismatch: true, fetcher: fetcher
         )
@@ -66,7 +72,7 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let g = try await genesis(fetcher)
         let kp = CryptoUtils.generateKeyPair()
         let block = try await buildAndStoreBlock(
-            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: child(1).cid, nonce: 0, by: kp)],
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: value(child(1).cid, after: g), nonce: 0, by: kp)],
             timestamp: g.timestamp + 1_000, allowChildCommitmentMismatch: true, fetcher: fetcher
         )
         let valid = try await block.validateNexus(fetcher: fetcher).0
@@ -81,7 +87,7 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let c = child(1)
         let body = TransactionBody(
             accountActions: [],
-            actions: [Action(key: CHILD_COMMITMENT_KEY_PREFIX + directory + "/b", oldValue: nil, newValue: c.cid)],
+            actions: [Action(key: CHILD_COMMITMENT_KEY_PREFIX + directory + "/b", oldValue: nil, newValue: value(c.cid, after: g))],
             depositActions: [], receiptActions: [], withdrawalActions: [],
             signers: [testAddress(publicKey: kp.publicKey)], nonce: 0, chainPath: ["Nexus"]
         )
@@ -98,7 +104,7 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let fetcher = StorableFetcher()
         let g = try await genesis(fetcher)
         let kp = CryptoUtils.generateKeyPair()
-        let transaction = commitTransaction(oldValue: nil, newValue: child(1).cid, nonce: 0, by: kp)
+        let transaction = commitTransaction(oldValue: nil, newValue: value(child(1).cid, after: g), nonce: 0, by: kp)
         do {
             _ = try await BlockBuilder.buildBlock(
                 previous: g, transactions: [transaction], children: [directory: child(2).block],
@@ -110,10 +116,10 @@ final class TransactionChildCommitmentTests: XCTestCase {
         }
         do {
             _ = try await BlockBuilder.buildGenesis(
-                spec: ChainSpec.test(), transactions: [transaction],
+                spec: ChainSpec.test(), transactions: [transaction], children: [directory: child(2).block],
                 timestamp: g.timestamp, target: .max, fetcher: fetcher
             )
-            XCTFail("built a genesis whose commitment has no children entry")
+            XCTFail("built a genesis whose commitment names another child and state")
         } catch BlockBuilderError.unmatchedChildCommitment(let name) {
             XCTAssertEqual(name, directory)
         }
@@ -136,14 +142,96 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let kp = CryptoUtils.generateKeyPair()
         let c = child(1)
         let committed = try await buildAndStoreBlock(
-            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: c.cid, nonce: 0, by: kp)],
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: value(c.cid, after: g), nonce: 0, by: kp)],
             children: [directory: c.block], timestamp: g.timestamp + 1_000, fetcher: fetcher
         )
         let deleted = try await buildAndStoreBlock(
-            previous: committed, transactions: [commitTransaction(oldValue: c.cid, newValue: nil, nonce: 1, by: kp)],
+            previous: committed, transactions: [commitTransaction(oldValue: value(c.cid, after: g), newValue: nil, nonce: 1, by: kp)],
             timestamp: g.timestamp + 2_000, fetcher: fetcher
         )
         let valid = try await deleted.validateNexus(fetcher: fetcher).0
         XCTAssertTrue(valid, "a delete needs no children entry")
+    }
+
+    func testAnotherParentStateIsInvalid() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        let c = child(1)
+        let block = try await buildAndStoreBlock(
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: c.cid + "@" + c.cid, nonce: 0, by: kp)],
+            children: [directory: c.block], timestamp: g.timestamp + 1_000,
+            allowChildCommitmentMismatch: true, fetcher: fetcher
+        )
+        let valid = try await block.validateNexus(fetcher: fetcher).0
+        XCTAssertFalse(valid, "the block does not enter the committed parent state")
+    }
+
+    func testMalformedValuesAreInvalid() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let c = child(1)
+        let state = g.postState.rawCID
+        for malformed in [c.cid, c.cid + "@", "@" + state, c.cid + "@" + state + "@" + state, c.cid + "@@" + state] {
+            let block = try await buildAndStoreBlock(
+                previous: g,
+                transactions: [commitTransaction(oldValue: nil, newValue: malformed, nonce: 0, by: CryptoUtils.generateKeyPair())],
+                children: [directory: c.block], timestamp: g.timestamp + 1_000,
+                allowChildCommitmentMismatch: true, fetcher: fetcher
+            )
+            let valid = try await block.validateNexus(fetcher: fetcher).0
+            XCTAssertFalse(valid, malformed)
+        }
+    }
+
+    /// The builder carries a committed child it does not hold, by CID, and
+    /// the block validates without the child's content.
+    func testBuilderCarriesACommittedChildByCID() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        let c = child(1)
+        let block = try await buildAndStoreBlock(
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: value(c.cid, after: g), nonce: 0, by: kp)],
+            timestamp: g.timestamp + 1_000, fetcher: fetcher
+        )
+        let index = try await block.children.resolve(fetcher: fetcher).node
+        XCTAssertEqual(index?[directory]?.rawCID, c.cid)
+        let held = try? await fetcher.fetch(rawCid: c.cid)
+        XCTAssertNil(held, "the child itself was never stored")
+        let valid = try await block.validateNexus(fetcher: fetcher).0
+        XCTAssertTrue(valid)
+    }
+
+    func testBuilderRefusesAnotherParentState() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        let c = child(1)
+        do {
+            _ = try await BlockBuilder.buildBlock(
+                previous: g, transactions: [commitTransaction(oldValue: nil, newValue: c.cid + "@" + c.cid, nonce: 0, by: kp)],
+                timestamp: g.timestamp + 1_000, fetcher: fetcher
+            )
+            XCTFail("built a block entering a state other than the committed one")
+        } catch BlockBuilderError.unmatchedChildCommitment(let name) {
+            XCTAssertEqual(name, directory)
+        }
+    }
+
+    func testBuilderRefusesANonStandardChildCID() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        do {
+            _ = try await BlockBuilder.buildBlock(
+                previous: g,
+                transactions: [commitTransaction(oldValue: nil, newValue: "not-a-cid@" + g.postState.rawCID, nonce: 0, by: kp)],
+                timestamp: g.timestamp + 1_000, fetcher: fetcher
+            )
+            XCTFail("built a block whose children name a non-standard CID")
+        } catch BlockBuilderError.unmatchedChildCommitment(let name) {
+            XCTAssertEqual(name, directory)
+        }
     }
 }

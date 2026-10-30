@@ -712,34 +712,48 @@ public extension Block {
         return true
     }
 
-    /// A transaction commits child block C into directory X by writing
-    /// `child/X` = C, and the block carrying it must hold exactly C at
-    /// `children[X]`. Only `children` weighs, so the action asks the miner for
-    /// a commitment and can never be a second, competing one. A delete
-    /// (`newValue == nil`) commits nothing. Two writes to one key in a block
-    /// are already a state conflict, so one directory has at most one action.
+    /// A transaction commits child block C, built on parent state P, into
+    /// directory X by writing `child/X` = `C@P`. The block carrying it must
+    /// hold exactly C at `children[X]` and enter exactly P (`prevState`), so a
+    /// commitment lands only on the state its child was built on. Only
+    /// `children` weighs, so the action asks the miner for a commitment and can
+    /// never be a second, competing one. A delete (`newValue == nil`) commits
+    /// nothing. Two writes to one key in a block are already a state conflict,
+    /// so one directory has at most one action.
     func validateChildCommitments(transactionBodies: [TransactionBody], fetcher: Fetcher) async throws -> Bool {
         let committed = Block.childCommitments(in: transactionBodies)
         if committed.isEmpty { return true }
         guard let index = try await children.resolve(fetcher: fetcher).node, index.isWellFormed else { return false }
         // Bytes, not String ==: see GeneralState's oldValue comparison.
         return committed.allSatisfy { commitment in
-            index[commitment.directory].map { $0.rawCID.utf8.elementsEqual(commitment.child.utf8) } ?? false
+            guard let value = Block.childCommitmentValue(commitment.value),
+                  value.parentState.elementsEqual(prevState.rawCID.utf8) else { return false }
+            return index[commitment.directory].map { $0.rawCID.utf8.elementsEqual(value.child) } ?? false
         }
     }
 
-    /// The `child/X` = C commitments the bodies make, deletes excluded: the
-    /// one reading of the key, shared by validation and the builder.
-    static func childCommitments(in transactionBodies: [TransactionBody]) -> [(directory: String, child: String)] {
+    /// The `child/X` commitments the bodies make, deletes excluded: the one
+    /// reading of the key, shared by validation and the builder.
+    static func childCommitments(in transactionBodies: [TransactionBody]) -> [(directory: String, value: String)] {
         let prefix = CHILD_COMMITMENT_KEY_PREFIX.utf8
-        var committed: [(directory: String, child: String)] = []
+        var committed: [(directory: String, value: String)] = []
         for body in transactionBodies {
             for action in body.actions {
-                guard let child = action.newValue, action.key.utf8.starts(with: prefix) else { continue }
-                committed.append((String(decoding: action.key.utf8.dropFirst(prefix.count), as: UTF8.self), child))
+                guard let value = action.newValue, action.key.utf8.starts(with: prefix) else { continue }
+                committed.append((String(decoding: action.key.utf8.dropFirst(prefix.count), as: UTF8.self), value))
             }
         }
         return committed
+    }
+
+    /// `C@P` split at its one separator byte; nil unless both sides are
+    /// non-empty. Bytes, not Characters: grapheme breaking is Unicode-version
+    /// dependent and must not decide validity.
+    static func childCommitmentValue(_ value: String) -> (child: ArraySlice<UInt8>, parentState: ArraySlice<UInt8>)? {
+        let separator = CHILD_COMMITMENT_PARENT_STATE_SEPARATOR
+        let parts = Array(value.utf8).split(separator: separator, omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return (parts[0], parts[1])
     }
 
     func validateChainPaths(transactionBodies: [TransactionBody], expectedPath: [String]) -> Bool {
