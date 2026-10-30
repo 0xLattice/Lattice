@@ -146,6 +146,9 @@ public extension Block {
         if !validateChainPaths(transactionBodies: transactionBodies, expectedPath: chainPath) {
             return (false, .empty, nil)
         }
+        if try await !validateChildCommitments(transactionBodies: transactionBodies, fetcher: fetcher) {
+            return (false, .empty, nil)
+        }
         if !(try await TransactionBody.validateConfiguredPolicyModules(
             spec: specNode,
             fetcher: fetcher
@@ -434,6 +437,7 @@ public extension Block {
         }
         if !validateChainPaths(transactionBodies: transactionBodies, expectedPath: expectedChainPath) { return (false, .empty, nil) }
         if !validateNoDepositsOrWithdrawalsOnRoot(transactionBodies: transactionBodies, expectedPath: expectedChainPath) { return (false, .empty, nil) }
+        if try await !validateChildCommitments(transactionBodies: transactionBodies, fetcher: fetcher) { return (false, .empty, nil) }
         // The policies after the block's own limits: a block over them costs
         // no policy evaluation.
         if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: expectedChainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
@@ -706,6 +710,29 @@ public extension Block {
             if !body.withdrawalActions.isEmpty { return false }
         }
         return true
+    }
+
+    /// A transaction commits child block C into directory X by writing
+    /// `child/X` = C, and the block carrying it must hold exactly C at
+    /// `children[X]`. Only `children` weighs, so the action asks the miner for
+    /// a commitment and can never be a second, competing one. A delete
+    /// (`newValue == nil`) commits nothing. Two writes to one key in a block
+    /// are already a state conflict, so one directory has at most one action.
+    func validateChildCommitments(transactionBodies: [TransactionBody], fetcher: Fetcher) async throws -> Bool {
+        let prefix = CHILD_COMMITMENT_KEY_PREFIX.utf8
+        var committed: [(directory: String, child: String)] = []
+        for body in transactionBodies {
+            for action in body.actions {
+                guard let child = action.newValue, action.key.utf8.starts(with: prefix) else { continue }
+                committed.append((String(decoding: action.key.utf8.dropFirst(prefix.count), as: UTF8.self), child))
+            }
+        }
+        if committed.isEmpty { return true }
+        guard let index = try await children.resolve(fetcher: fetcher).node, index.isWellFormed else { return false }
+        // Bytes, not String ==: see GeneralState's oldValue comparison.
+        return committed.allSatisfy { commitment in
+            index[commitment.directory].map { $0.rawCID.utf8.elementsEqual(commitment.child.utf8) } ?? false
+        }
     }
 
     func validateChainPaths(transactionBodies: [TransactionBody], expectedPath: [String]) -> Bool {
