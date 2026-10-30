@@ -54,7 +54,8 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let kp = CryptoUtils.generateKeyPair()
         let block = try await buildAndStoreBlock(
             previous: g, transactions: [commitTransaction(oldValue: nil, newValue: child(1).cid, nonce: 0, by: kp)],
-            children: [directory: child(2).block], timestamp: g.timestamp + 1_000, fetcher: fetcher
+            children: [directory: child(2).block], timestamp: g.timestamp + 1_000,
+            allowChildCommitmentMismatch: true, fetcher: fetcher
         )
         let valid = try await block.validateNexus(fetcher: fetcher).0
         XCTAssertFalse(valid, "the action and children[X] name different child blocks")
@@ -66,10 +67,56 @@ final class TransactionChildCommitmentTests: XCTestCase {
         let kp = CryptoUtils.generateKeyPair()
         let block = try await buildAndStoreBlock(
             previous: g, transactions: [commitTransaction(oldValue: nil, newValue: child(1).cid, nonce: 0, by: kp)],
-            timestamp: g.timestamp + 1_000, fetcher: fetcher
+            timestamp: g.timestamp + 1_000, allowChildCommitmentMismatch: true, fetcher: fetcher
         )
         let valid = try await block.validateNexus(fetcher: fetcher).0
         XCTAssertFalse(valid, "a child/X action needs children[X]")
+    }
+
+    /// `child/a/b` names no directory a block can carry, so it never matches.
+    func testNonDirectoryKeyIsInvalid() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        let c = child(1)
+        let body = TransactionBody(
+            accountActions: [],
+            actions: [Action(key: CHILD_COMMITMENT_KEY_PREFIX + directory + "/b", oldValue: nil, newValue: c.cid)],
+            depositActions: [], receiptActions: [], withdrawalActions: [],
+            signers: [testAddress(publicKey: kp.publicKey)], nonce: 0, chainPath: ["Nexus"]
+        )
+        let block = try await buildAndStoreBlock(
+            previous: g, transactions: [signedTestTransaction(body, by: kp)],
+            children: [directory: c.block], timestamp: g.timestamp + 1_000,
+            allowChildCommitmentMismatch: true, fetcher: fetcher
+        )
+        let valid = try await block.validateNexus(fetcher: fetcher).0
+        XCTAssertFalse(valid)
+    }
+
+    func testBuilderRefusesUnmatchedCommitment() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        let transaction = commitTransaction(oldValue: nil, newValue: child(1).cid, nonce: 0, by: kp)
+        do {
+            _ = try await BlockBuilder.buildBlock(
+                previous: g, transactions: [transaction], children: [directory: child(2).block],
+                timestamp: g.timestamp + 1_000, fetcher: fetcher
+            )
+            XCTFail("built a block whose commitment does not match children")
+        } catch BlockBuilderError.unmatchedChildCommitment(let name) {
+            XCTAssertEqual(name, directory)
+        }
+        do {
+            _ = try await BlockBuilder.buildGenesis(
+                spec: ChainSpec.test(), transactions: [transaction],
+                timestamp: g.timestamp, target: .max, fetcher: fetcher
+            )
+            XCTFail("built a genesis whose commitment has no children entry")
+        } catch BlockBuilderError.unmatchedChildCommitment(let name) {
+            XCTAssertEqual(name, directory)
+        }
     }
 
     func testChildEntryWithoutActionIsValid() async throws {

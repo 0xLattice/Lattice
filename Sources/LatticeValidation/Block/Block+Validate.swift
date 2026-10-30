@@ -719,6 +719,18 @@ public extension Block {
     /// (`newValue == nil`) commits nothing. Two writes to one key in a block
     /// are already a state conflict, so one directory has at most one action.
     func validateChildCommitments(transactionBodies: [TransactionBody], fetcher: Fetcher) async throws -> Bool {
+        let committed = Block.childCommitments(in: transactionBodies)
+        if committed.isEmpty { return true }
+        guard let index = try await children.resolve(fetcher: fetcher).node, index.isWellFormed else { return false }
+        // Bytes, not String ==: see GeneralState's oldValue comparison.
+        return committed.allSatisfy { commitment in
+            index[commitment.directory].map { $0.rawCID.utf8.elementsEqual(commitment.child.utf8) } ?? false
+        }
+    }
+
+    /// The `child/X` = C commitments the bodies make, deletes excluded: the
+    /// one reading of the key, shared by validation and the builder.
+    static func childCommitments(in transactionBodies: [TransactionBody]) -> [(directory: String, child: String)] {
         let prefix = CHILD_COMMITMENT_KEY_PREFIX.utf8
         var committed: [(directory: String, child: String)] = []
         for body in transactionBodies {
@@ -727,12 +739,7 @@ public extension Block {
                 committed.append((String(decoding: action.key.utf8.dropFirst(prefix.count), as: UTF8.self), child))
             }
         }
-        if committed.isEmpty { return true }
-        guard let index = try await children.resolve(fetcher: fetcher).node, index.isWellFormed else { return false }
-        // Bytes, not String ==: see GeneralState's oldValue comparison.
-        return committed.allSatisfy { commitment in
-            index[commitment.directory].map { $0.rawCID.utf8.elementsEqual(commitment.child.utf8) } ?? false
-        }
+        return committed
     }
 
     func validateChainPaths(transactionBodies: [TransactionBody], expectedPath: [String]) -> Bool {

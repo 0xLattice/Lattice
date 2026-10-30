@@ -18,6 +18,9 @@ public enum BlockBuilderError: Error {
     case invalidCoinbase(CoinbaseError)
     /// A child is carried under a name that is not a directory atom.
     case invalidChildDirectory(String)
+    /// A transaction commits `child/<directory>` to a child the block does
+    /// not carry there (see `Block.validateChildCommitments`).
+    case unmatchedChildCommitment(String)
 }
 
 public struct BlockBuildResult: Sendable {
@@ -151,6 +154,7 @@ public struct BlockBuilder {
             transactions,
             fetcher: fetcher
         )
+        try requireChildCommitmentsMatch(transactionBodies, children: children)
         let (postState, stateDiff) = try await computePostState(
             prevState: prevState,
             transactionBodies: transactionBodies,
@@ -280,6 +284,7 @@ public struct BlockBuilder {
             transactions,
             fetcher: fetcher
         )
+        try requireChildCommitmentsMatch(transactionBodies, children: children)
         // The same rule the validator applies: the fee rule always holds, and
         // a recipient is credited exactly the reward plus fees (nil burns it).
         let coinbase: AccountAction?
@@ -323,6 +328,17 @@ public struct BlockBuilder {
             stateDiff: stateDiff,
             materializedPostState: postState.node
         )
+    }
+
+    /// Builds only what validation accepts: every `child/X` = C commitment
+    /// needs C at `children[X]`.
+    private static func requireChildCommitmentsMatch(_ bodies: [TransactionBody], children: [String: Block]) throws {
+        for commitment in Block.childCommitments(in: bodies) {
+            guard let child = children[commitment.directory],
+                  try BlockHeader(node: child).rawCID.utf8.elementsEqual(commitment.child.utf8) else {
+                throw BlockBuilderError.unmatchedChildCommitment(commitment.directory)
+            }
+        }
     }
 
     private static func validatedTransactionBodies(
