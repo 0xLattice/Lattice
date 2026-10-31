@@ -204,6 +204,9 @@ struct ReferenceSubject: OracleSubject {
             seen["\(key) runs"] = probe.directories.map {
                 "\($0)=\(tree.nearestCarrier(of: hash, directory: $0) ?? "nil")"
             }.joined(separator: " ")
+            seen["\(key) committers"] = (tree.recordedChildCommitments(of: hash) ?? [:]).sorted { $0.key < $1.key }.map {
+                "\($0.key)=\(tree.committers(of: $0.value, directory: $0.key).joined(separator: ","))"
+            }.joined(separator: " ")
         }
         seen.merge(observeGraphQueries(probe)) { _, new in new }
 

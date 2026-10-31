@@ -201,6 +201,16 @@ extension ChainTree {
         return carrier == BlockGraph.none ? nil : graph.hash(carrier)
     }
 
+    /// The connected blocks that commit `child` into `directory`, as run
+    /// attribution settled them. Answers only for a directory this node
+    /// serves (`serveRuns(for:)`); empty otherwise. Sorted.
+    public func committers(of child: String, directory: String) -> [String] {
+        guard graph.served.contains(directory),
+              let blocks = CIDIdentity.canonicalString(child).flatMap({ graph.committers[directory]?[$0] })
+        else { return [] }
+        return blocks.map(graph.hash).sorted()
+    }
+
     /// The run of `committer` into `directory`: the credited work of the
     /// connected blocks whose nearest committer it is. Nil when it has none.
     func runWork(of committer: String, directory: String) -> WorkSum? {

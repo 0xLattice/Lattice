@@ -207,6 +207,14 @@ extension ChainTree {
         return runs.nearestCarrier[blockHash]?[directory]
     }
 
+    /// The connected blocks that commit `child` into `directory`, as run
+    /// attribution settled them; empty for an unserved directory. Sorted.
+    /// The CID is looked up as given, not canonicalized.
+    public func committers(of child: String, directory: String) -> [String] {
+        guard runs.served.contains(directory) else { return [] }
+        return (runs.committers[directory]?[child] ?? []).sorted()
+    }
+
     /// Credit this chain with its parent's attributed runs into `directory`
     /// (§9.10): for each committer `P` of `parent` into `directory` whose
     /// committed block `C = P.childCommitments[directory]` this chain holds,

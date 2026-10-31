@@ -298,6 +298,56 @@ final class ParentRunAttributionTests: XCTestCase {
         XCTAssertNil(lateG)
     }
 
+    /// `committers(of:directory:)` inverts the commitments run attribution
+    /// settled: every connected block committing a child, forks included,
+    /// whichever path built the graph. Unserved directories answer empty.
+    func testCommittersAreEveryConnectedBlockCommittingTheChild() async throws {
+        //        g
+        //        |
+        //       p1  (commits c1 into d, b1 into e)
+        //      /  \
+        //    p2    x        p2 and x both commit c2 into d
+        let e = "Markets"
+        let byInit = makeChain(blocks: [
+            meta("g", parent: nil, height: 0, children: ["p1"], work: 1),
+            meta("p1", parent: "g", height: 1, children: ["p2", "x"], work: 5,
+                 commits: [d: testCID("c1"), e: testCID("b1")]),
+            meta("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]),
+            meta("x", parent: "p1", height: 2, work: 11, commits: [d: testCID("c2")]),
+        ])
+        await byInit.serveRuns(for: d)
+        let byReplay = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        await byReplay.serveRuns(for: d)
+        _ = try await byReplay.replay(batch("p1", parent: "g", height: 1, work: 5,
+                                            commits: [d: testCID("c1"), e: testCID("b1")]))
+        _ = try await byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
+        _ = try await byReplay.replay(batch("x", parent: "p1", height: 2, work: 11, commits: [d: testCID("c2")]))
+
+        for (label, chain) in [("init", byInit), ("replay", byReplay)] {
+            let c1 = await chain.committers(of: testCID("c1"), directory: d)
+            XCTAssertEqual(c1, [h("p1")], label)
+            let c2 = await chain.committers(of: testCID("c2"), directory: d)
+            XCTAssertEqual(c2, [h("p2"), h("x")].sorted(), "\(label): both forks")
+            let unserved = await chain.committers(of: testCID("b1"), directory: e)
+            XCTAssertEqual(unserved, [], "\(label): unserved directory")
+            let unknown = await chain.committers(of: testCID("nope"), directory: d)
+            XCTAssertEqual(unknown, [], label)
+        }
+
+        // An orphan commits nothing until it connects.
+        _ = try await byReplay.replay(batch("r2", parent: "r1", height: 4, work: 2, commits: [d: testCID("c3")]))
+        let orphaned = await byReplay.committers(of: testCID("c3"), directory: d)
+        XCTAssertEqual(orphaned, [])
+        _ = try await byReplay.replay(batch("r1", parent: "p2", height: 3, work: 2))
+        let connected = await byReplay.committers(of: testCID("c3"), directory: d)
+        XCTAssertEqual(connected, [h("r2")])
+
+        // Serving a directory late indexes what was already held.
+        await byReplay.serveRuns(for: e)
+        let late = await byReplay.committers(of: testCID("b1"), directory: e)
+        XCTAssertEqual(late, [h("p1")])
+    }
+
     func testDirectoriesAreIndependentPartitions() async throws {
         let e = "Markets"
         let chain = makeChain(blocks: [
