@@ -269,6 +269,10 @@ public actor ChainState {
         tree.nearestCarrier(of: blockHash, directory: directory)
     }
 
+    public func committers(of child: String, directory: String) -> [String] {
+        tree.committers(of: child, directory: directory)
+    }
+
     @discardableResult
     public func applyParentRun(
         from parent: ChainTree,
