@@ -234,6 +234,8 @@ Action = (key: string, oldValue: string?, newValue: string?)
 
 **Validity:** `key != ""` AND (`oldValue != nil` OR `newValue != nil`)
 
+Keys under `child/` are child commitments (section 6.3).
+
 #### DepositAction
 
 ```
@@ -339,6 +341,7 @@ A genesis block `B` is valid if and only if ALL of the following hold:
     ```
     proveAndUpdateState(prevState, allActions) == postState
     ```
+14. Every child commitment in the transactions holds (section 6.3)
 
 Genesis authority: the Nexus genesis is the exact content-addressed block of
 its configured genesis CID, and the root chain admits no other. A child chain
@@ -390,6 +393,7 @@ dropped, or held — is section 9.9's header admission.
 12. Post-state correctness: the transactions' actions, plus the coinbase credit
     of exactly `M` to `B.rewardRecipient` when it is set and `M > 0`, applied to
     `prevState` produce `postState`
+13. Every child commitment in the transactions holds (section 6.3)
 
 **Nexus validation does not validate child blocks.** The `children` field is
 committed by the root hash, but every child is validated by its own chain
@@ -707,6 +711,27 @@ For each `Action(key, oldValue, newValue)`:
 - **Update**:
   - If `newValue != nil`: set `generalState[key] = newValue`
   - If `newValue == nil`: delete `generalState[key]`
+
+**Child commitment.** An action with key `child/X` and `newValue` `C@P`
+commits child block `C`, built on parent state `P`, into directory `X`. The
+block carrying it is valid only if its `children[X]` is exactly `C` and its
+`prevState` is exactly `P`. The value splits at its one `@` byte (bytes, not
+characters); a value with no `@`, more than one, or an empty side is invalid.
+`C` and `P` compare byte-exactly with the CID strings the block commits. A
+delete (`newValue == nil`) commits nothing. A `children[X]` entry with no
+action stays valid. Two commitments to one directory in a block are already a
+conflicting write to one key. Otherwise the action is an ordinary general-state
+write.
+
+The commitment weighs nothing: `children` remains the only weighed
+commitment, so work, fork choice, and `ChildBlockProof` are unchanged
+(section 9). Validation reads only the carrier's own `children` index and
+`prevState`; it never fetches `C`, so it does not check `C.parentState`. A
+carrier's run credits `C` only when `C.parentState` equals the carrier's
+`prevState` (section 9.10), so a commitment whose `P` is `C.parentState` can
+land only on a carrier whose run credits `C`. A carrier that satisfies a
+commitment whose `C` was built elsewhere is valid, and its run credits `C`
+nothing.
 
 ### 6.4 Deposit State Transitions
 
@@ -1456,7 +1481,9 @@ PoW-bound `children` index at import and carried on its durable block fact,
 so live import and replay see the same commitments. (The index is inside
 `maxBlockSize` (§3.5); until the validate tier applies that rule a
 not-yet-validated block's map is bounded only by what the boundary store will
-fetch, and it is retained through a later exclusion.)
+fetch, and it is retained through a later exclusion.) Their inverse — every
+connected block that commits a given child into `d`, forks included — is read
+through `committers(of:directory:)`, for hosted directories only.
 
 `runWork(P, d)` is the sum of credited work — grinds and attributed runs
 alike — over the connected blocks whose nearest carrier into `d` is `P`. Runs
