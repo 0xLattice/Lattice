@@ -23,7 +23,7 @@ final class StateDiffExactnessTests: XCTestCase {
     }
 
     /// How many places each CID holds in the tree under `header`, resolved whole.
-    private func places(_ header: AccountStateHeader, _ fetcher: Fetcher) async throws -> [String: Int] {
+    private func places<H: Header>(_ header: H, _ fetcher: Fetcher) async throws -> [String: Int] {
         var counts: [String: Int] = [:]
         func walk(_ h: any Header) {
             counts[h.rawCID, default: 0] += 1
@@ -113,11 +113,15 @@ final class StateDiffExactnessTests: XCTestCase {
         )
         let postHeader = try LatticeStateHeader(node: post)
         try await postHeader.storeMaterialized(createdBy: diff, storer: fetcher)
-        let whole = try? await LatticeStateHeader(rawCID: postHeader.rawCID).resolveRecursive(fetcher: fetcher)
-        XCTAssertNotNil(whole, "every node of the post-state is stored")
+        // Throws, naming the CID, when a node of the post-state is not stored.
+        _ = try await LatticeStateHeader(rawCID: postHeader.rawCID).resolveRecursive(fetcher: fetcher)
     }
 
+    /// Over seeded blocks of inserts, updates and deletes, each block's
+    /// whole post-state is stored by its diff alone, as admission stores
+    /// it, and each diff is the change in places of the whole tree.
     func testTheNettedDiffIsTheChangeInPlacesUnderSplitsAndMerges() async throws {
+        let empty = LatticeState.emptyState()
         for seed in UInt64(0)..<40 {
             var generator = SplitMix64(state: seed)
             let fetcher = StorableFetcher()
@@ -128,7 +132,10 @@ final class StateDiffExactnessTests: XCTestCase {
                 let k = key()
                 if balances[k] == nil { balances[k] = 1; dict = try dict.inserting(key: k, value: 1) }
             }
-            var header = try AccountStateHeader(node: dict)
+            var header = try LatticeStateHeader(node: LatticeState(
+                accountState: try AccountStateHeader(node: dict), generalState: empty.generalState,
+                depositState: empty.depositState, receiptState: empty.receiptState
+            ))
             try await header.storeRecursively(storer: fetcher)
             for round in 0..<12 {
                 var actions: [AccountAction] = []
@@ -146,11 +153,17 @@ final class StateDiffExactnessTests: XCTestCase {
                     }
                 }
                 let before = try await places(header, fetcher)
-                let (result, diff) = try await AccountStateHeader(rawCID: header.rawCID)
-                    .proveAndUpdateState(allAccountActions: actions, fetcher: fetcher)
-                try await storeLoaded(result, fetcher)
-                assertExact(diff, from: before, to: try await places(result, fetcher), "seed \(seed), round \(round)")
-                header = result
+                let resolved = try await LatticeStateHeader(rawCID: header.rawCID).resolve(fetcher: fetcher)
+                let prev = try XCTUnwrap(resolved.node)
+                let (post, diff) = try await prev.proveAndUpdateState(
+                    allAccountActions: actions, allActions: [], allDepositActions: [], allReceiptActions: [],
+                    allWithdrawalActions: [], transactionBodies: [], fetcher: fetcher
+                )
+                let next = try LatticeStateHeader(node: post)
+                try await next.storeMaterialized(createdBy: diff, storer: fetcher)
+                let after = try await places(LatticeStateHeader(rawCID: next.rawCID), fetcher)
+                assertExact(diff, from: before, to: after, "seed \(seed), round \(round)")
+                header = LatticeStateHeader(rawCID: next.rawCID)
             }
         }
     }

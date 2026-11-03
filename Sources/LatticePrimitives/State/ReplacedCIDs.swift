@@ -28,23 +28,43 @@ public struct StateDiff: Codable, Sendable, Equatable {
     }
 }
 
-/// The change from `old` to `new`: every node loaded under `new`, less
-/// every node loaded under `old`, netted per CID. A node the transition did
-/// not load it did not change, only kept or moved, so it is unloaded on
-/// both sides and drops out. Nothing pairs old and new children by place:
-/// a split or a merge moves nodes, and a pairing by property name meets
-/// unrelated nodes.
+/// The change from `old` to `new`, netted per CID. A child with one CID
+/// on both sides did not change, and is skipped; below a pair that
+/// differs, every node loaded on each side counts, down to where a side
+/// is not loaded. That is exact because a transform does not change what
+/// its proof did not load: such a node is kept or moved, unloaded on both
+/// sides, or, loaded, kept as the same loaded header (cashew's radix
+/// transforms reuse the children they leave alone), so it cancels.
 public func diffCIDs(old: any Header, new: any Header) -> StateDiff {
-    if old.rawCID == new.rawCID { return .empty }
     var net: [String: Int] = [:]
-    collectMaterialized(new, adding: 1, into: &net)
-    collectMaterialized(old, adding: -1, into: &net)
+    accumulateChange(from: old, to: new, into: &net)
     var replaced: [String: Int] = [:]
     var created: [String: Int] = [:]
     for (cid, change) in net {
         if change > 0 { created[cid] = change } else if change < 0 { replaced[cid] = -change }
     }
     return StateDiff(replaced: replaced, created: created)
+}
+
+private func accumulateChange(from old: any Header, to new: any Header, into net: inout [String: Int]) {
+    if old.rawCID == new.rawCID { return }
+    guard let oldNode = old.node, let newNode = new.node else {
+        // A split or a merge moved what stands here: what is loaded on
+        // either side below it is that side's whole change.
+        collectMaterialized(new, adding: 1, into: &net)
+        collectMaterialized(old, adding: -1, into: &net)
+        return
+    }
+    net[old.rawCID, default: 0] -= 1
+    net[new.rawCID, default: 0] += 1
+    for property in oldNode.properties().union(newNode.properties()) {
+        switch (oldNode.get(property: property), newNode.get(property: property)) {
+        case let (oldChild?, newChild?): accumulateChange(from: oldChild, to: newChild, into: &net)
+        case let (oldChild?, nil): collectMaterialized(oldChild, adding: -1, into: &net)
+        case let (nil, newChild?): collectMaterialized(newChild, adding: 1, into: &net)
+        case (nil, nil): continue
+        }
+    }
 }
 
 /// Adds `amount` for each place a loaded node holds under `header`.
