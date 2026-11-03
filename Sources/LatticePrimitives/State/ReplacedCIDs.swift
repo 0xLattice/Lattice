@@ -4,8 +4,9 @@ import cashew
 /// as far as the transition loaded it: `created[cid]` places gained,
 /// `replaced[cid]` places lost. `diffCIDs` nets each CID, so one CID is on
 /// one side at most. A `merge` of diffs sums them, and may hold a CID on
-/// both sides: a consumer nets `created - replaced` per CID, as
-/// `storeMaterialized(createdBy:)` does.
+/// both sides. A block's diff (`LatticeState`'s transition, and what a
+/// block fact keeps) is such a merge, so it is not netted: a consumer nets
+/// `created - replaced` per CID, as `storeMaterialized(createdBy:)` does.
 public struct StateDiff: Codable, Sendable, Equatable {
     public var replaced: [String: Int]
     public var created: [String: Int]

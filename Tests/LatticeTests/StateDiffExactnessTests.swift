@@ -117,7 +117,9 @@ final class StateDiffExactnessTests: XCTestCase {
         _ = try await LatticeStateHeader(rawCID: postHeader.rawCID).resolveRecursive(fetcher: fetcher)
     }
 
-    /// Over seeded blocks of inserts, updates and deletes, each block's
+    /// Over seeded blocks of inserts, updates and deletes of accounts and
+    /// general state, deposits, and withdrawals that spend earlier deposits
+    /// (the deposit tree transformed twice in one block), each block's
     /// whole post-state is stored by its diff alone, as admission stores
     /// it, and each diff is the change in places of the whole tree.
     func testTheNettedDiffIsTheChangeInPlacesUnderSplitsAndMerges() async throws {
@@ -137,6 +139,9 @@ final class StateDiffExactnessTests: XCTestCase {
                 depositState: empty.depositState, receiptState: empty.receiptState
             ))
             try await header.storeRecursively(storer: fetcher)
+            var general: [String: String] = [:]
+            var deposits: [String: (demander: String, nonce: UInt128, amount: UInt64)] = [:]
+            var spent = Set<String>()
             for round in 0..<12 {
                 var actions: [AccountAction] = []
                 var touched = Set<String>()
@@ -152,12 +157,47 @@ final class StateDiffExactnessTests: XCTestCase {
                         balances[k, default: 0] += d
                     }
                 }
+                var generalActions: [Action] = []
+                var named = Set<String>()
+                for _ in 0..<Int.random(in: 0...5, using: &generator) {
+                    let k = key()
+                    guard named.insert(k).inserted else { continue }
+                    let held = general[k]
+                    let value: String? = held != nil && Bool.random(using: &generator)
+                        ? nil : String(UInt8.random(in: 0...9, using: &generator))
+                    guard value != held else { continue }
+                    generalActions.append(Action(key: k, oldValue: held, newValue: value))
+                    general[k] = value
+                }
+                // Withdrawals spend deposits of earlier blocks; deposits add
+                // keys no block has used.
+                var withdrawals: [WithdrawalAction] = []
+                for (k, d) in deposits.sorted(by: { $0.key < $1.key }) where !spent.contains(k) {
+                    guard UInt8.random(in: 0..<4, using: &generator) == 0 else { continue }
+                    withdrawals.append(WithdrawalAction(
+                        withdrawer: d.demander, nonce: d.nonce, demander: d.demander,
+                        amountDemanded: 1, amountWithdrawn: d.amount
+                    ))
+                    spent.insert(k)
+                }
+                var depositActions: [DepositAction] = []
+                for _ in 0..<Int.random(in: 0...5, using: &generator) {
+                    let demander = key()
+                    let nonce = UInt128(UInt8.random(in: 0..<2, using: &generator))
+                    let k = DepositKey(nonce: nonce, demander: demander, amountDemanded: 1).description
+                    guard deposits[k] == nil else { continue }
+                    let amount = UInt64.random(in: 1...9, using: &generator)
+                    depositActions.append(DepositAction(
+                        nonce: nonce, demander: demander, amountDemanded: 1, amountDeposited: amount
+                    ))
+                    deposits[k] = (demander, nonce, amount)
+                }
                 let before = try await places(header, fetcher)
                 let resolved = try await LatticeStateHeader(rawCID: header.rawCID).resolve(fetcher: fetcher)
                 let prev = try XCTUnwrap(resolved.node)
                 let (post, diff) = try await prev.proveAndUpdateState(
-                    allAccountActions: actions, allActions: [], allDepositActions: [], allReceiptActions: [],
-                    allWithdrawalActions: [], transactionBodies: [], fetcher: fetcher
+                    allAccountActions: actions, allActions: generalActions, allDepositActions: depositActions,
+                    allReceiptActions: [], allWithdrawalActions: withdrawals, transactionBodies: [], fetcher: fetcher
                 )
                 let next = try LatticeStateHeader(node: post)
                 try await next.storeMaterialized(createdBy: diff, storer: fetcher)
