@@ -28,12 +28,16 @@ public func diffCIDs(old: any Header, new: any Header) -> StateDiff {
     var replaced: [String: Int] = [:]
     var created: [String: Int] = [:]
 
-    if old.node != nil { replaced[old.rawCID, default: 0] += 1 }
-    if new.node != nil { created[new.rawCID, default: 0] += 1 }
-
+    // Children pair by property name, so a node a split or a merge moved
+    // meets an unrelated node: one side loaded, the other not. What the
+    // proof did not load the transform did not change, only kept or moved,
+    // so it is unloaded on both sides and cancels; what is loaded on the one
+    // side is all of that side's change below this place.
     guard let oldNode = old.node, let newNode = new.node else {
-        return StateDiff(replaced: replaced, created: created)
+        return StateDiff(replaced: collectMaterialized(old), created: collectMaterialized(new))
     }
+    replaced[old.rawCID, default: 0] += 1
+    created[new.rawCID, default: 0] += 1
 
     for property in oldNode.properties() {
         guard let oldChild = oldNode.get(property: property) else { continue }
