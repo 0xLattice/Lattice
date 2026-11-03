@@ -73,6 +73,50 @@ final class StateDiffExactnessTests: XCTestCase {
         assertExact(diff, from: before, to: try await places(result, fetcher), "the split's diff")
     }
 
+    /// The mirror: two deletions merge `b`, `b`, `b` back into `bbb`, and
+    /// the nodes that were between go.
+    func testAMergeReplacesEveryNodeBetweenItAndWhatMovedUp() async throws {
+        let fetcher = StorableFetcher()
+        var dict = AccountState()
+        for key in ["bbba", "bbbb", "baba", "bbab"] { dict = try dict.inserting(key: key, value: 1) }
+        let header = try AccountStateHeader(node: dict)
+        try await header.storeRecursively(storer: fetcher)
+        let before = try await places(header, fetcher)
+        let (result, diff) = try await AccountStateHeader(rawCID: header.rawCID).proveAndUpdateState(
+            allAccountActions: [AccountAction(owner: "baba", delta: -1), AccountAction(owner: "bbab", delta: -1)],
+            fetcher: fetcher
+        )
+        try await storeLoaded(result, fetcher)
+        assertExact(diff, from: before, to: try await places(result, fetcher), "the merge's diff")
+        XCTAssertTrue(Set(diff.created.keys).isDisjoint(with: diff.replaced.keys), "a diff is netted per CID")
+    }
+
+    /// A block's whole post-state, stored by its diff alone, as admission
+    /// stores it (`storeMaterialized(createdBy:)`), resolves whole from the
+    /// store, when the block's insertions split a node.
+    func testAPostStateStoredByItsDiffResolvesWholeAfterASplit() async throws {
+        let fetcher = StorableFetcher()
+        let account = try AccountStateHeader(node: AccountState().inserting(key: "bbba", value: 1).inserting(key: "bbbb", value: 1))
+        let empty = LatticeState.emptyState()
+        let state = LatticeState(
+            accountState: account, generalState: empty.generalState,
+            depositState: empty.depositState, receiptState: empty.receiptState
+        )
+        let header = try LatticeStateHeader(node: state)
+        try await header.storeRecursively(storer: fetcher)
+        let resolved = try await LatticeStateHeader(rawCID: header.rawCID).resolve(fetcher: fetcher)
+        let prev = try XCTUnwrap(resolved.node)
+        let (post, diff) = try await prev.proveAndUpdateState(
+            allAccountActions: [AccountAction(owner: "baba", delta: 1), AccountAction(owner: "bbab", delta: 1)],
+            allActions: [], allDepositActions: [], allReceiptActions: [], allWithdrawalActions: [],
+            transactionBodies: [], fetcher: fetcher
+        )
+        let postHeader = try LatticeStateHeader(node: post)
+        try await postHeader.storeMaterialized(createdBy: diff, storer: fetcher)
+        let whole = try? await LatticeStateHeader(rawCID: postHeader.rawCID).resolveRecursive(fetcher: fetcher)
+        XCTAssertNotNil(whole, "every node of the post-state is stored")
+    }
+
     func testTheNettedDiffIsTheChangeInPlacesUnderSplitsAndMerges() async throws {
         for seed in UInt64(0)..<40 {
             var generator = SplitMix64(state: seed)

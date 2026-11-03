@@ -1,5 +1,11 @@
 import cashew
 
+/// How a transition changed the places each node holds in the state tree,
+/// as far as the transition loaded it: `created[cid]` places gained,
+/// `replaced[cid]` places lost. `diffCIDs` nets each CID, so one CID is on
+/// one side at most. A `merge` of diffs sums them, and may hold a CID on
+/// both sides: a consumer nets `created - replaced` per CID, as
+/// `storeMaterialized(createdBy:)` does.
 public struct StateDiff: Codable, Sendable, Equatable {
     public var replaced: [String: Int]
     public var created: [String: Int]
@@ -22,53 +28,30 @@ public struct StateDiff: Codable, Sendable, Equatable {
     }
 }
 
+/// The change from `old` to `new`: every node loaded under `new`, less
+/// every node loaded under `old`, netted per CID. A node the transition did
+/// not load it did not change, only kept or moved, so it is unloaded on
+/// both sides and drops out. Nothing pairs old and new children by place:
+/// a split or a merge moves nodes, and a pairing by property name meets
+/// unrelated nodes.
 public func diffCIDs(old: any Header, new: any Header) -> StateDiff {
     if old.rawCID == new.rawCID { return .empty }
-
+    var net: [String: Int] = [:]
+    collectMaterialized(new, adding: 1, into: &net)
+    collectMaterialized(old, adding: -1, into: &net)
     var replaced: [String: Int] = [:]
     var created: [String: Int] = [:]
-
-    // Children pair by property name, so a node a split or a merge moved
-    // meets an unrelated node: one side loaded, the other not. What the
-    // proof did not load the transform did not change, only kept or moved,
-    // so it is unloaded on both sides and cancels; what is loaded on the one
-    // side is all of that side's change below this place.
-    guard let oldNode = old.node, let newNode = new.node else {
-        return StateDiff(replaced: collectMaterialized(old), created: collectMaterialized(new))
+    for (cid, change) in net {
+        if change > 0 { created[cid] = change } else if change < 0 { replaced[cid] = -change }
     }
-    replaced[old.rawCID, default: 0] += 1
-    created[new.rawCID, default: 0] += 1
-
-    for property in oldNode.properties() {
-        guard let oldChild = oldNode.get(property: property) else { continue }
-        if let newChild = newNode.get(property: property) {
-            if oldChild.rawCID != newChild.rawCID {
-                let sub = diffCIDs(old: oldChild, new: newChild)
-                for (cid, count) in sub.replaced { replaced[cid, default: 0] += count }
-                for (cid, count) in sub.created { created[cid, default: 0] += count }
-            }
-        } else {
-            for (cid, count) in collectMaterialized(oldChild) { replaced[cid, default: 0] += count }
-        }
-    }
-
-    for property in newNode.properties() {
-        if oldNode.get(property: property) == nil,
-           let newChild = newNode.get(property: property) {
-            for (cid, count) in collectMaterialized(newChild) { created[cid, default: 0] += count }
-        }
-    }
-
     return StateDiff(replaced: replaced, created: created)
 }
 
-private func collectMaterialized(_ header: any Header) -> [String: Int] {
-    guard let node = header.node else { return [:] }
-    var cids: [String: Int] = [header.rawCID: 1]
+/// Adds `amount` for each place a loaded node holds under `header`.
+private func collectMaterialized(_ header: any Header, adding amount: Int, into counts: inout [String: Int]) {
+    guard let node = header.node else { return }
+    counts[header.rawCID, default: 0] += amount
     for property in node.properties() {
-        if let child = node.get(property: property) {
-            for (cid, count) in collectMaterialized(child) { cids[cid, default: 0] += count }
-        }
+        if let child = node.get(property: property) { collectMaterialized(child, adding: amount, into: &counts) }
     }
-    return cids
 }
