@@ -29,16 +29,19 @@ public struct StateDiff: Codable, Sendable, Equatable {
     }
 }
 
-/// The change from `old` to `new`, netted per CID. A child with one CID
-/// on both sides did not change, and is skipped; below a pair that
-/// differs, every node loaded on each side counts, down to where a side
-/// is not loaded. That is exact because a transform does not change what
-/// its proof did not load: such a node is kept or moved, unloaded on both
-/// sides, or, loaded, kept as the same loaded header (cashew's radix
-/// transforms reuse the children they leave alone), so it cancels.
+/// The change from `old` to `new`, netted per CID. Children are paired by
+/// the key they end at, not by the character they hang under: a split or
+/// a merge changes a node's prefix, and then one character names different
+/// keys on the two sides. A pair with one CID at one key is one place on
+/// both sides, and is skipped; one CID at different keys is two places.
+/// A node at a key the other side has no node at counts on its side, and
+/// so does everything loaded under a pair where either side is not loaded.
+/// That is exact because a transform does not change what its proof did
+/// not load: such a node keeps its keys, so it stands at the same key on
+/// both sides, unloaded, and cancels.
 public func diffCIDs(old: any Header, new: any Header) -> StateDiff {
     var net: [String: Int] = [:]
-    accumulateChange(from: old, to: new, into: &net)
+    accumulateChange(from: old, at: "", to: new, at: "", into: &net)
     var replaced: [String: Int] = [:]
     var created: [String: Int] = [:]
     for (cid, change) in net {
@@ -47,24 +50,61 @@ public func diffCIDs(old: any Header, new: any Header) -> StateDiff {
     return StateDiff(replaced: replaced, created: created)
 }
 
-private func accumulateChange(from old: any Header, to new: any Header, into net: inout [String: Int]) {
-    if old.rawCID == new.rawCID { return }
+/// `oldBase` and `newBase` are the keys above `old` and `new`, so each
+/// ends at its base and its radix prefix.
+private func accumulateChange(
+    from old: any Header, at oldBase: String, to new: any Header, at newBase: String,
+    into net: inout [String: Int]
+) {
+    if old.rawCID == new.rawCID && oldBase == newBase { return }
     guard let oldNode = old.node, let newNode = new.node else {
-        // A split or a merge moved what stands here: what is loaded on
-        // either side below it is that side's whole change.
         collectMaterialized(new, adding: 1, into: &net)
         collectMaterialized(old, adding: -1, into: &net)
         return
     }
-    net[old.rawCID, default: 0] -= 1
-    net[new.rawCID, default: 0] += 1
-    for property in oldNode.properties().union(newNode.properties()) {
-        switch (oldNode.get(property: property), newNode.get(property: property)) {
-        case let (oldChild?, newChild?): accumulateChange(from: oldChild, to: newChild, into: &net)
-        case let (oldChild?, nil): collectMaterialized(oldChild, adding: -1, into: &net)
-        case let (nil, newChild?): collectMaterialized(newChild, adding: 1, into: &net)
-        case (nil, nil): continue
+    let oldEnd = oldBase + ((oldNode as? any RadixNode)?.prefix ?? "")
+    let newEnd = newBase + ((newNode as? any RadixNode)?.prefix ?? "")
+    if oldEnd == newEnd {
+        net[old.rawCID, default: 0] -= 1
+        net[new.rawCID, default: 0] += 1
+        for property in oldNode.properties().union(newNode.properties()) {
+            switch (oldNode.get(property: property), newNode.get(property: property)) {
+            case let (oldChild?, newChild?):
+                accumulateChange(from: oldChild, at: oldEnd, to: newChild, at: newEnd, into: &net)
+            case let (oldChild?, nil): collectMaterialized(oldChild, adding: -1, into: &net)
+            case let (nil, newChild?): collectMaterialized(newChild, adding: 1, into: &net)
+            case (nil, nil): continue
+            }
         }
+    } else if oldEnd.hasPrefix(newEnd) {
+        // A split: the new node branches above the old one, which stands
+        // under the new child toward its key.
+        net[new.rawCID, default: 0] += 1
+        let toward = String(oldEnd.dropFirst(newEnd.count).prefix(1))
+        for property in newNode.properties() where property != toward {
+            if let child = newNode.get(property: property) { collectMaterialized(child, adding: 1, into: &net) }
+        }
+        if let newChild = newNode.get(property: toward) {
+            accumulateChange(from: old, at: oldBase, to: newChild, at: newEnd, into: &net)
+        } else {
+            collectMaterialized(old, adding: -1, into: &net)
+        }
+    } else if newEnd.hasPrefix(oldEnd) {
+        // A merge: the old node branched above the new one, which stands
+        // where the old child toward its key did.
+        net[old.rawCID, default: 0] -= 1
+        let toward = String(newEnd.dropFirst(oldEnd.count).prefix(1))
+        for property in oldNode.properties() where property != toward {
+            if let child = oldNode.get(property: property) { collectMaterialized(child, adding: -1, into: &net) }
+        }
+        if let oldChild = oldNode.get(property: toward) {
+            accumulateChange(from: oldChild, at: oldEnd, to: new, at: newBase, into: &net)
+        } else {
+            collectMaterialized(new, adding: 1, into: &net)
+        }
+    } else {
+        collectMaterialized(new, adding: 1, into: &net)
+        collectMaterialized(old, adding: -1, into: &net)
     }
 }
 

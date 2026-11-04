@@ -91,6 +91,31 @@ final class StateDiffExactnessTests: XCTestCase {
         XCTAssertTrue(Set(diff.created.keys).isDisjoint(with: diff.replaced.keys), "a diff is netted per CID")
     }
 
+    /// Inserting `aab` splits `aaa` into `aa` with `a` and `b` below. The
+    /// new leaf `b` = 3 equals the leaf `aaab` keeps under `aaa`, which the
+    /// split moves down unloaded: one character, `b`, names `aaab` on the
+    /// old side and `aab` on the new, and the leaf gains a place.
+    func testALeafEqualToOneASplitMovesGainsAPlace() async throws {
+        let fetcher = StorableFetcher()
+        let header = try GeneralStateHeader(node: GeneralState().inserting(key: "aaa", value: "1").inserting(key: "aaab", value: "3"))
+        try await header.storeRecursively(storer: fetcher)
+        let leaf = try VolumeRadixHeaderImpl<String>(node: VolumeRadixNodeImpl<String>(prefix: "b", value: "3", children: [:])).rawCID
+        let before = try await places(header, fetcher)
+        let (inserted, diff) = try await GeneralStateHeader(rawCID: header.rawCID).proveAndUpdateState(
+            allActions: [Action(key: "aab", oldValue: nil, newValue: "3")], fetcher: fetcher
+        )
+        try await storeLoaded(inserted, fetcher)
+        let after = try await places(inserted, fetcher)
+        XCTAssertEqual(after[leaf], 2)
+        assertExact(diff, from: before, to: after, "the split's diff")
+        // `aaab` changes: the leaf keeps the place `aab` holds.
+        let (updated, next) = try await GeneralStateHeader(rawCID: inserted.rawCID).proveAndUpdateState(
+            allActions: [Action(key: "aaab", oldValue: "3", newValue: "2")], fetcher: fetcher
+        )
+        try await storeLoaded(updated, fetcher)
+        assertExact(next, from: after, to: try await places(updated, fetcher), "the update's diff")
+    }
+
     /// A block's whole post-state, stored by its diff alone, as admission
     /// stores it (`storeMaterialized(createdBy:)`), resolves whole from the
     /// store, when the block's insertions split a node.
