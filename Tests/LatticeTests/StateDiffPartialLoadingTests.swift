@@ -31,7 +31,7 @@ private func oraclePlaces(_ root: any Header) -> [String: Int] {
 private func storeAllLoaded(_ header: any Header, _ storer: any VolumeStorer) async throws {
     guard let node = header.node else { return }
     if let volume = header as? any Volume { try await volume.store(storer: storer) }
-    for p in node.properties() { if let c = node.get(property: p) { try await storeAllLoaded(c, storer) } }
+    for p in node.properties().sorted() { if let c = node.get(property: p) { try await storeAllLoaded(c, storer) } }
 }
 
 /// Randomly unloads subtrees (keeps CIDs).
@@ -42,7 +42,7 @@ private func stripTyped<H: Header>(_ h: H, _ rng: inout RNG, _ p: Double, _ keep
     guard let node = h.node else { return h }
     if !keepRoot, Double.random(in: 0..<1, using: &rng) < p { return H(rawCID: h.rawCID) }
     var props: [String: any Header] = [:]
-    for prop in node.properties() { if let c = node.get(property: prop) { props[prop] = strip(c, &rng, p) } }
+    for prop in node.properties().sorted() { if let c = node.get(property: prop) { props[prop] = strip(c, &rng, p) } }
     let rebuilt = try! H(node: node.set(properties: props))
     precondition(rebuilt.rawCID == h.rawCID, "strip changed CID")
     return rebuilt
