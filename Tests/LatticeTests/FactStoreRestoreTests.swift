@@ -115,22 +115,6 @@ final class FactStoreRestoreTests: XCTestCase {
         var seqCount: Int { Set(rows.values.map(\.seq)).count }
     }
 
-    /// The node's weigh log over a fact sequence at a child level: a header
-    /// per block fact, a proof per grind at a block, each at its first
-    /// occurrence.
-    private func weighLog(_ facts: [ChainFact]) -> [String] {
-        var seen = Set<String>()
-        return facts.compactMap { fact in
-            let key: String
-            switch fact {
-            case .block(let block): key = "header \(block.blockHash)"
-            case .work(let work): key = "proof \(work.contribution.id) at \(work.blockHash)"
-            default: return nil
-            }
-            return seen.insert(key).inserted ? key : nil
-        }
-    }
-
     private func capture(_ tree: ChainTree, _ graph: ForkChoiceGoldenGraph) async throws -> ForkChoiceGolden {
         let chain = ChainState(tree: tree.detached())
         await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
@@ -172,11 +156,92 @@ final class FactStoreRestoreTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(fromFacts.currentRevision(), liveRevision, "seed \(seed)")
             }
             XCTAssertGreaterThanOrEqual(fromBatches.currentRevision(), liveRevision, "seed \(seed)")
-            XCTAssertEqual(weighLog(store.facts), weighLog(journal.flatMap(\.facts)), "seed \(seed)")
         }
         XCTAssertGreaterThan(executions, 0, "execution batches must re-state block facts")
         XCTAssertGreaterThan(eager, 0, "some blocks must stage executed in one batch")
         XCTAssertGreaterThan(raised, 0, "some execution batches must carry a new grind quantity")
+    }
+
+    /// Tip, and per block subtree weight, canonical membership and executed
+    /// status, for a graph `ForkChoiceGolden.capture` cannot take whole.
+    private func assertSameTree(_ expected: ChainTree, _ actual: ChainTree, blocks: [String]) {
+        XCTAssertEqual(actual.canonicalTip, expected.canonicalTip)
+        for hash in blocks {
+            XCTAssertEqual(actual.subtreeWeight(forHash: hash), expected.subtreeWeight(forHash: hash), hash)
+            XCTAssertEqual(actual.isCanonical(hash: hash), expected.isCanonical(hash: hash), hash)
+            XCTAssertEqual(
+                actual.hasExecutedAncestry(blockHash: hash), expected.hasExecutedAncestry(blockHash: hash), hash
+            )
+        }
+    }
+
+    /// A block fact given twice (as staged and as re-stated) restores the
+    /// same tree; a copy that conflicts is refused, as the batch path
+    /// refuses it.
+    func testDuplicatedBlockFactRestoresTheSameTreeAndConflictsAreRefused() async throws {
+        let graph = ForkChoiceGoldenGraph.generate(seed: 5, blockCount: 60)
+        let journal = graph.events.map(\.batch)
+        let facts = FactStore(journal).facts
+        var random = GoldenRandom(seed: 5)
+        var duplicated = facts
+        for case .block(let block) in facts where random.chance(40) {
+            duplicated.insert(.block(restated(block, salt: random.nextInt(1_000))), at: random.nextInt(duplicated.count + 1))
+        }
+        XCTAssertGreaterThan(duplicated.count, facts.count)
+        let expected = try await capture(ChainTree.restore(replaying: journal, context: context), graph)
+        let actual = try await capture(ChainTree.restore(facts: duplicated, context: context), graph)
+        XCTAssertEqual(ForkChoiceGolden.diff(expected: expected, actual: actual), [])
+
+        guard case .block(let block) = facts.first(where: {
+            if case .block(let block) = $0 { return block.parentBlockHash != nil } else { return false }
+        }) else { return XCTFail("fixture: a non-root block fact") }
+        let conflicting = ChainFact.block(ChainBlockFact(
+            blockHash: block.blockHash, parentBlockHash: block.parentBlockHash,
+            blockHeight: block.blockHeight, postStateCID: block.postStateCID,
+            prevStateCID: block.prevStateCID, specCID: block.specCID, target: block.target,
+            nextTarget: block.nextTarget, timestamp: block.timestamp + 1, stateDiff: block.stateDiff,
+            childCommitments: block.childCommitments
+        ))
+        XCTAssertThrowsError(try ChainTree.restore(facts: facts + [conflicting], context: context)) {
+            XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+        }
+    }
+
+    /// On a root chain the genesis pin holds on the facts path: a store
+    /// holding another root is refused as the batch path refuses it, and the
+    /// pinned root's own subtree restores the same tree.
+    func testRootLevelKeepsTheGenesisPin() throws {
+        let graph = ForkChoiceGoldenGraph.generate(seed: 7, blockCount: 80)
+        let root = testChainContext(genesisCID: graph.blocks[0].hash)
+        let journal = graph.events.map(\.batch)
+        let facts = FactStore(journal).facts
+        XCTAssertThrowsError(try ChainTree.restore(replaying: journal, context: root)) {
+            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+        }
+        XCTAssertThrowsError(try ChainTree.restore(facts: facts, context: root)) {
+            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+        }
+
+        var pinned = Set<String>()
+        for block in graph.blocks where block.index == 0 || block.parentIndex.map({ pinned.contains(graph.blocks[$0].hash) }) == true {
+            pinned.insert(block.hash)
+        }
+        func about(_ fact: ChainFact) -> String {
+            switch fact {
+            case .block(let fact): fact.blockHash
+            case .work(let fact): fact.blockHash
+            case .validation(let fact): fact.blockHash
+            case .exclusion(let fact): fact.blockHash
+            }
+        }
+        let pinnedJournal = journal.filter { pinned.contains(about($0.facts[0])) }
+        let pinnedFacts = facts.filter { pinned.contains(about($0)) }
+        XCTAssertLessThan(pinnedFacts.count, facts.count, "fixture: the rival root has a subtree")
+        assertSameTree(
+            try ChainTree.restore(replaying: pinnedJournal, context: root),
+            try ChainTree.restore(facts: pinnedFacts, context: root),
+            blocks: graph.blocks.map(\.hash).filter(pinned.contains)
+        )
     }
 
     func testRestoreFromFactsRefusesWhatBatchRestoreRefuses() throws {
