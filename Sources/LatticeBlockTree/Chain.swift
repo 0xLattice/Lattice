@@ -724,6 +724,62 @@ public struct ChainTree: Sendable {
         )
     }
 
+    /// `restore(replaying:)` from a store that keeps each distinct fact once,
+    /// by its `id`, rather than the batches that staged them. The facts may
+    /// come in any order.
+    ///
+    /// Replay needs no batch boundary but one: a block enters the graph with
+    /// one positive work contribution for it. So each block fact replays with
+    /// the first work fact for its block, and every other fact alone.
+    ///
+    /// Each fact is expected once. A block fact given twice (say, as staged
+    /// and as re-stated with its `stateDiff`) replays twice with that same
+    /// work fact, exactly as the batch path replays a re-statement: copies
+    /// that agree on the consensus fields add nothing, and copies that
+    /// conflict are refused. So keeping either copy restores the same tree.
+    public static func restore(
+        facts: [ChainFact],
+        revisionFloor: UInt64 = 0,
+        context: ChainRuntimeContext,
+        specs: [ChainSpec] = [],
+        parent: ChainTree? = nil
+    ) throws -> ChainTree {
+        try restore(
+            replaying: replayBatches(of: facts), revisionFloor: revisionFloor,
+            context: context, specs: specs, parent: parent
+        )
+    }
+
+    /// The batches `restore(facts:)` replays. Blocks are matched to work by
+    /// `standardCID`, as `TrustedImportBatch` matches them. A block fact with
+    /// no work fact for it replays alone, which restore refuses as corrupt.
+    private static func replayBatches(of facts: [ChainFact]) -> [BlockImportBatch] {
+        func key(_ hash: String) -> String { standardCID(hash) ?? hash }
+        var firstWork: [String: Int] = [:]
+        for (index, fact) in facts.enumerated() {
+            guard case .work(let work) = fact else { continue }
+            let block = key(work.blockHash)
+            if firstWork[block] == nil { firstWork[block] = index }
+        }
+        var paired = [Bool](repeating: false, count: facts.count)
+        var batches: [BlockImportBatch] = []
+        batches.reserveCapacity(facts.count)
+        for fact in facts {
+            guard case .block(let block) = fact else { continue }
+            if let work = firstWork[key(block.blockHash)] {
+                paired[work] = true
+                batches.append(BlockImportBatch(facts: [fact, facts[work]]))
+            } else {
+                batches.append(BlockImportBatch(facts: [fact]))
+            }
+        }
+        for (index, fact) in facts.enumerated() where !paired[index] {
+            if case .block = fact { continue }
+            batches.append(BlockImportBatch(facts: [fact]))
+        }
+        return batches
+    }
+
     /// A tree with no chain context — tests and the superseded actor path's
     /// internals only; it pins nothing.
     package static func restoreWithoutContext(

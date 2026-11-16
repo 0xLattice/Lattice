@@ -162,8 +162,8 @@ public struct BlockImportBatch: Codable, Sendable, Equatable {
     /// exposing general batch construction would let a caller turn wire claims
     /// into consensus facts. Execution is different in kind: it is a judgment
     /// the node's own validate walk reaches locally, and the node must be able
-    /// to make it durable, because the durable batch log is the only recovery
-    /// authority and an execution the log forgets is an execution that never
+    /// to make it durable, because its durable facts are the only recovery
+    /// authority and an execution they forget is an execution that never
     /// happened.
     public static func validation(blockHash: String) -> BlockImportBatch {
         BlockImportBatch(facts: [

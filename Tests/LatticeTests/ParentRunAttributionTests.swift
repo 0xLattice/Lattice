@@ -883,9 +883,14 @@ final class ParentRunAttributionTests: XCTestCase {
                     child.applyParentRun(from: parent, directory: d, parentBlocks: [], held: Set(reported))
                 }
                 let restored = try ChainTree.restore(replaying: childSoFar, context: context, parent: parent)
+                let fromFacts = try ChainTree.restore(
+                    facts: childSoFar.flatMap(\.facts), context: context, parent: parent
+                )
                 for name in childNames {
                     XCTAssertEqual(weight(child, name), weight(restored, name),
                                    "trial \(trial) step \(step): \(name)")
+                    XCTAssertEqual(weight(fromFacts, name), weight(restored, name),
+                                   "restore(facts:), trial \(trial) step \(step): \(name)")
                 }
             }
         }
