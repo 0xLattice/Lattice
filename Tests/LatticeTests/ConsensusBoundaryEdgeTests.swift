@@ -229,7 +229,7 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
             let proof = try await ChildBlockProof.generate(
                 rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
             )
-            return try await proof.verifySecuringWork(child: child, chainPath: childPath).get()
+            return try proof.verifySecuringWork(child: child, chainPath: childPath).get()
         }
         let g1 = try await childGenesis(nonce: 1)
         let g2 = try await childGenesis(nonce: 2)

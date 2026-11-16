@@ -627,7 +627,7 @@ final class CoinbaseRecipientAdmissionTests: XCTestCase {
             let proof = try await ChildBlockProof.generate(
                 rootHeader: try BlockHeader(node: twin), childDirectory: "Child", fetcher: fetcher
             )
-            let verified = await proof.verifySecuringWork(
+            let verified = proof.verifySecuringWork(
                 child: candidate, chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
             )
             guard case .failure(let failure) = verified else {

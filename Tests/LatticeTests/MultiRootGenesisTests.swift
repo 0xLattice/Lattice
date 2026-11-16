@@ -102,7 +102,7 @@ final class MultiRootGenesisTests: XCTestCase {
             let proof = try await ChildBlockProof.generate(
                 rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
             )
-            return try await proof.verifySecuringWork(child: child, chainPath: childContext.path).get()
+            return try proof.verifySecuringWork(child: child, chainPath: childContext.path).get()
         }
 
         let hard = easy / UInt256(4)

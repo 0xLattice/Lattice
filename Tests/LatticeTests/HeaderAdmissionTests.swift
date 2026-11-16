@@ -334,7 +334,7 @@ final class HeaderAdmissionTests: XCTestCase {
         let proof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
-        let evidence = try await proof.verifySecuringWork(child: childBlock, chainPath: childContext.path).get()
+        let evidence = try proof.verifySecuringWork(child: childBlock, chainPath: childContext.path).get()
         XCTAssertNotNil(evidence.contribution, "the share clears the child's target")
         var child = try await TreeDriver.tree(genesis: childGenesis, context: childContext, fetcher: fetcher)
         let before = try XCTUnwrap(child.subtreeWeight(forHash: try cid(childGenesis)))
@@ -680,7 +680,7 @@ final class HeaderAdmissionTests: XCTestCase {
 
     func testADepthTwoShareWeighsOnlyTheGrandchildItClears() async throws {
         let f = try await depthTwo()
-        let evidence = try await f.proof.verifySecuringWork(child: f.leaf, chainPath: leafContext.path).get()
+        let evidence = try f.proof.verifySecuringWork(child: f.leaf, chainPath: leafContext.path).get()
         var leafTree = try await TreeDriver.tree(genesis: f.leafGenesis, context: leafContext, fetcher: f.fetcher)
         let inserted = try await TreeDriver.insert(f.leaf, into: &leafTree, fetcher: f.fetcher, evidence: evidence)
         XCTAssertEqual(kinds(inserted.update?.batches), [["block", "work"]])
@@ -689,7 +689,7 @@ final class HeaderAdmissionTests: XCTestCase {
         let middleHop = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: f.root), childDirectory: "Middle", fetcher: f.fetcher
         )
-        let middleEvidence = try await middleHop.verifySecuringWork(child: f.middle, chainPath: middleContext.path).get()
+        let middleEvidence = try middleHop.verifySecuringWork(child: f.middle, chainPath: middleContext.path).get()
         XCTAssertNil(middleEvidence.contribution, "the share misses Middle")
         var middleTree = try await TreeDriver.tree(genesis: f.middleGenesis, context: middleContext, fetcher: f.fetcher)
         let middleInserted = try await TreeDriver.insert(f.middle, into: &middleTree, fetcher: f.fetcher, evidence: middleEvidence)
@@ -706,7 +706,7 @@ final class HeaderAdmissionTests: XCTestCase {
     /// `prevState` breaks the path structurally: a drop, not blame.
     func testAnIntermediateCarrierParentStateMismatchIsADropNotBlame() async throws {
         let f = try await depthTwo(middleParentState: LatticeStateHeader(rawCID: testCID("not-the-carrier-prev")))
-        guard case .failure(let failure) = await f.proof.verifySecuringWork(
+        guard case .failure(let failure) = f.proof.verifySecuringWork(
             child: f.leaf, chainPath: leafContext.path
         ) else {
             return XCTFail("a broken path secures nothing")

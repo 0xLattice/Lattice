@@ -116,7 +116,7 @@ final class CreditLadderDepthTests: XCTestCase {
             proof = proof.composing(hop: hop)
         }
 
-        let verification = await proof.verifySecuringWork(
+        let verification = proof.verifySecuringWork(
             child: terminal,
             chainPath: [DEFAULT_ROOT_DIRECTORY] + directories
         )
@@ -201,7 +201,7 @@ final class CreditLadderDepthTests: XCTestCase {
             "fixture must MISS the terminal target"
         )
 
-        let verification = await proof.verifySecuringWork(
+        let verification = proof.verifySecuringWork(
             child: terminal,
             chainPath: [DEFAULT_ROOT_DIRECTORY, "L0"]
         )

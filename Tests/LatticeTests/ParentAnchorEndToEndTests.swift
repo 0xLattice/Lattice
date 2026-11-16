@@ -218,7 +218,7 @@ private final class World {
         let proof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
-        return try await proof.verifySecuringWork(child: child, chainPath: childPath).get()
+        return try proof.verifySecuringWork(child: child, chainPath: childPath).get()
     }
 
     func bootstrapChild(_ genesis: Block, carrierParent: Block) async throws -> ChainTree {

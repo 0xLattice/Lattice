@@ -328,7 +328,7 @@ enum BlockImport {
         child: Block,
         context: ChainRuntimeContext
     ) async -> Result<VerifiedChildEvidence, BlockImportError> {
-        await package.proof.verifySecuringWork(
+        package.proof.verifySecuringWork(
             child: child,
             chainPath: context.path
         ).mapError(mapProofFailure)

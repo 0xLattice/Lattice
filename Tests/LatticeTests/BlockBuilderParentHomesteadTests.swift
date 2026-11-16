@@ -47,7 +47,7 @@ final class BlockBuilderParentHomesteadTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let result = await proof.verifySecuringWork(
+        let result = proof.verifySecuringWork(
             child: childGenesis,
             chainPath: ["Nexus", "Child"]
         )

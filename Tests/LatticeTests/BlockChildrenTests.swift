@@ -154,7 +154,7 @@ final class BlockChildrenTests: XCTestCase {
         let present = try await ChildBlockProof.generate(
             rootHeader: rootHeader, childDirectory: "Beta", fetcher: fetcher
         )
-        guard case .success = await present.verifySecuringWork(child: child, chainPath: ["Nexus", "Beta"]) else {
+        guard case .success = present.verifySecuringWork(child: child, chainPath: ["Nexus", "Beta"]) else {
             return XCTFail("a carried child verifies")
         }
         // The proof carries the whole map, so the same node shows what the
@@ -170,11 +170,11 @@ final class BlockChildrenTests: XCTestCase {
             rootHeader: rootHeader, childDirectory: "Delta", fetcher: fetcher
         )
         XCTAssertEqual(absent.entries.count, 2, "root block and children: no child")
-        guard case .failure(.malformedEvidence) = await absent.verifySecuringWork(child: child, chainPath: ["Nexus", "Delta"]) else {
+        guard case .failure(.malformedEvidence) = absent.verifySecuringWork(child: child, chainPath: ["Nexus", "Delta"]) else {
             return XCTFail("an absent directory proves no child")
         }
         let relabeled = ChildBlockProof(rootCID: present.rootCID, directoryPath: ["Delta"], entries: present.entries)
-        guard case .failure(.malformedEvidence) = await relabeled.verifySecuringWork(child: child, chainPath: ["Nexus", "Delta"]) else {
+        guard case .failure(.malformedEvidence) = relabeled.verifySecuringWork(child: child, chainPath: ["Nexus", "Delta"]) else {
             return XCTFail("a present child's proof does not prove it under another directory")
         }
     }
@@ -244,7 +244,7 @@ final class BlockChildrenTests: XCTestCase {
         let rootHeader = try BlockHeader(node: root)
         try await rootHeader.storeBlock(storer: fetcher)
         let proof = try await ChildBlockProof.generate(rootHeader: rootHeader, childDirectory: "K", fetcher: fetcher)
-        guard case .failure(.protocolInvalid) = await proof.verifySecuringWork(child: child, chainPath: ["Nexus", "K"]) else {
+        guard case .failure(.protocolInvalid) = proof.verifySecuringWork(child: child, chainPath: ["Nexus", "K"]) else {
             return XCTFail("a proof through an invalid directory verifies")
         }
         let hop = await proof.directHop()

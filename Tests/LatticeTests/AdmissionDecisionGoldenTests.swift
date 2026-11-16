@@ -352,7 +352,7 @@ private struct AdmissionFixtures {
     func evidence(_ name: String, path: [String]) async throws -> VerifiedChildEvidence {
         let package = try XCTUnwrap(packages[name], "no package for \(name)")
         let block = try XCTUnwrap(blocks[name], "no fixture named \(name)")
-        return try await package.proof.verifySecuringWork(child: block, chainPath: path).get()
+        return try package.proof.verifySecuringWork(child: block, chainPath: path).get()
     }
 
     /// A child tree on `path` made by `ChainTree.bootstrap` — the one genesis
@@ -528,7 +528,7 @@ final class AdmissionDecisionGoldenTests: XCTestCase {
                 return tree.insertRootHeader(block, childIndex: childIndex)
             }
             let package = try XCTUnwrap(fixtures.packages[step.candidate])
-            let evidence = try await package.proof.verifySecuringWork(child: block, chainPath: path).get()
+            let evidence = try package.proof.verifySecuringWork(child: block, chainPath: path).get()
             return tree.insertChildHeader(block, childIndex: childIndex, evidence: evidence)
         case .genesis:
             guard step.package else {

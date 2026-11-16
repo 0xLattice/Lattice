@@ -119,8 +119,8 @@ public struct ChildSchedulingTargets: Sendable, Equatable {
 ///     [cidLen: UInt16 LE][cid: UTF-8]
 ///     [dataLen: UInt32 LE][data: bytes]
 ///
-/// Verification uses a sealed in-memory source, verifies the mined root, then
-/// walks `directoryPath` via targeted resolution down to the leaf CID.
+/// Verification reads only the proof's own entries: it verifies the mined root,
+/// then walks `directoryPath` down to the leaf CID.
 public struct ChildBlockProof: Sendable {
     /// CAS entries from the sparse path (union across all hops, root → leaf only).
     public let entries: [(cid: String, data: Data)]
@@ -297,7 +297,7 @@ public struct ChildBlockProof: Sendable {
             return nil
         }
 
-        let fetcher = _TrackingProofFetcher(proofEntries)
+        let fetcher = InMemoryContentSource(proofEntries)
         var current = root
         var deploymentTarget = root.target
         var canonicalEntries: [String: Data] = [:]
@@ -355,11 +355,16 @@ public struct ChildBlockProof: Sendable {
     public func verifySecuringWork(
         child: Block,
         chainPath: [String]
-    ) async -> Result<VerifiedChildEvidence, ChildProofVerificationFailure> {
+    ) -> Result<VerifiedChildEvidence, ChildProofVerificationFailure> {
         guard chainPath.first == DEFAULT_ROOT_DIRECTORY,
               hasRepresentableDirectoryPath,
               chainPath.count == directoryPath.count + 1,
-              directoryPath == Array(chainPath.dropFirst()),
+              // Byte for byte: `String ==` is Unicode canonical equivalence,
+              // under which a peer could respell a directory (KELVIN SIGN
+              // for "K") that the walk below would then not follow.
+              directoryPath.elementsEqual(chainPath.dropFirst(), by: {
+                  $0.utf8.elementsEqual($1.utf8)
+              }),
               !entries.isEmpty,
               !directoryPath.isEmpty else {
             return .failure(.malformedEvidence)
@@ -382,20 +387,37 @@ public struct ChildBlockProof: Sendable {
                 return .failure(.malformedEvidence)
             }
         }
-        let fetcher = _TrackingProofFetcher(proofEntries)
-        var directlyConsumed = Set([rootCID])
+        // Each link resolves from the proof's own entries by cashew's rule:
+        // present, plaintext, hashing to the link, decoding canonically.
+        var consumed: Set<String> = [rootCID]
+        func resolved<Link: cashew.Header>(_ link: Link) -> Link.NodeType? {
+            guard link.encryptionInfo == nil,
+                  let data = proofEntries[link.rawCID],
+                  (try? link.verifyData(data, matches: link.rawCID)) != nil else { return nil }
+            consumed.insert(link.rawCID)
+            return Link.NodeType(data: data)
+        }
         var carriers: [(block: Block, cid: String)] = [
             (rootBlock, rootCID)
         ]
         var currentBlock = rootBlock
 
         for (index, directory) in directoryPath.enumerated() {
-            guard let children = try? await currentBlock.children.resolve(
-                    paths: [[directory]: .targeted], fetcher: fetcher
-                  ).node,
-                  let childHeader: VolumeImpl<Block> = children[directory]
+            guard let children = resolved(currentBlock.children),
+                  let childHeader = children[directory]
             else { return .failure(.malformedEvidence) }
+            // The entry under the directory's exact spelling resolves before
+            // the map's well-formedness is judged, so an unresolvable link is
+            // malformed at every depth. A key equal to it only under Unicode
+            // equivalence is not a directory (§3.1): the map is judged first.
+            let spelledExactly = children.entries.keys.contains {
+                $0.utf8.elementsEqual(directory.utf8)
+            }
+            let next = spelledExactly ? resolved(childHeader) : nil
+            guard !spelledExactly || next != nil else { return .failure(.malformedEvidence) }
             guard children.isWellFormed else { return .failure(.protocolInvalid) }
+            // Every hop, the terminal one included, requires its entry.
+            guard let next else { return .failure(.malformedEvidence) }
 
             if index == directoryPath.count - 1 {
                 guard childHeader.rawCID == childCID else {
@@ -404,7 +426,6 @@ public struct ChildBlockProof: Sendable {
                 guard child.parentState.rawCID == currentBlock.prevState.rawCID else {
                     return .failure(.protocolInvalid)
                 }
-                let consumed = await fetcher.consumed().union(directlyConsumed)
                 guard consumed == Set(proofEntries.keys) else {
                     return .failure(.malformedEvidence)
                 }
@@ -467,16 +488,8 @@ public struct ChildBlockProof: Sendable {
                 ))
             }
 
-            guard let nextData = proofEntries[childHeader.rawCID] else {
-                return .failure(.malformedEvidence)
-            }
-            let next: Block
-            switch contentBoundBlock(cid: childHeader.rawCID, data: nextData) {
-            case .success(let block): next = block
-            case .failure(let failure): return .failure(failure)
-            }
-            directlyConsumed.insert(childHeader.rawCID)
-            guard next.parentState.rawCID == currentBlock.prevState.rawCID else {
+            guard next.hasWellFormedRewardRecipient,
+                  next.parentState.rawCID == currentBlock.prevState.rawCID else {
                 return .failure(.protocolInvalid)
             }
             currentBlock = next
@@ -576,24 +589,6 @@ public final class _CollectingStorer: Storer, @unchecked Sendable {
         lock.withLock {
             storedEntries.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         }
-    }
-}
-
-private actor _TrackingProofFetcher: Fetcher {
-    private let source: InMemoryContentSource
-    private var consumedCIDs = Set<String>()
-
-    init(_ entries: [String: Data]) {
-        source = InMemoryContentSource(entries)
-    }
-
-    func fetch(rawCid: String) async throws -> Data {
-        consumedCIDs.insert(rawCid)
-        return try await source.fetch(rawCid: rawCid)
-    }
-
-    func consumed() -> Set<String> {
-        consumedCIDs
     }
 }
 
