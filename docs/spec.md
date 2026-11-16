@@ -428,8 +428,9 @@ Let `R` be the proof root and `h = proofOfWorkHash(R)`. Validation proceeds in
 this order:
 
 1. Recompute `CID(R)` and its proof-of-work hash.
-2. Require the proof path to equal the runtime path below the outer root, consume
-   every supplied proof entry, and require its terminal CID to equal `CID(B)`.
+2. Require the proof path to be byte-equal to the runtime path below the outer
+   root, consume every supplied proof entry, and require its terminal CID to
+   equal `CID(B)`.
 3. At every vertical edge, require the nested child's `parentState` to equal the
    carrier's committed `prevState`. An attributed run is bound the same way
    (§9.10).

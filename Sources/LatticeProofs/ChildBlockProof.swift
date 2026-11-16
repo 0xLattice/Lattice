@@ -359,7 +359,12 @@ public struct ChildBlockProof: Sendable {
         guard chainPath.first == DEFAULT_ROOT_DIRECTORY,
               hasRepresentableDirectoryPath,
               chainPath.count == directoryPath.count + 1,
-              directoryPath == Array(chainPath.dropFirst()),
+              // Byte for byte: `String ==` is Unicode canonical equivalence,
+              // under which a peer could respell a directory (KELVIN SIGN
+              // for "K") that the walk below would then not follow.
+              directoryPath.elementsEqual(chainPath.dropFirst(), by: {
+                  $0.utf8.elementsEqual($1.utf8)
+              }),
               !entries.isEmpty,
               !directoryPath.isEmpty else {
             return .failure(.malformedEvidence)
@@ -411,6 +416,8 @@ public struct ChildBlockProof: Sendable {
             let next = spelledExactly ? resolved(childHeader) : nil
             guard !spelledExactly || next != nil else { return .failure(.malformedEvidence) }
             guard children.isWellFormed else { return .failure(.protocolInvalid) }
+            // Every hop, the terminal one included, requires its entry.
+            guard let next else { return .failure(.malformedEvidence) }
 
             if index == directoryPath.count - 1 {
                 guard childHeader.rawCID == childCID else {
@@ -481,8 +488,6 @@ public struct ChildBlockProof: Sendable {
                 ))
             }
 
-            // Unresolved only under a runtime directory outside the grammar.
-            guard let next else { return .failure(.malformedEvidence) }
             guard next.hasWellFormedRewardRecipient,
                   next.parentState.rawCID == currentBlock.prevState.rawCID else {
                 return .failure(.protocolInvalid)

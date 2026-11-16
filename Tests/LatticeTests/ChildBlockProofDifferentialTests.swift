@@ -18,15 +18,17 @@ import cashew
 /// class, and on acceptance every field of the evidence (grind, root hash,
 /// credited ancestor work, child, terminal carrier, contribution).
 ///
-/// One deliberate exception: a directory spelled differently from a map key
-/// or runtime path that it equals only under Unicode canonical equivalence
-/// (KELVIN SIGN for "K"). The old walk followed such a key or not by an
+/// One deliberate exception: a directory spelled differently from the
+/// runtime path or a map key that it equals only under Unicode canonical
+/// equivalence (KELVIN SIGN for "K"). The old walk compared the proof's path
+/// to the runtime path with `String ==` and followed such a key or not by an
 /// accident of cashew's path trie (whether the first scalars of the two
-/// spellings share a 5-bit hash bucket); the walk follows a key only under the
-/// directory's exact bytes. Directories are visible ASCII (§3.1) and
-/// `ChainRuntimeContext` refuses any other runtime path, so the difference is
-/// unreachable from a valid chain path except as blame for a map that is
-/// already not well-formed. Those cases assert the walk's verdict
+/// spellings share a 5-bit hash bucket), so a peer's respelled proof path
+/// could verify, even with no terminal entry. The proof path is now compared
+/// byte for byte and a key is followed only under the directory's exact bytes:
+/// a respelled proof path is rejected, and a map key respelled after its first
+/// character, already not well-formed, is blamed `protocolInvalid` where it
+/// could be `malformedEvidence`. Those cases assert the walk's verdict
 /// (`unicodeVerdict`) and list where it differs.
 ///
 /// The old verifier is kept below, verbatim, as the oracle. Inputs are real
@@ -362,6 +364,29 @@ final class ChildBlockProofDifferentialTests: XCTestCase {
                     chainPath: [DEFAULT_ROOT_DIRECTORY] + path,
                     unicodeVerdict: .rejected(.malformedEvidence))
             }
+        }
+        // A peer respells the proof's path; the runtime path stays ASCII. The
+        // shape is compared byte for byte, so the walk never sees it, with or
+        // without the terminal entry.
+        let terminalCID = try! BlockHeader(node: fixture.child).rawCID
+        var respelledPaths: [(name: String, path: [String])] = []
+        for (level, directory) in fixture.directories.enumerated() {
+            for (position, spelled) in unicodeEquivalents(of: directory) {
+                var path = fixture.directories
+                path[level] = spelled
+                respelledPaths.append(("proof directory \(level) equivalent @\(position)", path))
+            }
+        }
+        if respelledPaths.count > 1 {
+            respelledPaths.append(("every proof directory equivalent", fixture.directories.map {
+                unicodeEquivalents(of: $0).first?.spelled ?? $0
+            }))
+        }
+        for (name, path) in respelledPaths {
+            add(name, path: path, unicodeVerdict: .rejected(.malformedEvidence))
+            add("\(name), terminal entry dropped", path: path,
+                entries: base.entries.filter { $0.cid != terminalCID },
+                unicodeVerdict: .rejected(.malformedEvidence))
         }
 
         // Wrong child, extra entries, shape.
