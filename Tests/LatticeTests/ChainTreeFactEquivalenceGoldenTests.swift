@@ -154,7 +154,7 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
         let proof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
-        let evidence = try await proof.verifySecuringWork(child: child, chainPath: context.path).get()
+        let evidence = try proof.verifySecuringWork(child: child, chainPath: context.path).get()
         return (ChildValidationPackage(proof: proof, parentStateContinuityLink: link), evidence)
     }
 

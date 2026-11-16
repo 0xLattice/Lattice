@@ -919,7 +919,7 @@ final class ParentRunAttributionTests: XCTestCase {
         let genesisCID = try BlockHeader(node: genesis).rawCID
         let context = testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
         let package = try await carriedGenesisPackage(genesis, fetcher: fetcher)
-        let evidence = try await package.proof.verifySecuringWork(child: genesis, chainPath: context.path).get()
+        let evidence = try package.proof.verifySecuringWork(child: genesis, chainPath: context.path).get()
 
         let eager = try await ChainTree.bootstrap(
             genesis: try BlockHeader(node: genesis), evidence: evidence, fetcher: fetcher,

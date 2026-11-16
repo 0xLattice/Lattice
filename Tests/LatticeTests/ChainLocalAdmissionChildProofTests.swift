@@ -426,7 +426,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
         let fixture = try await AdmissionFixture.makeChildProofFixture()
         let candidate = fixture.candidate
         let proof = fixture.package.proof
-        let valid = await proof.verifySecuringWork(
+        let valid = proof.verifySecuringWork(
             child: candidate,
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
         )
@@ -439,7 +439,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
         )
         XCTAssertEqual(evidence.grindID, proof.rootCID)
 
-        let alternateRoot = await proof.verifySecuringWork(
+        let alternateRoot = proof.verifySecuringWork(
             child: candidate,
             chainPath: ["Other", "Child"]
         )
@@ -464,7 +464,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             rewardRecipient: candidate.rewardRecipient,
             nonce: candidate.nonce + 1
         )
-        let mismatched = await proof.verifySecuringWork(
+        let mismatched = proof.verifySecuringWork(
             child: impostor,
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
         )

@@ -284,7 +284,7 @@ final class ChainTreeArchitectureTests: XCTestCase {
         let proof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
-        let evidence = try await proof.verifySecuringWork(child: childGenesis, chainPath: childContext.path).get()
+        let evidence = try proof.verifySecuringWork(child: childGenesis, chainPath: childContext.path).get()
         return (childGenesis, evidence)
     }
 

@@ -864,5 +864,5 @@ func carriedGenesisEvidence(
     let package = try await carriedGenesisPackage(
         childGenesis, directory: path.last ?? "Child", nonce: nonce, fetcher: fetcher
     )
-    return try await package.proof.verifySecuringWork(child: childGenesis, chainPath: path).get()
+    return try package.proof.verifySecuringWork(child: childGenesis, chainPath: path).get()
 }

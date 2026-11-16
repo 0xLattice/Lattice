@@ -233,7 +233,7 @@ final class StandardHeaderCIDTests: XCTestCase {
         let honest = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
-        guard case .success = await honest.verifySecuringWork(child: child, chainPath: chainPath) else {
+        guard case .success = honest.verifySecuringWork(child: child, chainPath: chainPath) else {
             return XCTFail("the honest proof verifies")
         }
         func proof(root: String, data: Data) -> ChildBlockProof {
@@ -247,7 +247,7 @@ final class StandardHeaderCIDTests: XCTestCase {
         let malformedData = try XCTUnwrap(replacing("postState", of: carrier, with: cidV0).toData())
         XCTAssertNil(Block(data: malformedData))
         let malformed = proof(root: CIDIdentity.standardCID(of: malformedData), data: malformedData)
-        guard case .failure(let undecodable) = await malformed.verifySecuringWork(
+        guard case .failure(let undecodable) = malformed.verifySecuringWork(
             child: child, chainPath: chainPath
         ) else { return XCTFail("a carrier that is not a block verified") }
         XCTAssertEqual(undecodable, .protocolInvalid)
@@ -255,7 +255,7 @@ final class StandardHeaderCIDTests: XCTestCase {
 
         let otherData = try XCTUnwrap(replacing("postState", of: carrier, with: testCID("other")).toData())
         let mismatched = proof(root: honest.rootCID, data: otherData)
-        guard case .failure(let mismatch) = await mismatched.verifySecuringWork(
+        guard case .failure(let mismatch) = mismatched.verifySecuringWork(
             child: child, chainPath: chainPath
         ) else { return XCTFail("bytes not matching their CID verified") }
         XCTAssertEqual(ChainTree.headerFailure(mismatch), .proofOfWorkInvalid, "a byte mismatch blames")
@@ -285,7 +285,7 @@ final class StandardHeaderCIDTests: XCTestCase {
             let proof = try await ChildBlockProof.generate(
                 rootHeader: carrierHeader, childDirectory: "Child", fetcher: fetcher
             )
-            guard case .failure(let failure) = await proof.verifySecuringWork(
+            guard case .failure(let failure) = proof.verifySecuringWork(
                 child: child, chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
             ) else {
                 XCTFail("\(shape.name): verified")

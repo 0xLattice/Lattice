@@ -94,7 +94,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             proof: proof,
             fetcher: fetcher
         )
-        let verification = await proof.verifySecuringWork(
+        let verification = proof.verifySecuringWork(
             child: leaf,
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]
         )
@@ -699,7 +699,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             childDirectory: "Middle",
             fetcher: fetcher
         )
-        guard case .success = await rootHop.verifySecuringWork(
+        guard case .success = rootHop.verifySecuringWork(
             child: invalidMiddle,
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Middle"]
         ) else {

@@ -257,7 +257,7 @@ final class ChildBlockProofCoreTests: XCTestCase {
             entries: entries
         )
 
-        let result = await tampered.verifySecuringWork(
+        let result = tampered.verifySecuringWork(
             child: fixture.leaf,
             chainPath: [DEFAULT_ROOT_DIRECTORY]
                 + fixture.composed.directoryPath
