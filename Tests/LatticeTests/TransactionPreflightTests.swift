@@ -120,6 +120,17 @@ final class TransactionPreflightTests: XCTestCase {
             checksSignatures: false
         )
         XCTAssertEqual(elsewhere, .invalid)
+        // The body's own rules still run: a debit of bob, who has not signed.
+        let aliceAddress = testAddress(publicKey: alice.publicKey)
+        let bobAddress = testAddress(publicKey: bob.publicKey)
+        let debitsANonSigner = await classify(
+            transaction(signers: [alice], nonce: 1, accountActions: [
+                AccountAction(owner: bobAddress, delta: -1),
+                AccountAction(owner: aliceAddress, delta: 1),
+            ]),
+            checksSignatures: false
+        )
+        XCTAssertEqual(debitsANonSigner, .invalid)
     }
 
     func testMultiSignerNonceClassificationUsesTheFirstSignerOnly() async throws {
