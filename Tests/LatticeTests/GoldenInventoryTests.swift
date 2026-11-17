@@ -15,6 +15,7 @@ final class GoldenInventoryTests: XCTestCase {
         ("WorkTableGoldenTests", WorkTableGoldenTests.goldenName),
         ("ChainTreeFactEquivalenceGoldenTests", ChainTreeFactEquivalenceGoldenTests.goldenName),
         ("ConsensusBoundaryEdgeTests", ConsensusBoundaryEdgeTests.goldenName),
+        ("TransactionEncodingDifferentialTests", TransactionEncodingDifferentialTests.corpusName),
     ]
 
     func testEveryGoldenFileExistsAndIsJSON() async throws {
