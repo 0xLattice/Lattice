@@ -67,6 +67,12 @@ public enum TransactionPreflight {
     /// re-checking a transaction they already accepted on an earlier tip
     /// learns whether it still fits this one's state. It must judge the
     /// transaction by them again before any block it builds carries it.
+    ///
+    /// `checksSignatures: false` leaves out the signature rules (every
+    /// signature verifies, the signing keys are exactly the signers). They
+    /// read nothing but the transaction's own content, which its CID fixes,
+    /// so a host re-checking one it already judged by them on admission
+    /// would learn nothing new on another tip.
     public static func classify(
         _ transaction: Transaction,
         tipCID: String,
@@ -75,7 +81,8 @@ public enum TransactionPreflight {
         parentState: LatticeStateHeader? = nil,
         fetcher: any Fetcher,
         validationContext: ValidationContext = .current,
-        checksPolicies: Bool = true
+        checksPolicies: Bool = true,
+        checksSignatures: Bool = true
     ) async -> TransactionPreflightResult {
         let tip = (cid: tipCID, snapshot: snapshot)
         guard let snapshot = tip.snapshot else {
@@ -96,7 +103,7 @@ public enum TransactionPreflight {
             )
             // A transaction that creates value (negative surplus) can never
             // be carried alone under the fee rule, so it is refused here.
-            guard try await resolved.validateTransactionForNexus(fetcher: fetcher),
+            guard try await resolved.validateTransactionForNexus(fetcher: fetcher, checksSignatures: checksSignatures),
                   body.minerSurplus() != nil,
                   body.chainPath == chainPath,
                   chainPath.count > 1

@@ -43,11 +43,12 @@ extension Transaction {
     }
 
     private func validateSignaturesAndResolve(
-        fetcher: Fetcher
+        fetcher: Fetcher,
+        checksSignatures: Bool = true
     ) async throws -> TransactionBody? {
         let resolvedBody = try await body.resolve(fetcher: fetcher)
         guard let bodyNode = resolvedBody.node else { throw ValidationErrors.transactionNotResolved }
-        if !signaturesAreValid(bodyNode) || !signaturesMatchSigners(bodyNode) {
+        if checksSignatures, !signaturesAreValid(bodyNode) || !signaturesMatchSigners(bodyNode) {
             return nil
         }
         return bodyNode
@@ -67,8 +68,12 @@ extension Transaction {
         return true
     }
 
-    package func validateTransactionForNexus(fetcher: Fetcher) async throws -> Bool {
-        guard let bodyNode = try await validateSignaturesAndResolve(fetcher: fetcher) else { return false }
+    /// `checksSignatures: false` leaves out the two signature rules, for a
+    /// caller that has already judged this transaction by them.
+    package func validateTransactionForNexus(fetcher: Fetcher, checksSignatures: Bool = true) async throws -> Bool {
+        guard let bodyNode = try await validateSignaturesAndResolve(
+            fetcher: fetcher, checksSignatures: checksSignatures
+        ) else { return false }
         if !bodyNode.stateAtomsAreValid() { return false }
         if !bodyNode.accountActionsAreValid() { return false }
         if !bodyNode.actionsAreValid() { return false }
