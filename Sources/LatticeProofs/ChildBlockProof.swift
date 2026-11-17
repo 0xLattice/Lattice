@@ -538,7 +538,7 @@ public struct ChildBlockProof: Sendable {
         var pos = data.startIndex
         guard let rootCIDLen = readU16(data, &pos),
               data.distance(from: pos, to: data.endIndex) >= Int(rootCIDLen),
-              let rootCID = String(data: data[pos..<data.index(pos, offsetBy: Int(rootCIDLen))], encoding: .utf8)
+              let rootCID = exactUTF8(data[pos..<data.index(pos, offsetBy: Int(rootCIDLen))])
         else { return nil }
         pos = data.index(pos, offsetBy: Int(rootCIDLen))
 
@@ -547,7 +547,7 @@ public struct ChildBlockProof: Sendable {
         for _ in 0..<Int(pathCount) {
             guard let dirLen = readU16(data, &pos),
                   data.distance(from: pos, to: data.endIndex) >= Int(dirLen),
-                  let dir = String(data: data[pos..<data.index(pos, offsetBy: Int(dirLen))], encoding: .utf8)
+                  let dir = exactUTF8(data[pos..<data.index(pos, offsetBy: Int(dirLen))])
             else { return nil }
             directoryPath.append(dir)
             pos = data.index(pos, offsetBy: Int(dirLen))
@@ -559,7 +559,7 @@ public struct ChildBlockProof: Sendable {
         for _ in 0..<Int(count) {
             guard let cidLen = readU16(data, &pos),
                   data.distance(from: pos, to: data.endIndex) >= Int(cidLen),
-                  let cid = String(data: data[pos..<data.index(pos, offsetBy: Int(cidLen))], encoding: .utf8)
+                  let cid = exactUTF8(data[pos..<data.index(pos, offsetBy: Int(cidLen))])
             else { return nil }
             pos = data.index(pos, offsetBy: Int(cidLen))
 
@@ -612,6 +612,15 @@ private func writeU32(_ out: inout Data, _ v: UInt32) {
     out.append(UInt8(v & 0xFF)); out.append(UInt8((v >> 8) & 0xFF))
     out.append(UInt8((v >> 16) & 0xFF)); out.append(UInt8(v >> 24))
 }
+/// The text `bytes` spell as UTF-8, scalar for scalar, or nil if they are not
+/// UTF-8. A leading U+FEFF stays a character: Foundation's
+/// `String(data:encoding: .utf8)` drops it on Darwin but keeps it on Linux,
+/// so the same proof bytes would name different CIDs on different hosts.
+private func exactUTF8(_ bytes: Data) -> String? {
+    let text = String(decoding: bytes, as: UTF8.self)
+    return text.utf8.elementsEqual(bytes) ? text : nil
+}
+
 private func readU16(_ data: Data, _ pos: inout Data.Index) -> UInt16? {
     guard data.distance(from: pos, to: data.endIndex) >= 2 else { return nil }
     let v = UInt16(data[pos]) | (UInt16(data[data.index(after: pos)]) << 8)

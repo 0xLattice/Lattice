@@ -89,6 +89,38 @@ final class ChildBlockProofCoreTests: XCTestCase {
         )
     }
 
+    /// Text fields decode as exactly their UTF-8 bytes on every host: a
+    /// leading U+FEFF stays a character (Foundation drops it on Darwin only),
+    /// and bytes that are not UTF-8 are refused, never repaired.
+    func test_deserialize_textIsByteExact() throws {
+        let bom = "\u{FEFF}"
+        let p = proof(
+            root: bom + "bafyroot",
+            path: [bom + "Nexus", "Child" + bom],
+            entries: [(bom, Data([1])), (bom + "bafyroot", Data([2]))]
+        )
+        let bytes = try p.serialize()
+        let back = try XCTUnwrap(ChildBlockProof.deserialize(bytes))
+        XCTAssertEqual(Array(back.rootCID.utf8), Array((bom + "bafyroot").utf8))
+        XCTAssertEqual(back.directoryPath.map { Array($0.utf8) }, p.directoryPath.map { Array($0.utf8) })
+        XCTAssertEqual(back.entries.map { Array($0.cid.utf8) }, p.entries.map { Array($0.cid.utf8) })
+        XCTAssertEqual(try back.serialize(), bytes)
+
+        // A root CID of `text`, no directories, no entries.
+        func rootOnly(_ text: [UInt8]) -> Data {
+            Data([UInt8(text.count), 0]) + Data(text) + Data([0, 0, 0, 0])
+        }
+        XCTAssertEqual(ChildBlockProof.deserialize(rootOnly([0x61, 0x00]))?.rootCID, "a\u{0}")
+        for invalid: [UInt8] in [[0xc0, 0x80], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0xff]] {
+            XCTAssertNil(ChildBlockProof.deserialize(rootOnly(invalid)), "\(invalid) is not UTF-8")
+        }
+    }
+
+    func test_publicKeyData_isByteExact() {
+        XCTAssertEqual(PublicKey(data: Data([0xef, 0xbb, 0xbf, 0x61]))?.key, "\u{FEFF}a")
+        XCTAssertNil(PublicKey(data: Data([0xc0, 0x80])))
+    }
+
     func test_serializeRejectsOversizedFields() {
         let oversized = String(repeating: "x", count: Int(UInt16.max) + 1)
         XCTAssertThrowsError(
