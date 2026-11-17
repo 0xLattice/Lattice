@@ -83,6 +83,12 @@ enum TreeDriver {
         let verdict = await ChainTree.connect(
             job, fetcher: fetcher, parentFacts: parentFacts
         )
+        // A valid verdict carries the block it executed; no other does.
+        if verdict.provesInvalid || verdict.retryFailure != nil {
+            XCTAssertNil(verdict.connectedBlock)
+        } else {
+            XCTAssertEqual(try BlockHeader(node: try XCTUnwrap(verdict.connectedBlock)).rawCID, blockHash)
+        }
         return tree.applyConnect(verdict)
     }
 

@@ -136,7 +136,8 @@ struct AnchorSnapshot: DifficultyAnchorSource {
 /// `applyConnect`, or a non-verdict to retry.
 public struct ConnectVerdict: Sendable {
     enum Outcome: Sendable {
-        case valid(BlockImportBatch, LatticeState?)
+        /// Executed and valid, with the block `connect` decoded to execute it.
+        case valid(BlockImportBatch, LatticeState?, Block)
         /// Execution completed and proved the block invalid.
         case invalid(isGenesis: Bool)
         /// No verdict (availability, ordering, missing parent facts).
@@ -155,6 +156,14 @@ public struct ConnectVerdict: Sendable {
     /// The non-verdict failure, when execution could not decide.
     public var retryFailure: BlockImportError? {
         if case .retry(let failure) = outcome { return failure }
+        return nil
+    }
+
+    /// The block `connect` executed, as it decoded it, when the verdict is
+    /// valid: a caller storing the block need not resolve and decode it
+    /// again. Nil for any other verdict.
+    public var connectedBlock: Block? {
+        if case .valid(_, _, let block) = outcome { return block }
         return nil
     }
 }
@@ -475,7 +484,8 @@ extension ChainTree {
                 ),
                 childCommitments: commitments
             ),
-            transition.materializedPostState
+            transition.materializedPostState,
+            block
         ))
     }
 
@@ -506,7 +516,7 @@ extension ChainTree {
                 of: blockHash,
                 excluded: true
             )
-        case .valid(let facts, let materializedPostState):
+        case .valid(let facts, let materializedPostState, _):
             guard contains(blockHash: blockHash) else {
                 return .rejected(.notYetValid)
             }
@@ -641,7 +651,7 @@ extension ChainTree {
             validationContext: validationContext
         )
         if let failure = verdict.retryFailure { return .failure(failure) }
-        guard case .valid(let facts, _) = verdict.outcome,
+        guard case .valid(let facts, _, _) = verdict.outcome,
               let executed = tree.applyConnect(verdict).update else {
             return .failure(.protocolInvalid)
         }
