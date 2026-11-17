@@ -29,6 +29,9 @@ public enum CIDIdentity {
     static let provenCanonicalMaxBytes = 128
 
     public static func canonicalString(_ value: String) -> String? {
+        // The standard CID in canonical spelling is its own canonical form,
+        // proven by the one strict decode (`CIDDigest`) without a parse.
+        if CIDDigest(value) != nil { return value }
         let memoizable = value.utf8.count <= provenCanonicalMaxBytes
             && value.utf8.allSatisfy { $0 < 0x80 }
         if memoizable, provenCanonical.withLock({ $0.contains(value) }) { return value }
