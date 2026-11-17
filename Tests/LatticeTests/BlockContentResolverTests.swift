@@ -247,6 +247,70 @@ final class BlockContentResolverTests: XCTestCase {
         XCTAssertNil(try prevState.node?.accountState.node?.get(key: "alice"))
     }
 
+    func testStoreBlockContentStoresWhatTheBlockCarriesAndReadsNoState() async throws {
+        let source = StorableFetcher()
+        let genesisResult = try await BlockBuilder.buildGenesisWithTransition(
+            spec: testSpec(directory: "Nexus"),
+            timestamp: 1,
+            target: UInt256.max,
+            fetcher: source
+        )
+        let genesis = try await storeBuiltBlock(genesisResult, in: source)
+        let body = TransactionBody(
+            accountActions: [],
+            actions: [],
+            depositActions: [],
+            receiptActions: [],
+            withdrawalActions: [],
+            signers: ["alice"],
+            nonce: 0,
+            chainPath: ["Nexus"]
+        )
+        let transaction = Transaction(
+            signatures: ["alice": "sig"],
+            body: try HeaderImpl(node: body)
+        )
+        let child = try await buildAndStoreGenesis(
+            spec: testSpec(directory: "Child"),
+            timestamp: 1,
+            target: UInt256.max,
+            fetcher: source
+        )
+        let block = try await buildAndStoreBlock(
+            previous: genesis,
+            transactions: [transaction],
+            children: ["Child": child],
+            timestamp: 2,
+            target: UInt256.max,
+            nonce: 0,
+            fetcher: source
+        )
+        let header = try VolumeImpl<Block>(node: block)
+        try await header.storeBlock(fetcher: source, storer: source)
+        let content = StorableFetcher()
+
+        try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: source, storer: content)
+
+        let roots = content.volumeRoots()
+        XCTAssertTrue(roots.contains(header.rawCID))
+        XCTAssertTrue(roots.contains(block.spec.rawCID))
+        XCTAssertTrue(roots.contains(try VolumeImpl<Transaction>(node: transaction).rawCID))
+        XCTAssertTrue(content.contains(rawCid: block.children.rawCID))
+        XCTAssertFalse(content.contains(rawCid: block.prevState.rawCID))
+        XCTAssertFalse(content.contains(rawCid: block.postState.rawCID))
+        XCTAssertFalse(content.contains(rawCid: try XCTUnwrap(block.parent).rawCID))
+        XCTAssertFalse(roots.contains(try VolumeImpl<Block>(node: child).rawCID))
+        // What it stored is all it reads: the same walk over that alone
+        // stores the same, where `storeBlock` needs the pre-state.
+        let copy = StorableFetcher()
+        try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: content, storer: copy)
+        XCTAssertEqual(copy.entries, content.entries)
+        do {
+            try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlock(fetcher: content, storer: StorableFetcher())
+            XCTFail("storeBlock read no pre-state")
+        } catch {}
+    }
+
     func testStoreBlockIncludesPrevStateRootWithoutTransactions() async throws {
         let source = StorableFetcher()
         let destination = StorableFetcher()
