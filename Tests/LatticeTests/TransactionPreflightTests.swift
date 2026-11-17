@@ -79,6 +79,60 @@ final class TransactionPreflightTests: XCTestCase {
         return (ChainLevel(testChain: chain), chain, genesis)
     }
 
+    /// A recheck that leaves the signatures out still runs every rule that
+    /// reads the tip's state.
+    func testClassifyWithoutSignaturesSkipsOnlyTheSignatureRules() async throws {
+        let fetcher = StorableFetcher()
+        let alice = CryptoUtils.generateKeyPair()
+        let bob = CryptoUtils.generateKeyPair()
+        let (level, _, _) = try await fundedLevel(fetcher: fetcher, alice: alice, bob: bob)
+        let tip = await level.chain.transactionPreflightTip(at: nil)
+        func classify(_ transaction: Transaction, checksSignatures: Bool) async -> TransactionPreflightDisposition {
+            await TransactionPreflight.classify(
+                transaction, tipCID: tip.cid, snapshot: tip.snapshot,
+                chainPath: [DEFAULT_ROOT_DIRECTORY], fetcher: fetcher,
+                checksPolicies: false, checksSignatures: checksSignatures
+            ).disposition
+        }
+
+        let valid = transaction(signers: [alice], nonce: 1)
+        let forged = Transaction(
+            signatures: [alice.publicKey: String(repeating: "00", count: 64)],
+            body: valid.body
+        )
+        let wrongSigner = Transaction(
+            signatures: transaction(signers: [bob], nonce: 1).signatures,
+            body: valid.body
+        )
+        for (candidate, checked) in [(valid, TransactionPreflightDisposition.ready), (forged, .invalid), (wrongSigner, .invalid)] {
+            let withSignatures = await classify(candidate, checksSignatures: true)
+            XCTAssertEqual(withSignatures, checked)
+            let withoutSignatures = await classify(candidate, checksSignatures: false)
+            XCTAssertEqual(withoutSignatures, .ready)
+        }
+        // State still decides: a spent nonce, a nonce ahead, and the wrong chain.
+        let spent = await classify(transaction(signers: [alice], nonce: 0), checksSignatures: false)
+        XCTAssertEqual(spent, .invalid)
+        let ahead = await classify(transaction(signers: [alice], nonce: 2), checksSignatures: false)
+        XCTAssertEqual(ahead, .future)
+        let elsewhere = await classify(
+            transaction(signers: [alice], nonce: 1, chainPath: [DEFAULT_ROOT_DIRECTORY, "child"]),
+            checksSignatures: false
+        )
+        XCTAssertEqual(elsewhere, .invalid)
+        // The body's own rules still run: a debit of bob, who has not signed.
+        let aliceAddress = testAddress(publicKey: alice.publicKey)
+        let bobAddress = testAddress(publicKey: bob.publicKey)
+        let debitsANonSigner = await classify(
+            transaction(signers: [alice], nonce: 1, accountActions: [
+                AccountAction(owner: bobAddress, delta: -1),
+                AccountAction(owner: aliceAddress, delta: 1),
+            ]),
+            checksSignatures: false
+        )
+        XCTAssertEqual(debitsANonSigner, .invalid)
+    }
+
     func testMultiSignerNonceClassificationUsesTheFirstSignerOnly() async throws {
         let fetcher = StorableFetcher()
         let alice = CryptoUtils.generateKeyPair()

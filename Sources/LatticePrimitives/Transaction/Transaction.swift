@@ -1,6 +1,5 @@
 import cashew
 import Foundation
-import Multikey
 
 let TRANSACTION_BODY_PROPERTY = "body"
 let TRANSACTION_PROPERTIES = Set([TRANSACTION_BODY_PROPERTY])
@@ -52,7 +51,7 @@ public struct Transaction {
     }
 
     private static func normalizedPublicKey(_ value: String) -> String {
-        (try? Multikey.decode(fromHex: value))?.hexEncoded ?? value
+        CryptoUtils.multikey(fromHex: value)?.hex ?? value
     }
 
     package static func normalized(
