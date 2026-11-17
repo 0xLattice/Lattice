@@ -11,7 +11,10 @@ public struct PublicKey: Scalar {
 
 public extension PublicKey {
     init?(data: Data) {
-        guard let keyString = String(data: data, encoding: .utf8) else { return nil }
+        // Exact UTF-8, so a leading U+FEFF is kept on every host (Foundation
+        // drops it on Darwin only).
+        let keyString = String(decoding: data, as: UTF8.self)
+        guard keyString.utf8.elementsEqual(data) else { return nil }
         self.init(key: keyString)
     }
     
