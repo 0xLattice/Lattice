@@ -1,0 +1,1614 @@
+{
+  "genesis" : "bafyreiajzpvrqflh66v7y6wsflz4ekl5tv74zj44b5ht32mzrylqukqpha",
+  "records" : [
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "valid",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "rawCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "verifies" : [
+        true
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34",
+        "bafyreiav5y4dn6zy6ld33ekru5kt3ftgllplpyqqcbhl7ygw3asoksscdq"
+      ],
+      "block" : "bafyreib7lm2ytgvrfjh4v6rjifioipkstao5jjwb26qi5itk5wn2huna74 valid diff",
+      "bodyCID" : "bafyreib4oqoxaqmyxn5x6jr7ypcuyd6i6bspxixpgccf5sag4pw3n2j4bi",
+      "constructed" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "85b6981d2e143e5e8b6b35565f3dc192bd3c633702220cc0a10c4d769a8f664695da8766182c19db05fe8c9d9953ad7179b2b3ae66059e0b9a8492fcb4ff7503"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "995f188d5144a798fe7c436127d817edc6c5af6b2fe101033f32a9b85375dd8fb5e118b107a2fecdbecf38b4f3903aa178008b285add6809f6f6dbcf91673b00"
+        }
+      ],
+      "constructedCID" : "bafyreibmhejafgjj6kvx3kvghbousy2kaxmyly4iecm4nadrjkyfkh3ah4",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "995f188d5144a798fe7c436127d817edc6c5af6b2fe101033f32a9b85375dd8fb5e118b107a2fecdbecf38b4f3903aa178008b285add6809f6f6dbcf91673b00"
+        },
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "85b6981d2e143e5e8b6b35565f3dc192bd3c633702220cc0a10c4d769a8f664695da8766182c19db05fe8c9d9953ad7179b2b3ae66059e0b9a8492fcb4ff7503"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true,
+        true
+      ],
+      "name" : "valid-two-signers",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreib6u7frqvvbuqb57kxx7jwxpm5ybkwj4stznhnpwgxbxcpdxhw43u throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreiem6tfrwn3hd7puoeaynmcqwhhzecs4iusrj5zbge5mjww7o7lglm",
+      "verifies" : [
+        true,
+        true
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreiav5y4dn6zy6ld33ekru5kt3ftgllplpyqqcbhl7ygw3asoksscdq",
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreigcxcygsqwdeoxfthblbxl7vistrtt7vu7zwfuhql346irvy3zupi valid diff",
+      "bodyCID" : "bafyreib4oqoxaqmyxn5x6jr7ypcuyd6i6bspxixpgccf5sag4pw3n2j4bi",
+      "constructed" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "cba5f3ee50561efdc27c56d50b9c7cdc40fc25f9add260ae63b8d020da4998b02b210e086029e91cfc3b44b1aab094818d03df35c6921d3f144291d4dfd35e09"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "e07b418d9760cbe224a3f2575f3c1cb25ce3398067fc7f31f499a4ec6b016d7094f1a69a61aaf47163989769e924968c6f93d3c7a9e3b23474f24f431953380a"
+        }
+      ],
+      "constructedCID" : "bafyreifrejmzo564ikntwserk4vdds7knyqjmid7sjq7irimkbse4vurge",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "decoded" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "cba5f3ee50561efdc27c56d50b9c7cdc40fc25f9add260ae63b8d020da4998b02b210e086029e91cfc3b44b1aab094818d03df35c6921d3f144291d4dfd35e09"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "e07b418d9760cbe224a3f2575f3c1cb25ce3398067fc7f31f499a4ec6b016d7094f1a69a61aaf47163989769e924968c6f93d3c7a9e3b23474f24f431953380a"
+        }
+      ],
+      "decodedCID" : "bafyreifrejmzo564ikntwserk4vdds7knyqjmid7sjq7irimkbse4vurge",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "cba5f3ee50561efdc27c56d50b9c7cdc40fc25f9add260ae63b8d020da4998b02b210e086029e91cfc3b44b1aab094818d03df35c6921d3f144291d4dfd35e09"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "e07b418d9760cbe224a3f2575f3c1cb25ce3398067fc7f31f499a4ec6b016d7094f1a69a61aaf47163989769e924968c6f93d3c7a9e3b23474f24f431953380a"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true,
+        true
+      ],
+      "name" : "valid-two-signers-unsorted",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreigcxcygsqwdeoxfthblbxl7vistrtt7vu7zwfuhql346irvy3zupi valid diff",
+      "rawCID" : "bafyreifrejmzo564ikntwserk4vdds7knyqjmid7sjq7irimkbse4vurge",
+      "verifies" : [
+        true,
+        true
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreihgreyancymdodboeo5e7aviqmfhbllwecttxskdco7beodskoeva invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e504ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreigtvgfehzj2jbexhlqkfgepe4nkngbtgfwlh34otsgavyzx45yw5y",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e504ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreigtvgfehzj2jbexhlqkfgepe4nkngbtgfwlh34otsgavyzx45yw5y",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e504ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-bit-flipped",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreihgreyancymdodboeo5e7aviqmfhbllwecttxskdco7beodskoeva invalid -",
+      "rawCID" : "bafyreigtvgfehzj2jbexhlqkfgepe4nkngbtgfwlh34otsgavyzx45yw5y",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6AED61A2E514CEB39F88D7846F105EFB704ACFA03A64A2830B97A8FE6EC508F3FB89D70EAA1A6E75B57DCC97052197CCAD7F203E1CEE3C0B9770B7D4D800E30D"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-uppercase",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreig7rl4owetyhepcv74mfir3f6mtr5tc5ufrqs426n4ctoncyhfsam throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreifhdvidqq7hc42tkokhf2yo7zsah63c7nk6w2j6pfk4jagyf43ibe",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "0x6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-0x",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreieijfqyvbzx54r3y643ydxjjbvxcth57r7remqadg5uh2c37auo3i throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreidrzbtfqlqhegbopv6hjheix2m6f3t2yp27yl7eukozirkbe6thuy",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicgawtep6khldcepnjufncayjbby5vecg75w253k754os6tsm6y34 invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "0X6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreieizbiabnp4xyctbnenj5lhizoo5bunr37raowmnf2jr4xahcdaqe",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "0X6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreieizbiabnp4xyctbnenj5lhizoo5bunr37raowmnf2jr4xahcdaqe",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "0X6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-0X",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreicgawtep6khldcepnjufncayjbby5vecg75w253k754os6tsm6y34 invalid -",
+      "rawCID" : "bafyreieizbiabnp4xyctbnenj5lhizoo5bunr37raowmnf2jr4xahcdaqe",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "0x6AED61A2E514CEB39F88D7846F105EFB704ACFA03A64A2830B97A8FE6EC508F3FB89D70EAA1A6E75B57DCC97052197CCAD7F203E1CEE3C0B9770B7D4D800E30D"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-0x-uppercase",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreibs74jgojzupn26avha6dg5xrf777npsxiy4ap7p4iwwreo3b5nja throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreiabcip37pikcix452b2cobysadifpgnmivt6uuahl5z646ap7icea",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a283+b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-plus-sign",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreiggwfoeq6mshg7z4xkimem5hvda275t54ythcv3aybgmdy3echdju throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreieu2m22litpmq2yyj5iagxjprk74xu6fe27jjoocppqqqk3rjrana",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d8-0e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-minus-zero",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreihluosbzhmizoze363i2en7q4umwkdwlrrcnfepexgm4nwq7iq5bu throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreietwga57oqu2ihbql6ihsbgwwi4f47qsaiwyjiayhp6soakqdqfku",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreieuhxra2sc2dr4fz645wkrizhwsolmnxjjkjhqvsl36ov5pifqst4 invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30"
+        }
+      ],
+      "constructedCID" : "bafyreig7z23frit63ozhrwkqixnes4l3cpriqvmrjtpmspxtlsv43ygiuu",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30"
+        }
+      ],
+      "decodedCID" : "bafyreig7z23frit63ozhrwkqixnes4l3cpriqvmrjtpmspxtlsv43ygiuu",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-odd-length",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreieuhxra2sc2dr4fz645wkrizhwsolmnxjjkjhqvsl36ov5pifqst4 invalid -",
+      "rawCID" : "bafyreig7z23frit63ozhrwkqixnes4l3cpriqvmrjtpmspxtlsv43ygiuu",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreigivjprtw5yix52qeqliiupvdgr4kreuedznk3oo72h5zwia265le invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e3"
+        }
+      ],
+      "constructedCID" : "bafyreiebcdt45kdr6ba4gsrmnwb77yri2td3ohocpwc4bv6ytzgzvab7xe",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e3"
+        }
+      ],
+      "decodedCID" : "bafyreiebcdt45kdr6ba4gsrmnwb77yri2td3ohocpwc4bv6ytzgzvab7xe",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e3"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-63-bytes",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreigivjprtw5yix52qeqliiupvdgr4kreuedznk3oo72h5zwia265le invalid -",
+      "rawCID" : "bafyreiebcdt45kdr6ba4gsrmnwb77yri2td3ohocpwc4bv6ytzgzvab7xe",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreidap3mbmgric4zgsf73qqngswdbra7idfcbtsl4ex4rowkazp6fue invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d00"
+        }
+      ],
+      "constructedCID" : "bafyreicwlbc73ufaqhbznekq26boisxefmbd5af42qr4762xvi7ssmok2y",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d00"
+        }
+      ],
+      "decodedCID" : "bafyreicwlbc73ufaqhbznekq26boisxefmbd5af42qr4762xvi7ssmok2y",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d00"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-65-bytes",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreidap3mbmgric4zgsf73qqngswdbra7idfcbtsl4ex4rowkazp6fue invalid -",
+      "rawCID" : "bafyreicwlbc73ufaqhbznekq26boisxefmbd5af42qr4762xvi7ssmok2y",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreictt6xk6etghkpmukqfdi73o5pz6iuirvtx73ymkn57a3in4iccce invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : ""
+        }
+      ],
+      "constructedCID" : "bafyreifeg2it32obbslpqfcsfv3t4digfzrwxrbx4g6qi4npedqpuksg2q",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : ""
+        }
+      ],
+      "decodedCID" : "bafyreifeg2it32obbslpqfcsfv3t4digfzrwxrbx4g6qi4npedqpuksg2q",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : ""
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-empty",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreictt6xk6etghkpmukqfdi73o5pz6iuirvtx73ymkn57a3in4iccce invalid -",
+      "rawCID" : "bafyreifeg2it32obbslpqfcsfv3t4digfzrwxrbx4g6qi4npedqpuksg2q",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreido6zuyczacggguue7tntep3g2m76yhyswty5uiomxygmi77xprqy invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : " aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreid5atctnmamkkicebkorbnkmvq2drojk2peats2h7vn7sypdkze7e",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : " aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreid5atctnmamkkicebkorbnkmvq2drojk2peats2h7vn7sypdkze7e",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : " aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-space",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreido6zuyczacggguue7tntep3g2m76yhyswty5uiomxygmi77xprqy invalid -",
+      "rawCID" : "bafyreid5atctnmamkkicebkorbnkmvq2drojk2peats2h7vn7sypdkze7e",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreigfljhr7wiosy7h5z5u4wwyxrc2af4mly2qa4mlf7elm3a5ae34nm invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "éaed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreih5akxqtddpi53splvwv2ryzbuqfrr2qvq24qxslkhrx755hhes7u",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "éaed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreih5akxqtddpi53splvwv2ryzbuqfrr2qvq24qxslkhrx755hhes7u",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "éaed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-non-ascii",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreigfljhr7wiosy7h5z5u4wwyxrc2af4mly2qa4mlf7elm3a5ae34nm invalid -",
+      "rawCID" : "bafyreih5akxqtddpi53splvwv2ryzbuqfrr2qvq24qxslkhrx755hhes7u",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreihwzshqrctb6si2r2u4bvmwoodzeiwrdnztjexju25cyqzsre556i invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "０aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibgbqgci2h5xstrdhui64zwn4lwqyxuocpyd2iuy2ltyyromflhha",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "０aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreibgbqgci2h5xstrdhui64zwn4lwqyxuocpyd2iuy2ltyyromflhha",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "０aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-fullwidth-digit",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreihwzshqrctb6si2r2u4bvmwoodzeiwrdnztjexju25cyqzsre556i invalid -",
+      "rawCID" : "bafyreibgbqgci2h5xstrdhui64zwn4lwqyxuocpyd2iuy2ltyyromflhha",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreictkytkjuy5icjdje4okeinojfwrvksw22qtmyepwixfv6ucftk7m invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "\r\ned61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreiajxucaw63hmchutzcmk25mg6vm6xabhuw6djkkmmz73qphwzgr6e",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "\r\ned61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreiajxucaw63hmchutzcmk25mg6vm6xabhuw6djkkmmz73qphwzgr6e",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "\r\ned61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-crlf",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreictkytkjuy5icjdje4okeinojfwrvksw22qtmyepwixfv6ucftk7m invalid -",
+      "rawCID" : "bafyreiajxucaw63hmchutzcmk25mg6vm6xabhuw6djkkmmz73qphwzgr6e",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreihfw7mhihg7amo2jakloj7qduhze6itsf2nmy3funz47hbkfcocbi invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6́aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreicngddzsqpvpk6tc64qmjqc7o4pjg6xuwooceoyivblxulhkthq7y",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6́aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreicngddzsqpvpk6tc64qmjqc7o4pjg6xuwooceoyivblxulhkthq7y",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6́aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-combining-mark",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreihfw7mhihg7amo2jakloj7qduhze6itsf2nmy3funz47hbkfcocbi invalid -",
+      "rawCID" : "bafyreicngddzsqpvpk6tc64qmjqc7o4pjg6xuwooceoyivblxulhkthq7y",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ED018A88E3DD7409F195FD52DB2D3CBA5D72CA6709BF1D94121BF3748801B40F6F5C",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-uppercase",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreiclhqbd36ckbrf2grtb5wetbfoopin4ubbi7lvkwz3fdjq62tg5si throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreiedxstykqatpaqc2hfntpp6ccbykutfmmfehd7dqsspvl7w4ftdbe",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "0xed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-0x",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreighmlqwx64wwheuhdezarz5dozhnp2qjrs36tgkytfmhi2jvqetna throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreihlj32t2wrirtqzapkqznmakmigmyav36p3ofunt2t6elwvqck7oa",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreiethktfmdujugo3jp33hgifx7ut7lhnegfgvcmwtz72npa3bunz6m"
+      ],
+      "block" : "bafyreidtwwv34n25glo3vs5butwsonloyjvjkey32sztnredr3mrkz2mqu invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "0Xed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreihbui7mm2cuahpfixk7s25aho2uu6qsmt5lzkeirjdsd7qxsqjxl4",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "0Xed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreihbui7mm2cuahpfixk7s25aho2uu6qsmt5lzkeirjdsd7qxsqjxl4",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "0Xed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-0X",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreidtwwv34n25glo3vs5butwsonloyjvjkey32sztnredr3mrkz2mqu invalid -",
+      "rawCID" : "bafyreihbui7mm2cuahpfixk7s25aho2uu6qsmt5lzkeirjdsd7qxsqjxl4",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed81008a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-non-minimal-varint",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreigiy4gd3newjsmrpve3h4un2havuj6w7zmtmom3vwwwkdmdc6gxza throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreif6elb5e57rsnp3hxog4pqmr6teygv7cc3nofdvauizccspofbc3y",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreicgszp23a6g6g2xvvypnff4yzpn46qg33nxrip6dj4pf2k3hzdn2y"
+      ],
+      "block" : "bafyreifa6n2qzopvu5jyjrr45snkyi4wgt4w63rntj6rvll2g5tundnjxy invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "e7018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreidp4h34rtqyf76jchf5nxvmugkiv5pgifczpgwb27i5q5doindrci",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "e7018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreidp4h34rtqyf76jchf5nxvmugkiv5pgifczpgwb27i5q5doindrci",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "e7018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-secp256k1-code",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreifa6n2qzopvu5jyjrr45snkyi4wgt4w63rntj6rvll2g5tundnjxy invalid -",
+      "rawCID" : "bafyreidp4h34rtqyf76jchf5nxvmugkiv5pgifczpgwb27i5q5doindrci",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreihdhzpqu3el2ufa66mkkq6sxxt4kij7w5m5pdfrpx7iv73auu3jl4"
+      ],
+      "block" : "bafyreicre4j2obaw54eyqpdia57xt3sb2sdh5kl7uu5ur5dh2phxwg7d7y invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreifemi5n7xbnxjfd5vmvbp5rbkj25fvxf2k3wozbpye5imar7v2ly4",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreifemi5n7xbnxjfd5vmvbp5rbkj25fvxf2k3wozbpye5imar7v2ly4",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-unregistered-code",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreicre4j2obaw54eyqpdia57xt3sb2sdh5kl7uu5ur5dh2phxwg7d7y invalid -",
+      "rawCID" : "bafyreifemi5n7xbnxjfd5vmvbp5rbkj25fvxf2k3wozbpye5imar7v2ly4",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreicrpv2jkg5anl7i4mjuqackseeontwjnzeu335p43ilatmguwqkvy"
+      ],
+      "block" : "bafyreicmlk7i54imjnljoowhyqcpmwmkyfvh5sk3jmiknj3rn5bwifh2l4 invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibbekm4wk24c2d2d5zgjmpug5hd6aryop2cleai3cknq7mhd6tfuu",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreibbekm4wk24c2d2d5zgjmpug5hd6aryop2cleai3cknq7mhd6tfuu",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-bare-32-bytes",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreicmlk7i54imjnljoowhyqcpmwmkyfvh5sk3jmiknj3rn5bwifh2l4 invalid -",
+      "rawCID" : "bafyreibbekm4wk24c2d2d5zgjmpug5hd6aryop2cleai3cknq7mhd6tfuu",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreigkzjgdwqm2vihzksktp3umcc4czvbo6forpea53knlzft6wswahe"
+      ],
+      "block" : "bafyreid5pjwmvqpqx4hpacsu2ozqmyjcv56m62s7wnjqedrqsefxsyzwja invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreigujed2fxwpudxibor2n3awm5zkczcovcchzev4ks24x6l6mt4puy",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreigujed2fxwpudxibor2n3awm5zkczcovcchzev4ks24x6l6mt4puy",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-truncated",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreid5pjwmvqpqx4hpacsu2ozqmyjcv56m62s7wnjqedrqsefxsyzwja invalid -",
+      "rawCID" : "bafyreigujed2fxwpudxibor2n3awm5zkczcovcchzev4ks24x6l6mt4puy",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreifdkq2xqmxtsye3wgqof3n33y2gu5yoiasxnqrytk6hjx3coclkqu"
+      ],
+      "block" : "bafyreide3pfug4k2uxwtg53l3gvacdbb4aizpzkyetoqtdw4ritqbqgsvi invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c00",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreienv7v7vcddc5svy74dpg6tx35ibtks6rsqi33sdh5rs5x7tdr6em",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c00",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreienv7v7vcddc5svy74dpg6tx35ibtks6rsqi33sdh5rs5x7tdr6em",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c00",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-extended",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreide3pfug4k2uxwtg53l3gvacdbb4aizpzkyetoqtdw4ritqbqgsvi invalid -",
+      "rawCID" : "bafyreienv7v7vcddc5svy74dpg6tx35ibtks6rsqi33sdh5rs5x7tdr6em",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreihm5suozqdmllue3ojabvojycwhkbktuad4t2fynskge6deu7tgkm"
+      ],
+      "block" : "bafyreibmwagofs7vf2bf453znctzk4kba5fpjvvwvfolarm3bdakrcdxji invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreideyd7smrscxddjofosxhh4fdu3i6shrfnlteek6lgmrmllujbhs4",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreideyd7smrscxddjofosxhh4fdu3i6shrfnlteek6lgmrmllujbhs4",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-odd-length",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreibmwagofs7vf2bf453znctzk4kba5fpjvvwvfolarm3bdakrcdxji invalid -",
+      "rawCID" : "bafyreideyd7smrscxddjofosxhh4fdu3i6shrfnlteek6lgmrmllujbhs4",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreigw2fluvxuwrtjxy5ukvuugwss3bzh2b63lzmldjaeiuuxtfbtjcq"
+      ],
+      "block" : "bafyreihbbcjiorvkaqrqnyfp6myxygtglkd2x336mjlbnrd7u5ep4pg4xm invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreie4gdftyz6jixey7xhapnvrlopnhy4o2zapet7bd6eyrb4eein5xe",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreie4gdftyz6jixey7xhapnvrlopnhy4o2zapet7bd6eyrb4eein5xe",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-empty",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreihbbcjiorvkaqrqnyfp6myxygtglkd2x336mjlbnrd7u5ep4pg4xm invalid -",
+      "rawCID" : "bafyreie4gdftyz6jixey7xhapnvrlopnhy4o2zapet7bd6eyrb4eein5xe",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreifarqfkxrupvqi2d5bde3ee5jv6iopy4l3g5cg4fggsdmv5bhfmyu"
+      ],
+      "block" : "bafyreiaxa5vsiykpquve4vs7uzqpnvdulgsz4o7th5vi3z2tmrfbdrdpym invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "zz018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreiafozbrhyu6vedpbkctw6sb4magn5ei6cuyqb5ecdglvqutzkvmma",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "zz018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreiafozbrhyu6vedpbkctw6sb4magn5ei6cuyqb5ecdglvqutzkvmma",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "zz018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-non-hex",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreiaxa5vsiykpquve4vs7uzqpnvdulgsz4o7th5vi3z2tmrfbdrdpym invalid -",
+      "rawCID" : "bafyreiafozbrhyu6vedpbkctw6sb4magn5ei6cuyqb5ecdglvqutzkvmma",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreiddu3cq2gazkqntd2msocy77cbkoiph2cf223wptgd3qmuv5hh2ua"
+      ],
+      "block" : "bafyreic2wtj2atfwsc3x2xf6z27rk6sjfypgda5ikoc44ef3jx4iwsednu invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "éd018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreihz7ioqbnuirs55sudpvlws6flplsjzp5sgnp2brov7r4yhwwjgkq",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "éd018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreihz7ioqbnuirs55sudpvlws6flplsjzp5sgnp2brov7r4yhwwjgkq",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "éd018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-non-ascii",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreic2wtj2atfwsc3x2xf6z27rk6sjfypgda5ikoc44ef3jx4iwsednu invalid -",
+      "rawCID" : "bafyreihz7ioqbnuirs55sudpvlws6flplsjzp5sgnp2brov7r4yhwwjgkq",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34",
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreieiaopcwrubrtb54lke4t3o4n76hquxpadmpm3tquforavdpz45hm invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ED018A88E3DD7409F195FD52DB2D3CBA5D72CA6709BF1D94121BF3748801B40F6F5C",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreiauh7jfqp4perxapfuh2ma5agj24isx2p4alwqqx25xhunmkn7nbm",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        },
+        {
+          "key" : "ED018A88E3DD7409F195FD52DB2D3CBA5D72CA6709BF1D94121BF3748801B40F6F5C",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true,
+        true
+      ],
+      "name" : "duplicate-key-spellings",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreiebmnaca322u5pttgpumcifq6zehmgqkr63ljedptwlst32vlowum throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreicbfsjygr33gmovtmaneyeigvyp4nkyawkx45obixhqld5m6puiv4",
+      "verifies" : [
+        true,
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34",
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true,
+        true
+      ],
+      "name" : "duplicate-entry",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreidezd5kddbswti576hwyvbpujbgyw6klxrt3a6dhspmj2t7z3rdi4 throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreig2ccttypfq7f7q7phjcx36mdoww3nwepxejpygeqeio2m7cwotxy",
+      "verifies" : [
+        true,
+        true
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreiav5y4dn6zy6ld33ekru5kt3ftgllplpyqqcbhl7ygw3asoksscdq"
+      ],
+      "block" : "bafyreicbj3wzi5mm4igj3xu6ou7cg5zwk37wveuquvhowfvgrno5zehcpy invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "d100ea186b6307a94d5aff2e4b89c8e72c71d681ec39f176487ea01586f4d009afebf2b769320ca8639793b3305bf375b0fb7dd76beb505f99f6af75de537b07"
+        }
+      ],
+      "constructedCID" : "bafyreicn2z2re2jyp5yakitb2zkmtyfrutcmo4pfb4peiew7yesz5ry6v4",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : true,
+      "decoded" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "d100ea186b6307a94d5aff2e4b89c8e72c71d681ec39f176487ea01586f4d009afebf2b769320ca8639793b3305bf375b0fb7dd76beb505f99f6af75de537b07"
+        }
+      ],
+      "decodedCID" : "bafyreicn2z2re2jyp5yakitb2zkmtyfrutcmo4pfb4peiew7yesz5ry6v4",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "d100ea186b6307a94d5aff2e4b89c8e72c71d681ec39f176487ea01586f4d009afebf2b769320ca8639793b3305bf375b0fb7dd76beb505f99f6af75de537b07"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signed-by-the-wrong-key",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreicbj3wzi5mm4igj3xu6ou7cg5zwk37wveuquvhowfvgrno5zehcpy invalid -",
+      "rawCID" : "bafyreicn2z2re2jyp5yakitb2zkmtyfrutcmo4pfb4peiew7yesz5ry6v4",
+      "verifies" : [
+        true
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreigmsjjj7seffodoqp3vuvc4n3p6fbsqjqbkycxzgguei4jcfso4ta invalid -",
+      "bodyCID" : "bafyreib4oqoxaqmyxn5x6jr7ypcuyd6i6bspxixpgccf5sag4pw3n2j4bi",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "d9270267a7263818d4ee46c3065ce7dbe509681711c20a2aee94aa8b3c21d1bd29b8514384c23d75fd9cd5d0c4ea72e098ea7bbe5a1fbd8148498c4574d43905"
+        }
+      ],
+      "constructedCID" : "bafyreielnv6pxwh73alhb3ov3ga3ntsqh6cmayeiys2vmpmwfzavsiw5ue",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : true,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "d9270267a7263818d4ee46c3065ce7dbe509681711c20a2aee94aa8b3c21d1bd29b8514384c23d75fd9cd5d0c4ea72e098ea7bbe5a1fbd8148498c4574d43905"
+        }
+      ],
+      "decodedCID" : "bafyreielnv6pxwh73alhb3ov3ga3ntsqh6cmayeiys2vmpmwfzavsiw5ue",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "d9270267a7263818d4ee46c3065ce7dbe509681711c20a2aee94aa8b3c21d1bd29b8514384c23d75fd9cd5d0c4ea72e098ea7bbe5a1fbd8148498c4574d43905"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "missing-a-declared-signer",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreigmsjjj7seffodoqp3vuvc4n3p6fbsqjqbkycxzgguei4jcfso4ta invalid -",
+      "rawCID" : "bafyreielnv6pxwh73alhb3ov3ga3ntsqh6cmayeiys2vmpmwfzavsiw5ue",
+      "verifies" : [
+        true
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34",
+        "bafyreiav5y4dn6zy6ld33ekru5kt3ftgllplpyqqcbhl7ygw3asoksscdq"
+      ],
+      "block" : "bafyreifjqnaiteslauuwdkpsikk6t7fykeb7is7gkfssxa5azlteua67bi invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "23f99cd4b199da856635a96d4a42aa05ab55c7ec8a9544bb22c9e9276e66a0ad590df966f090816b781b8970bda9004c754282a809781892b1c58f6445b0c202"
+        },
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreiesv3j3v5tv2cjdiclnfgqmcqza6zqfaw6jrateqj462nxbw7lzqe",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        },
+        {
+          "key" : "ed018139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+          "value" : "23f99cd4b199da856635a96d4a42aa05ab55c7ec8a9544bb22c9e9276e66a0ad590df966f090816b781b8970bda9004c754282a809781892b1c58f6445b0c202"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true,
+        true
+      ],
+      "name" : "an-undeclared-signer",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreicm44hdzmdwn3h5ru3gav7pq6oexrr7nhs3lmnokj5u5aqq6noqyu throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreiasucpzehneow4sr2zspz66jyjrfnmoid4ttm3siaj4uqvfyrnm2u",
+      "verifies" : [
+        true,
+        true
+      ]
+    },
+    {
+      "addresses" : [
+
+      ],
+      "block" : "bafyreiea4zcbzhsfzieg2c5p4qrhguz7ty4mxgbmhdcvlnshenwiwfusv4 invalid -",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+
+      ],
+      "constructedCID" : "bafyreicig7cs37dbrxmh4cx24dugfmj6pse5gyvffre2boyozsgq2ri7yq",
+      "constructedSignaturesMatchSigners" : false,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+
+      ],
+      "decodedCID" : "bafyreicig7cs37dbrxmh4cx24dugfmj6pse5gyvffre2boyozsgq2ri7yq",
+      "decodedSignaturesMatchSigners" : false,
+      "decodedSignaturesValid" : false,
+      "input" : [
+
+      ],
+      "isAddressOfItsKey" : [
+
+      ],
+      "name" : "no-signatures",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreiea4zcbzhsfzieg2c5p4qrhguz7ty4mxgbmhdcvlnshenwiwfusv4 invalid -",
+      "rawCID" : "bafyreicig7cs37dbrxmh4cx24dugfmj6pse5gyvffre2boyozsgq2ri7yq",
+      "verifies" : [
+
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicmiwascop3ylip67l4db2cvw7utee5nv63nsimtr6iqvcu7yxmoq invalid -",
+      "bodyCID" : "bafyreibya4pv5kebhkd6idysilitynq67pxkhocnowbixccgjshzb4ntka",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreicxaddvdacsmyjrd2xpwnsmq4t45fbmfawasrdz323izawlp6mfla",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : false,
+      "decoded" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "decodedCID" : "bafyreicxaddvdacsmyjrd2xpwnsmq4t45fbmfawasrdz323izawlp6mfla",
+      "decodedSignaturesMatchSigners" : true,
+      "decodedSignaturesValid" : false,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "signature-over-another-body",
+      "preflight" : "invalid",
+      "preflightWithoutPolicies" : "invalid",
+      "rawBlock" : "bafyreicmiwascop3ylip67l4db2cvw7utee5nv63nsimtr6iqvcu7yxmoq invalid -",
+      "rawCID" : "bafyreicxaddvdacsmyjrd2xpwnsmq4t45fbmfawasrdz323izawlp6mfla",
+      "verifies" : [
+        false
+      ]
+    },
+    {
+      "addresses" : [
+        "bafyreig4rfs3ywfwh3nnvysrpfhovdbodgdypmxgptlmnhduedv2iyqp34"
+      ],
+      "block" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
+      "bodyCID" : "bafyreicxefg26facshxbybjtjze4sgwdzr2qthvadk3rxssupewfxp6b6q",
+      "constructed" : [
+        {
+          "key" : "ed018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "constructedCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
+      "constructedSignaturesMatchSigners" : true,
+      "constructedSignaturesValid" : true,
+      "input" : [
+        {
+          "key" : "ed018a88e3dd74+9f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "value" : "6aed61a2e514ceb39f88d7846f105efb704acfa03a64a2830b97a8fe6ec508f3fb89d70eaa1a6e75b57dcc97052197ccad7f203e1cee3c0b9770b7d4d800e30d"
+        }
+      ],
+      "isAddressOfItsKey" : [
+        true
+      ],
+      "name" : "key-plus-sign",
+      "preflight" : "ready",
+      "preflightWithoutPolicies" : "ready",
+      "rawBlock" : "bafyreidtzo4vrpftwpykg4pjn5573b3e6jwgmq23wp5ud45z5aqtvyl5ii throws cashew.CashewDecodingError",
+      "rawCID" : "bafyreifu2akaj5tq4yznhmp2ltngyndmxxhoeqrkc3arrlixtcwh5tnxda",
+      "verifies" : [
+        false
+      ]
+    }
+  ]
+}
