@@ -1,10 +1,10 @@
 {
-  "originHash" : "4be3c28e17e7a9c1c3b5833754f3dac7866639e12bd9fdaa538778be8ebd2de6",
+  "originHash" : "40a17950f77f6338412f4e37813910d5385dae18477bfec51d8127c5c083c2a7",
   "pins" : [
     {
       "identity" : "arraytrie",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/adalinxx/ArrayTrie.git",
+      "location" : "https://github.com/0xLattice/ArrayTrie.git",
       "state" : {
         "revision" : "8f8d3aacbd86999fffeebd60a0e89a423a41a8dc",
         "version" : "1.0.1"
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/0xLattice/cashew.git",
       "state" : {
-        "revision" : "5daec3cdfd3d572d9437daa7a84242f7ae5a96d5",
-        "version" : "5.0.3"
+        "revision" : "6c9bb7eb0fc5624e7bd6597960521b00a3831a15",
+        "version" : "5.0.5"
       }
     },
     {

@@ -23,38 +23,41 @@ package struct CIDDigest: Hashable, Comparable, Sendable {
     /// and `string` are then inverse, so the text a caller asks with matches
     /// exactly the text a held identity answers with.
     package init?(_ cid: String) {
-        let text = cid.utf8
-        guard text.count == Self.textLength, text.first == UInt8(ascii: "b") else { return nil }
-        // Decoded straight into the words: byte n of the 36 is the prefix
-        // for n < 4, then digest byte n - 4.
-        var words: (UInt64, UInt64, UInt64, UInt64) = (0, 0, 0, 0)
-        var buffer: UInt32 = 0
-        var bits = 0
-        var index = 0
-        for character in text.dropFirst() {
-            let value: UInt32
-            switch character {
-            case UInt8(ascii: "a")...UInt8(ascii: "z"): value = UInt32(character - UInt8(ascii: "a"))
-            case UInt8(ascii: "2")...UInt8(ascii: "7"): value = UInt32(character - UInt8(ascii: "2")) + 26
-            default: return nil
-            }
-            buffer = buffer << 5 | value
-            bits += 5
-            guard bits >= 8 else { continue }
-            bits -= 8
-            let byte = UInt64(UInt8(truncatingIfNeeded: buffer >> UInt32(bits)))
-            switch index {
-            case 0..<4: guard byte == UInt64(Self.prefix[index]) else { return nil }
-            case 4..<12: words.0 = words.0 << 8 | byte
-            case 12..<20: words.1 = words.1 << 8 | byte
-            case 20..<28: words.2 = words.2 << 8 | byte
-            default: words.3 = words.3 << 8 | byte
-            }
-            index += 1
-        }
-        // The two bits past the last byte are padding and must be zero.
-        guard bits == 2, buffer & 0b11 == 0, index == 36 else { return nil }
+        var cid = cid
+        guard let words = cid.withUTF8(Self.words(decoding:)) else { return nil }
         self.init(w0: words.0, w1: words.1, w2: words.2, w3: words.3)
+    }
+
+    private static func words(decoding text: UnsafeBufferPointer<UInt8>) -> (UInt64, UInt64, UInt64, UInt64)? {
+        guard text.count == textLength, text[0] == UInt8(ascii: "b") else { return nil }
+        return withUnsafeTemporaryAllocation(byteCount: 36, alignment: 8) { bytes in
+            var buffer: UInt32 = 0
+            var bits = 0
+            var index = 0
+            for position in 1..<textLength {
+                let character = text[position]
+                let value: UInt32
+                switch character {
+                case UInt8(ascii: "a")...UInt8(ascii: "z"): value = UInt32(character &- UInt8(ascii: "a"))
+                case UInt8(ascii: "2")...UInt8(ascii: "7"): value = UInt32(character &- UInt8(ascii: "2")) &+ 26
+                default: return nil
+                }
+                buffer = buffer << 5 | value
+                bits += 5
+                guard bits >= 8 else { continue }
+                bits -= 8
+                bytes[index] = UInt8(truncatingIfNeeded: buffer >> UInt32(bits))
+                index += 1
+            }
+            // The two bits past the last byte are padding and must be zero.
+            guard bits == 2, buffer & 0b11 == 0, index == 36,
+                  (0..<4).allSatisfy({ bytes[$0] == prefix[$0] }) else { return nil }
+            // Byte n of the 36 is the prefix for n < 4, then digest byte n - 4.
+            return (UInt64(bigEndian: bytes.loadUnaligned(fromByteOffset: 4, as: UInt64.self)),
+                    UInt64(bigEndian: bytes.loadUnaligned(fromByteOffset: 12, as: UInt64.self)),
+                    UInt64(bigEndian: bytes.loadUnaligned(fromByteOffset: 20, as: UInt64.self)),
+                    UInt64(bigEndian: bytes.loadUnaligned(fromByteOffset: 28, as: UInt64.self)))
+        }
     }
 
     package init(w0: UInt64, w1: UInt64, w2: UInt64, w3: UInt64) {

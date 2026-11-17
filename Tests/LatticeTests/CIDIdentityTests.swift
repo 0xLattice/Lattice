@@ -82,7 +82,10 @@ final class CIDIdentityTests: XCTestCase {
         XCTAssertEqual(CIDIdentity.canonicalString(long), long)
         XCTAssertFalse(CIDIdentity.isProvenCanonical(long))
 
-        let short = testCID("short-is-remembered")
+        // A short canonical CID the parse proves (the standard CID never
+        // reaches the memo: `CIDDigest` proves it without a parse).
+        let digest = Array(try CID(testCID("short-is-remembered")).rawBuffer.suffix(32))
+        let short = CIDIdentity.base32Multibase([0x01, 0x55, 0x12, 0x20] + digest)
         XCTAssertEqual(CIDIdentity.canonicalString(short), short)
         XCTAssertTrue(CIDIdentity.isProvenCanonical(short))
     }
