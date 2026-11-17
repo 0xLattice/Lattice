@@ -160,8 +160,9 @@ public struct ConnectVerdict: Sendable {
     }
 
     /// The block `connect` executed, as it decoded it, when the verdict is
-    /// valid: a caller storing the block need not resolve and decode it
-    /// again. Nil for any other verdict.
+    /// valid: a caller storing the block need not resolve and decode its
+    /// node again. Only the block's own node: its links (transactions,
+    /// states, children) are not loaded. Nil for any other verdict.
     public var connectedBlock: Block? {
         if case .valid(_, _, let block) = outcome { return block }
         return nil

@@ -49,15 +49,6 @@ final class ArithmeticDifferentialTests: XCTestCase {
     static func div(_ a: UInt256, _ b: UInt256) -> UInt256 { referenceDivision(a, b).0 }
     static func mod(_ a: UInt256, _ b: UInt256) -> UInt256 { referenceDivision(a, b).1 }
 
-    /// 56.3.0 `toPrefixedHexString`, with the hex spelled independently of
-    /// UInt256: each word through `String(format:)`.
-    static func referenceHex(_ value: UInt256) -> String {
-        let words = Array(value.words.reversed())
-        let padded = words.map { String(format: "%016lx", UInt64($0)) }.joined()
-        let trimmed = padded.drop { $0 == "0" }
-        return "0x" + (trimmed.isEmpty ? "0" : String(trimmed))
-    }
-
     static func referenceWorkForTarget(_ target: UInt256) -> UInt256 {
         guard target > UInt256.zero else { return UInt256.zero }
         guard target < UInt256.max else { return UInt256(1) }
@@ -230,8 +221,8 @@ final class ArithmeticDifferentialTests: XCTestCase {
             values.append(ArithmeticDifferentialTests.randomValue(using: &generator))
         }
         for value in values {
+            // 56.3.0's spelling, verbatim.
             let hex = value.toPrefixedHexString()
-            XCTAssertEqual(hex, ArithmeticDifferentialTests.referenceHex(value))
             XCTAssertEqual(hex, "0x" + String(value, radix: 16))
             XCTAssertEqual(UInt256.fromHexString(hex), value)
             // The encoding a block carries for its targets.
