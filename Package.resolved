@@ -1,5 +1,5 @@
 {
-  "originHash" : "5d7c8169344c48749033884243d7388f2b70b2523baf8d9be76fdddbcbe18f61",
+  "originHash" : "4be3c28e17e7a9c1c3b5833754f3dac7866639e12bd9fdaa538778be8ebd2de6",
   "pins" : [
     {
       "identity" : "arraytrie",
@@ -186,8 +186,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/0xLattice/UInt256.git",
       "state" : {
-        "revision" : "19e20ada50f87beb33f1f073f9c3fba786a4564e",
-        "version" : "1.1.0"
+        "revision" : "ef4c2794277ea7e1e1bd7134fd3cd95e4d347613",
+        "version" : "2.0.0"
       }
     },
     {

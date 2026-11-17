@@ -16,11 +16,11 @@ public extension ChainSpec {
         guard denominator > .zero else { return UInt256.max }
         guard numerator > .zero else { return .zero }
 
-        let quotient = value / denominator
-        let remainder = value % denominator
+        let (quotient, remainder) = UInt256.divisionWithRemainder(value, denominator)
+        let limit = UInt256.max / numerator
 
-        let scaledQuotient = quotient > UInt256.max / numerator ? UInt256.max : quotient * numerator
-        let scaledRemainderProduct = remainder > UInt256.max / numerator ? UInt256.max : remainder * numerator
+        let scaledQuotient = quotient > limit ? UInt256.max : quotient * numerator
+        let scaledRemainderProduct = remainder > limit ? UInt256.max : remainder * numerator
         let scaledRemainder = scaledRemainderProduct / denominator
 
         return scaledQuotient > UInt256.max - scaledRemainder

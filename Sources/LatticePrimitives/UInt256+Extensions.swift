@@ -7,8 +7,11 @@ public extension UInt256 {
     /// Converts UInt256 to hexadecimal string with "0x" prefix
     /// - Returns: A hexadecimal string representation with "0x" prefix
     func toPrefixedHexString() -> String {
-        let hexString = String(self, radix: 16)
-        return "0x" + hexString
+        // `"0x" + String(self, radix: 16)`: the 64 padded digits without
+        // their leading zeros, keeping one for zero.
+        let digits = toHexString().utf8
+        let significant = digits.drop { $0 == UInt8(ascii: "0") }
+        return "0x" + (significant.isEmpty ? "0" : String(decoding: significant, as: UTF8.self))
     }
     
     /// Creates a UInt256 from a hexadecimal string
