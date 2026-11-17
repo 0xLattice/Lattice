@@ -113,6 +113,38 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
         }
     }
 
+    /// Every spelling `Data(hex:)` might meet: the hex digits of both cases,
+    /// the `0x`/`0X` prefixes, the signs `UInt8(_:radix:)` accepts, and
+    /// non-ASCII text, including a combining mark that joins a digit into one
+    /// Character and a CR LF pair that is one.
+    func testHexDecodingMatchesTheStringParser() {
+        let alphabet = [
+            "0", "1", "7", "9", "a", "c", "f", "A", "C", "F", "x", "X", "+", "-",
+            " ", "g", "G", "0x", "0X", "\u{301}", "é", "０", "٣", "\r\n", "\n", "\u{0}",
+        ]
+        var rng = SeededRNG(seed: 0x6465_636f)
+        var inputs = [
+            "", "0", "0x", "0X", "00", "0x00", "0X00", "+f", "-0", "-1", "+-", "0x+f",
+            "0x\u{301}00", "0\u{301}0", "\r\n00", "ff", "FF", "fF", "0x0x00", "x0",
+        ]
+        for _ in 0..<20_000 {
+            let length = Int.random(in: 0...10, using: &rng)
+            inputs.append((0..<length).map { _ in alphabet.randomElement(using: &rng)! }.joined())
+        }
+        for _ in 0..<2_000 {
+            let bytes = Data((0..<Int.random(in: 0...40, using: &rng)).map { _ in UInt8.random(in: 0...255, using: &rng) })
+            var hex = Reference57.hexString(bytes)
+            if Bool.random(using: &rng) { hex = hex.uppercased() }
+            if Bool.random(using: &rng) { hex = "0x" + hex }
+            inputs.append(hex)
+        }
+        // `hexBytes` is `Data(hex:)`: this module declares a `Data(hex:)` of
+        // its own, which shadows Lattice's here.
+        for input in inputs {
+            XCTAssertEqual(hexBytes(input), Reference57.data(hex: input), "\(input.debugDescription)")
+        }
+    }
+
     /// Keys of every registered type, unregistered codes, non-minimal and
     /// truncated varints, and spellings, through each place a key is read.
     func testKeyAndSignatureNormalizationMatches() throws {
