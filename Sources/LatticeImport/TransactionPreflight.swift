@@ -72,7 +72,8 @@ public enum TransactionPreflight {
     /// signature verifies, the signing keys are exactly the signers). They
     /// read nothing but the transaction's own content, which its CID fixes,
     /// so a host re-checking one it already judged by them on admission
-    /// would learn nothing new on another tip.
+    /// would learn nothing new on another tip. That holds for the same
+    /// transaction, signatures included: its body alone does not fix them.
     public static func classify(
         _ transaction: Transaction,
         tipCID: String,

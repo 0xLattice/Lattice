@@ -103,7 +103,9 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
 
     func testHexStringMatchesFormatSpelling() {
         var rng = SeededRNG(seed: 0x6865_7873)
-        var inputs: [Data] = [Data(), Data([0]), Data([0xff]), Data(0...255)]
+        // Slices keep their parent's indices: `hexString` must not assume 0.
+        let whole = Data(0...255)
+        var inputs: [Data] = [Data(), Data([0]), Data([0xff]), whole, whole[7...], whole[100..<101], whole[255...]]
         for _ in 0..<4_000 {
             let count = Int.random(in: 0...80, using: &rng)
             inputs.append(Data((0..<count).map { _ in UInt8.random(in: 0...255, using: &rng) }))
@@ -312,14 +314,26 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
         return String(characters)
     }
 
-    /// The corpus's inputs, made fresh: each case's body and signature
-    /// entries. Signing until a spelling exists keeps every case present.
-    static func freshInputs() -> [(name: String, body: HeaderImpl<TransactionBody>, input: [Entry])] {
+    /// The corpus's inputs: each case's body and signature entries.
+    /// `signing: false` builds the bodies alone, with a placeholder for every
+    /// signature: reading the corpus signs nothing. Regeneration signs until
+    /// the signature has the byte pairs the sign spellings need; that takes a
+    /// randomized signer (CryptoKit, on Apple hosts). A deterministic one
+    /// (BoringSSL, on Linux) signs the same bytes every time, so it is given
+    /// a bounded number of tries.
+    static func freshInputs(signing: Bool = true) -> [(name: String, body: HeaderImpl<TransactionBody>, input: [Entry])] {
         let single = body(signers: [alice])
         let both = body(signers: [alice, bob])
+        let placeholder = String(repeating: "00", count: 64)
+        let sign = { (body: HeaderImpl<TransactionBody>, key: (privateKey: String, publicKey: String)) in
+            signing ? Self.sign(body, key) : placeholder
+        }
         var aliceSignature = sign(single, alice)
+        var tries = 1
         while signed(aliceSignature, "+") == nil || signed(aliceSignature, "-", requiringZeroPair: true) == nil {
+            precondition(tries < 1_000, "regenerate on a host whose Ed25519 signatures are randomized")
             aliceSignature = sign(single, alice)
+            tries += 1
         }
         let a = alice.publicKey
         let flipped = String(aliceSignature.prefix(10))
@@ -388,7 +402,7 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
             let golden = try JSONDecoder().decode(Corpus.self, from: data)
             // The bodies are rebuilt and checked against the file: only the
             // signatures are read from it.
-            let bodies = Dictionary(uniqueKeysWithValues: Self.freshInputs().map { ($0.name, $0.body) })
+            let bodies = Dictionary(uniqueKeysWithValues: Self.freshInputs(signing: false).map { ($0.name, $0.body) })
             inputs = try golden.records.map { record in
                 (record.name, try XCTUnwrap(bodies[record.name], record.name), record.input)
             }

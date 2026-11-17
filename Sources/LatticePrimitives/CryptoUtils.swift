@@ -15,7 +15,7 @@ public struct CryptoUtils {
         let pubKeyData = privateKey.publicKey.rawRepresentation
         let privKeyData = privateKey.rawRepresentation
         let mk = Multikey(keyType: .ed25519, keyBytes: pubKeyData)
-        return (privKeyData.hexString, mk.hexEncoded)
+        return (privKeyData.hexString, mk.encode().hexString)
     }
 
     // MARK: - Signing
