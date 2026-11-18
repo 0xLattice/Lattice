@@ -423,7 +423,9 @@ final class ParentAnchorEndToEndTests: XCTestCase {
     /// (§3.5): with the parent's state let go of, and no one holding it, the
     /// block is unavailable, never invalid; given only the witness
     /// `storeParentReceiptWitness` stores, it executes, and its verdict
-    /// carries the post-state its execution produced.
+    /// carries the post-state its execution produced. Anchored where its
+    /// receipt is absent, it is unavailable without the parent's state and
+    /// invalid with its witness alone: the witness proves the absence.
     func testAWithdrawalExecutesFromItsParentReceiptWitnessAlone() async throws {
         let w = try await World()
         // Another receipt beside it: the witness holds the one path only.
@@ -509,6 +511,11 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         )
         try await w.weigh(forged, carrierParent: bare, on: &child)
         let bareState = try await closure(of: bare.postState, from: w.fetcher).subtracting(childState)
+        let unrefuted = await ChainTree.connect(
+            try XCTUnwrap(child.connectJob(for: try cid(forged))),
+            fetcher: ParentStateLetGo(backing: w.fetcher, denied: bareState), parentFacts: w.facts
+        )
+        XCTAssertNotNil(unrefuted.retryFailure, "without the parent's state, no verdict: only the receipt read decides")
         let absence = StorableFetcher()
         try await VolumeImpl<Block>(node: forged).storeParentReceiptWitness(fetcher: w.fetcher, storer: absence)
         let refuted = await ChainTree.connect(
