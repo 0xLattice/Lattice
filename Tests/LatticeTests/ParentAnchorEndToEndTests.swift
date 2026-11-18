@@ -57,6 +57,25 @@ private actor GatedFetcher: Fetcher {
     func count(_ rawCid: String) -> Int { fetched[rawCid] ?? 0 }
 }
 
+/// Serves `backing` except `denied`, as a node that let go of that content
+/// and whose peers do not hold it either.
+private struct ParentStateLetGo: Fetcher {
+    let backing: StorableFetcher
+    let denied: Set<String>
+
+    func fetch(rawCid: String) async throws -> Data {
+        guard !denied.contains(rawCid) else { throw cashew.FetcherError.notFound(rawCid) }
+        return try await backing.fetch(rawCid: rawCid)
+    }
+}
+
+/// Every node of `state`'s closure, read from `fetcher`.
+private func closure(of state: LatticeStateHeader, from fetcher: StorableFetcher) async throws -> Set<String> {
+    let held = StorableFetcher()
+    try await state.resolveRecursive(fetcher: fetcher).storeRecursively(storer: held as any Storer)
+    return Set(held.entries.keys)
+}
+
 /// Parent facts that suspend before answering, as a source reading a live
 /// parent elsewhere does, and record every link a connect asks.
 private actor RecordingFacts: ParentChainFacts {
@@ -396,6 +415,118 @@ final class ParentAnchorEndToEndTests: XCTestCase {
             try await w.connect(onWFromC, on: &child), w.continuity(from: s, to: c3),
             block: onWFromC, tree: child, "a canonical-parent block on W, after the reorg"
         )
+    }
+
+    // MARK: - Parent-receipt witness
+
+    /// A child withdrawal executes from its parent-receipt witness alone
+    /// (§3.5): with the parent's state let go of, and no one holding it, the
+    /// block is unavailable, never invalid; given only the witness
+    /// `storeParentReceiptWitness` stores, it executes, and its verdict
+    /// carries the post-state its execution produced. Anchored where its
+    /// receipt is absent, it is unavailable without the parent's state and
+    /// invalid with its witness alone: the witness proves the absence.
+    func testAWithdrawalExecutesFromItsParentReceiptWitnessAlone() async throws {
+        let w = try await World()
+        // Another receipt beside it: the witness holds the one path only.
+        let other = ReceiptAction(
+            withdrawer: w.withdrawerAddr, nonce: w.depositNonce + 1, demander: w.demanderAddr,
+            amountDemanded: w.amount, directory: "Child"
+        )
+        func otherTx(nonce: UInt64) -> Transaction {
+            signTx(body: TransactionBody(
+                accountActions: [], actions: [], depositActions: [], receiptActions: [other],
+                withdrawalActions: [], signers: [w.withdrawerAddr], nonce: nonce, chainPath: w.rootPath
+            ), keypair: w.withdrawer)
+        }
+        let s = try await w.parentBlock(
+            on: w.g, at: -90_000, transactions: [w.receiptTx, otherTx(nonce: 1)], reward: w.withdrawerAddr
+        )
+        try await w.weighParent(s)
+        try await w.executeParent(s)
+        // A parent state with only the other receipt.
+        let bare = try await w.parentBlock(on: w.g, at: -89_000, transactions: [otherTx(nonce: 0)], reward: w.withdrawerAddr)
+        try await w.weighParent(bare)
+        try await w.executeParent(bare)
+        let genesis = try await w.childGenesis(anchoredAt: w.g, at: -94_000)
+        var child = try await w.bootstrapChild(genesis, carrierParent: w.g)
+        let deposit = try await w.childBlock(
+            previous: genesis, transactions: [w.depositTx], at: -80_000, reward: w.demanderAddr
+        )
+        try await w.weigh(deposit, carrierParent: w.g, on: &child)
+        try assertConnected(try await w.connect(deposit, on: &child), block: deposit, tree: child, "deposit")
+        let withdrawal = try await w.childBlock(
+            previous: deposit, anchoredAt: s, transactions: [w.withdrawalTx], at: -70_000, reward: w.withdrawerAddr
+        )
+        try await w.weigh(withdrawal, carrierParent: s, on: &child)
+
+        // The parent's state, but for what the child's own state shares.
+        let parentState = try await closure(of: s.postState, from: w.fetcher)
+        let childState = try await closure(of: deposit.postState, from: w.fetcher)
+        let lacking = parentState.subtracting(childState)
+        let witness = StorableFetcher()
+        // From the block's CID alone, as a node holding its content reads it.
+        try await VolumeImpl<Block>(rawCID: try cid(withdrawal)).storeParentReceiptWitness(fetcher: w.fetcher, storer: witness)
+        XCTAssertFalse(witness.contains(rawCid: try cid(withdrawal)), "the block's own Volume is its content's, not the witness's")
+        let witnessed = Set(witness.entries.keys).intersection(lacking)
+        XCTAssertFalse(witnessed.isEmpty, "the witness is parent state")
+        XCTAssertTrue(witnessed.contains(s.postState.rawCID), "rooted at the block's parentState")
+        let accounts = try XCTUnwrap(s.postState.node?.accountState.rawCID)
+        XCTAssertFalse(witness.contains(rawCid: accounts), "and only the receipt path under it")
+        let receipts = StorableFetcher()
+        let otherKey = ReceiptKey(receiptAction: other).storageKey
+        let otherPath = try await s.postState.resolve(
+            paths: [[RECEIPT_STATE_PROPERTY, otherKey]: .targeted], fetcher: w.fetcher
+        )
+        try await otherPath.store(paths: [[RECEIPT_STATE_PROPERTY, otherKey]: .targeted], storer: receipts)
+        let otherOnly = Set(receipts.entries.keys).subtracting(witness.entries.keys)
+        XCTAssertFalse(otherOnly.isEmpty, "the other receipt's path leaves the witness's somewhere")
+
+        var job = try XCTUnwrap(child.connectJob(for: try cid(withdrawal)))
+        let unavailable = await ChainTree.connect(
+            job, fetcher: ParentStateLetGo(backing: w.fetcher, denied: lacking), parentFacts: w.facts
+        )
+        let failure = try XCTUnwrap(unavailable.retryFailure, "no verdict without the parent's state")
+        XCTAssertFalse(BlockImport.isDeterministicInvalidity(failure))
+        XCTAssertNil(unavailable.materializedPostState)
+
+        job = try XCTUnwrap(child.connectJob(for: try cid(withdrawal)))
+        let verdict = await ChainTree.connect(
+            job, fetcher: ParentStateLetGo(backing: w.fetcher, denied: lacking.subtracting(witnessed)), parentFacts: w.facts
+        )
+        XCTAssertNil(verdict.retryFailure)
+        XCTAssertFalse(verdict.provesInvalid)
+        let produced = try XCTUnwrap(verdict.materializedPostState, "a valid verdict carries its post-state")
+        XCTAssertEqual(try LatticeStateHeader(node: produced).rawCID, withdrawal.postState.rawCID)
+        let applied = child.applyConnect(verdict)
+        try assertConnected(applied, block: withdrawal, tree: child, "the withdrawal from its witness")
+        XCTAssertEqual(
+            try applied.update?.materializedPostState.map { try LatticeStateHeader(node: $0).rawCID },
+            withdrawal.postState.rawCID, "the same state applying it materializes"
+        )
+
+        // The same withdrawal anchored where its receipt is absent: its
+        // witness proves the absence, so with that alone it is invalid, not
+        // unavailable. Holding the witness's nodes is the check.
+        let forged = try await w.childBlock(
+            previous: deposit, anchoredAt: bare, transactions: [w.withdrawalTx], at: -69_000, reward: w.withdrawerAddr
+        )
+        try await w.weigh(forged, carrierParent: bare, on: &child)
+        let bareState = try await closure(of: bare.postState, from: w.fetcher).subtracting(childState)
+        let unrefuted = await ChainTree.connect(
+            try XCTUnwrap(child.connectJob(for: try cid(forged))),
+            fetcher: ParentStateLetGo(backing: w.fetcher, denied: bareState), parentFacts: w.facts
+        )
+        XCTAssertNotNil(unrefuted.retryFailure, "without the parent's state, no verdict: only the receipt read decides")
+        let absence = StorableFetcher()
+        try await VolumeImpl<Block>(rawCID: try cid(forged)).storeParentReceiptWitness(fetcher: w.fetcher, storer: absence)
+        let refuted = await ChainTree.connect(
+            try XCTUnwrap(child.connectJob(for: try cid(forged))),
+            fetcher: ParentStateLetGo(backing: w.fetcher, denied: bareState.subtracting(absence.entries.keys)),
+            parentFacts: w.facts
+        )
+        XCTAssertTrue(refuted.provesInvalid, "\(String(describing: refuted.retryFailure))")
+        XCTAssertNil(refuted.materializedPostState)
     }
 
     // MARK: - 2. Laundering

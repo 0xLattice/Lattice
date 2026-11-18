@@ -159,6 +159,21 @@ public struct ConnectVerdict: Sendable {
         return nil
     }
 
+    /// The post-state the block's execution produced, when the verdict is
+    /// valid (`ChainTreeUpdate.materializedPostState` once applied). Nil for
+    /// any other verdict; a valid execution always materializes one.
+    ///
+    /// It is the transition's sparse state: the nodes the execution created,
+    /// over the pre-state it read. A caller that executes the block's child
+    /// before this verdict is applied and its state stored must serve those
+    /// nodes to the child's execution itself (its fetcher resolves the
+    /// child's `prevState` by CID). One that finds none commits before it
+    /// executes the child.
+    public var materializedPostState: LatticeState? {
+        if case .valid(_, let state, _) = outcome { return state }
+        return nil
+    }
+
     /// The block `connect` executed, as it decoded it, when the verdict is
     /// valid: a caller storing the block need not resolve and decode its
     /// node again. Only the block's own node: its links (transactions,
