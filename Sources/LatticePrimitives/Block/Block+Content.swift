@@ -94,17 +94,6 @@ public extension Block {
             }
             for action in body.withdrawalActions {
                 setPrevStatePath([DEPOSIT_STATE_PROPERTY, DepositKey(withdrawalAction: action).description])
-                if let directory = body.chainPath.last {
-                    let receiptKey = ReceiptKey(
-                        withdrawalAction: action,
-                        directory: directory
-                    )
-                    paths[[
-                        PARENT_STATE_PROPERTY,
-                        RECEIPT_STATE_PROPERTY,
-                        receiptKey.storageKey,
-                    ]] = .targeted
-                }
             }
             for action in body.receiptActions {
                 setPrevStatePath([
@@ -116,6 +105,28 @@ public extension Block {
             }
         }
 
+        paths.merge(parentReceiptWitnessPaths(transactionBodies: transactionBodies)) { $1 }
+        return paths
+    }
+
+    /// The parent-receipt witness of these transactions' withdrawals (§3.5):
+    /// for each, the path to its receipt in the block's
+    /// `parentState.receiptState`, which its execution proves (§8). None for
+    /// transactions with no withdrawal. The witness is validation data
+    /// outside `maxBlockSize`: its nodes are bound by CID to the block's
+    /// `parentState`, so whoever holds it can execute the block without the
+    /// rest of that parent state.
+    static func parentReceiptWitnessPaths(
+        transactionBodies: [TransactionBody]
+    ) -> [[String]: ResolutionStrategy] {
+        var paths: [[String]: ResolutionStrategy] = [:]
+        for body in transactionBodies {
+            guard let directory = body.chainPath.last else { continue }
+            for action in body.withdrawalActions {
+                let receiptKey = ReceiptKey(withdrawalAction: action, directory: directory)
+                paths[[PARENT_STATE_PROPERTY, RECEIPT_STATE_PROPERTY, receiptKey.storageKey]] = .targeted
+            }
+        }
         return paths
     }
 
@@ -220,35 +231,64 @@ public extension VolumeImpl where NodeType == Block {
         try await storeBlock(fetcher: fetcher, storer: storer, readsState: false)
     }
 
-    private func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer, readsState: Bool) async throws {
+    /// The parent-receipt witness of this block's withdrawals
+    /// (`Block.parentReceiptWitnessPaths`): the nodes of its
+    /// `parentState.receiptState` on the path to each withdrawal's receipt,
+    /// stored with the block's own Volume. A block with no withdrawal stores
+    /// that Volume alone and reads nothing under its parent state. The
+    /// transactions are read under the same byte bound as `storeBlock`.
+    ///
+    /// `storeBlockContent` and this together hold everything executing the
+    /// block reads but its pre-state, which a node derives by executing the
+    /// block's parent: a node that let go of the parent chain's state can
+    /// still execute a withdrawal it fetched with its witness.
+    func storeParentReceiptWitness(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
+        let (content, _) = try await resolveBoundedContent(fetcher: fetcher)
+        let paths = Block.parentReceiptWitnessPaths(transactionBodies: try Self.transactionBodies(of: content))
+        let resolved = try await content.resolve(paths: paths, fetcher: fetcher)
+        try await resolved.store(paths: paths.mapValues { _ in .targeted }, storer: storer)
+    }
+
+    /// The block's content (`Block.contentResolutionPaths`), its transactions
+    /// read under its chain's `maxBlockSize`, and that spec.
+    private func resolveBoundedContent(fetcher: any Fetcher) async throws -> (Self, ChainSpec) {
         let header = try await resolve(paths: [[SPEC_PROPERTY]: .targeted], fetcher: fetcher)
         guard let spec = header.node?.spec.node else { throw DataErrors.nodeNotAvailable }
         let counter = BlockContentByteCounter(limit: spec.maxBlockSize)
-        let content: Self
         do {
-            content = try await header.resolve(
+            let content = try await header.resolve(
                 paths: Block.contentResolutionPaths,
                 fetcher: fetcher,
                 cache: counter
             )
+            return (content, spec)
         } catch {
             throw await counter.failure ?? error
         }
-        guard let block = content.node,
-              let transactionNode = block.transactions.node else {
+    }
+
+    /// The bodies of the transactions resolved `content` carries.
+    private static func transactionBodies(of content: Self) throws -> [TransactionBody] {
+        guard let transactionNode = content.node?.transactions.node else {
+            throw DataErrors.nodeNotAvailable
+        }
+        return try transactionNode.allKeysAndValues().values.map { transaction -> TransactionBody in
+            guard let body = transaction.node?.body.node else {
+                throw DataErrors.nodeNotAvailable
+            }
+            return body
+        }
+    }
+
+    private func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer, readsState: Bool) async throws {
+        let (content, spec) = try await resolveBoundedContent(fetcher: fetcher)
+        guard let block = content.node, block.transactions.node != nil else {
             throw DataErrors.nodeNotAvailable
         }
         let resolutionPaths: [[String]: ResolutionStrategy]
         if readsState {
-            let transactions = try transactionNode.allKeysAndValues().values
-            let transactionBodies = try transactions.map { transaction -> TransactionBody in
-                guard let body = transaction.node?.body.node else {
-                    throw DataErrors.nodeNotAvailable
-                }
-                return body
-            }
             resolutionPaths = Block.validationPaths(
-                transactionBodies: transactionBodies,
+                transactionBodies: try Self.transactionBodies(of: content),
                 rewardRecipient: block.rewardRecipient
             )
         } else {

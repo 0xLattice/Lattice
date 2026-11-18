@@ -159,6 +159,16 @@ public struct ConnectVerdict: Sendable {
         return nil
     }
 
+    /// The post-state the block's execution produced, when the verdict is
+    /// valid (`ChainTreeUpdate.materializedPostState` once applied): what a
+    /// caller executing the block's child before this verdict is applied
+    /// and its state stored reads the child's pre-state from. Nil for any
+    /// other verdict, and for a valid one whose transition materialized none.
+    public var materializedPostState: LatticeState? {
+        if case .valid(_, let state, _) = outcome { return state }
+        return nil
+    }
+
     /// The block `connect` executed, as it decoded it, when the verdict is
     /// valid: a caller storing the block need not resolve and decode its
     /// node again. Only the block's own node: its links (transactions,

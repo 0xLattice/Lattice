@@ -101,6 +101,36 @@ final class BlockContentResolverTests: XCTestCase {
         XCTAssertNil(paths[[PARENT_STATE_PROPERTY, RECEIPT_STATE_PROPERTY, ""]])
     }
 
+    /// The parent-receipt witness is exactly what validation reads under
+    /// the parent state: one path per withdrawal, nothing else.
+    func testParentReceiptWitnessPathsAreTheValidationPathsUnderParentState() {
+        let withdrawals = [7, 8].map {
+            WithdrawalAction(withdrawer: "withdrawer", nonce: UInt128($0), demander: "demander", amountDemanded: 9, amountWithdrawn: 9)
+        }
+        let body = TransactionBody(
+            accountActions: [AccountAction(owner: "alice", delta: 1)],
+            actions: [],
+            depositActions: [],
+            receiptActions: [],
+            withdrawalActions: withdrawals,
+            signers: ["withdrawer"],
+            nonce: 0,
+            chainPath: ["Nexus", "Child"]
+        )
+        let witness = Block.parentReceiptWitnessPaths(transactionBodies: [body])
+        XCTAssertEqual(Set(witness.keys), Set(withdrawals.map {
+            [PARENT_STATE_PROPERTY, RECEIPT_STATE_PROPERTY, ReceiptKey(withdrawalAction: $0, directory: "Child").storageKey]
+        }))
+        XCTAssertTrue(witness.values.allSatisfy { $0 == .targeted })
+        let validation = Block.validationPaths(transactionBodies: [body], rewardRecipient: nil)
+        XCTAssertEqual(validation.filter { $0.key.first == PARENT_STATE_PROPERTY }.mapValues { "\($0)" }, witness.mapValues { "\($0)" })
+        let none = TransactionBody(
+            accountActions: [], actions: [], depositActions: [], receiptActions: [], withdrawalActions: [],
+            signers: [], nonce: 0, chainPath: ["Nexus", "Child"]
+        )
+        XCTAssertTrue(Block.parentReceiptWitnessPaths(transactionBodies: [none]).isEmpty)
+    }
+
     func testResolveBlockContentIncludesTransactionsAndSpecButLeavesChildrenIndependent() async throws {
         let fetcher = StorableFetcher()
         let parent = try await buildAndStoreGenesis(
