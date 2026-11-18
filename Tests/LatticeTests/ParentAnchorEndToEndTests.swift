@@ -426,9 +426,26 @@ final class ParentAnchorEndToEndTests: XCTestCase {
     /// carries the post-state its execution produced.
     func testAWithdrawalExecutesFromItsParentReceiptWitnessAlone() async throws {
         let w = try await World()
-        let s = try await w.parentBlock(on: w.g, at: -90_000, transactions: [w.receiptTx], reward: w.withdrawerAddr)
+        // Another receipt beside it: the witness holds the one path only.
+        let other = ReceiptAction(
+            withdrawer: w.withdrawerAddr, nonce: w.depositNonce + 1, demander: w.demanderAddr,
+            amountDemanded: w.amount, directory: "Child"
+        )
+        func otherTx(nonce: UInt64) -> Transaction {
+            signTx(body: TransactionBody(
+                accountActions: [], actions: [], depositActions: [], receiptActions: [other],
+                withdrawalActions: [], signers: [w.withdrawerAddr], nonce: nonce, chainPath: w.rootPath
+            ), keypair: w.withdrawer)
+        }
+        let s = try await w.parentBlock(
+            on: w.g, at: -90_000, transactions: [w.receiptTx, otherTx(nonce: 1)], reward: w.withdrawerAddr
+        )
         try await w.weighParent(s)
         try await w.executeParent(s)
+        // A parent state with only the other receipt.
+        let bare = try await w.parentBlock(on: w.g, at: -89_000, transactions: [otherTx(nonce: 0)], reward: w.withdrawerAddr)
+        try await w.weighParent(bare)
+        try await w.executeParent(bare)
         let genesis = try await w.childGenesis(anchoredAt: w.g, at: -94_000)
         var child = try await w.bootstrapChild(genesis, carrierParent: w.g)
         let deposit = try await w.childBlock(
@@ -452,7 +469,14 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         XCTAssertTrue(witnessed.contains(s.postState.rawCID), "rooted at the block's parentState")
         let accounts = try XCTUnwrap(s.postState.node?.accountState.rawCID)
         XCTAssertFalse(witness.contains(rawCid: accounts), "and only the receipt path under it")
-        XCTAssertLessThan(witnessed.count, lacking.count)
+        let receipts = StorableFetcher()
+        let otherKey = ReceiptKey(receiptAction: other).storageKey
+        let otherPath = try await s.postState.resolve(
+            paths: [[RECEIPT_STATE_PROPERTY, otherKey]: .targeted], fetcher: w.fetcher
+        )
+        try await otherPath.store(paths: [[RECEIPT_STATE_PROPERTY, otherKey]: .targeted], storer: receipts)
+        let otherOnly = Set(receipts.entries.keys).subtracting(witness.entries.keys)
+        XCTAssertFalse(otherOnly.isEmpty, "the other receipt's path leaves the witness's somewhere")
 
         var job = try XCTUnwrap(child.connectJob(for: try cid(withdrawal)))
         let unavailable = await ChainTree.connect(
@@ -476,6 +500,24 @@ final class ParentAnchorEndToEndTests: XCTestCase {
             try applied.update?.materializedPostState.map { try LatticeStateHeader(node: $0).rawCID },
             withdrawal.postState.rawCID, "the same state applying it materializes"
         )
+
+        // The same withdrawal anchored where its receipt is absent: its
+        // witness proves the absence, so with that alone it is invalid, not
+        // unavailable. Holding the witness's nodes is the check.
+        let forged = try await w.childBlock(
+            previous: deposit, anchoredAt: bare, transactions: [w.withdrawalTx], at: -69_000, reward: w.withdrawerAddr
+        )
+        try await w.weigh(forged, carrierParent: bare, on: &child)
+        let bareState = try await closure(of: bare.postState, from: w.fetcher).subtracting(childState)
+        let absence = StorableFetcher()
+        try await VolumeImpl<Block>(node: forged).storeParentReceiptWitness(fetcher: w.fetcher, storer: absence)
+        let refuted = await ChainTree.connect(
+            try XCTUnwrap(child.connectJob(for: try cid(forged))),
+            fetcher: ParentStateLetGo(backing: w.fetcher, denied: bareState.subtracting(absence.entries.keys)),
+            parentFacts: w.facts
+        )
+        XCTAssertTrue(refuted.provesInvalid, "\(String(describing: refuted.retryFailure))")
+        XCTAssertNil(refuted.materializedPostState)
     }
 
     // MARK: - 2. Laundering

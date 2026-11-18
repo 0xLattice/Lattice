@@ -113,7 +113,9 @@ public extension Block {
     /// for each, the path to its receipt in the block's
     /// `parentState.receiptState`, which its execution proves (§8). None for
     /// transactions with no withdrawal. The witness is validation data
-    /// outside `maxBlockSize`: its nodes are bound by CID to the block's
+    /// outside `maxBlockSize`, bounded through the withdrawals a block of
+    /// that size can carry: one trie path each, every edge of the receipt
+    /// trie a Volume boundary. Its nodes are bound by CID to the block's
     /// `parentState`, so whoever holds it can execute the block without the
     /// rest of that parent state.
     static func parentReceiptWitnessPaths(
@@ -235,8 +237,8 @@ public extension VolumeImpl where NodeType == Block {
     /// (`Block.parentReceiptWitnessPaths`): the nodes of its
     /// `parentState.receiptState` on the path to each withdrawal's receipt,
     /// stored with the block's own Volume. A block with no withdrawal stores
-    /// that Volume alone and reads nothing under its parent state. The
-    /// transactions are read under the same byte bound as `storeBlock`.
+    /// nothing and reads nothing under its parent state. The transactions
+    /// are read under the same byte bound as `storeBlock`.
     ///
     /// `storeBlockContent` and this together hold everything executing the
     /// block reads but its pre-state, which a node derives by executing the
@@ -245,6 +247,7 @@ public extension VolumeImpl where NodeType == Block {
     func storeParentReceiptWitness(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
         let (content, _) = try await resolveBoundedContent(fetcher: fetcher)
         let paths = Block.parentReceiptWitnessPaths(transactionBodies: try Self.transactionBodies(of: content))
+        guard !paths.isEmpty else { return }
         let resolved = try await content.resolve(paths: paths, fetcher: fetcher)
         try await resolved.store(paths: paths.mapValues { _ in .targeted }, storer: storer)
     }

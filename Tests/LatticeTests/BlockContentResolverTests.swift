@@ -123,7 +123,7 @@ final class BlockContentResolverTests: XCTestCase {
         }))
         XCTAssertTrue(witness.values.allSatisfy { $0 == .targeted })
         let validation = Block.validationPaths(transactionBodies: [body], rewardRecipient: nil)
-        XCTAssertEqual(validation.filter { $0.key.first == PARENT_STATE_PROPERTY }.mapValues { "\($0)" }, witness.mapValues { "\($0)" })
+        XCTAssertEqual(validation.filter { $0.key.first == PARENT_STATE_PROPERTY }, witness)
         let none = TransactionBody(
             accountActions: [], actions: [], depositActions: [], receiptActions: [], withdrawalActions: [],
             signers: [], nonce: 0, chainPath: ["Nexus", "Child"]
