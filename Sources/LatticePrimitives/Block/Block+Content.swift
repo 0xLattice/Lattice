@@ -229,8 +229,15 @@ public extension VolumeImpl where NodeType == Block {
     /// state is fetched or stored, except the constant empty state stored
     /// for a genesis (height-0) block. A node that derives a block's
     /// pre-state by executing its parent fetches a block's content this way.
-    func storeBlockContent(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
-        try await storeBlock(fetcher: fetcher, storer: storer, readsState: false)
+    ///
+    /// With `parentReceiptWitness`, it then stores the block's parent-receipt
+    /// witness (`storeParentReceiptWitness`) from the content it resolved,
+    /// without resolving it again: a block with no withdrawal reads and
+    /// stores nothing more.
+    func storeBlockContent(
+        fetcher: any Fetcher, storer: any VolumeStorer, parentReceiptWitness: Bool = false
+    ) async throws {
+        try await storeBlock(fetcher: fetcher, storer: storer, readsState: false, witness: parentReceiptWitness)
     }
 
     /// The parent-receipt witness of this block's withdrawals
@@ -247,7 +254,15 @@ public extension VolumeImpl where NodeType == Block {
     /// still execute a withdrawal it fetched with its witness.
     func storeParentReceiptWitness(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
         let (content, _) = try await resolveBoundedContent(fetcher: fetcher)
-        let paths = Block.parentReceiptWitnessPaths(transactionBodies: try Self.transactionBodies(of: content))
+        try await Self.storeParentReceiptWitness(of: content, fetcher: fetcher, storer: storer)
+    }
+
+    /// `storeParentReceiptWitness` of `content`, the block's resolved
+    /// content (`resolveBoundedContent`).
+    private static func storeParentReceiptWitness(
+        of content: Self, fetcher: any Fetcher, storer: any VolumeStorer
+    ) async throws {
+        let paths = Block.parentReceiptWitnessPaths(transactionBodies: try transactionBodies(of: content))
         guard !paths.isEmpty else { return }
         let resolved = try await content.resolve(paths: paths, fetcher: fetcher)
         guard let parentState = resolved.node?.parentState else { throw DataErrors.nodeNotAvailable }
@@ -286,7 +301,9 @@ public extension VolumeImpl where NodeType == Block {
         }
     }
 
-    private func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer, readsState: Bool) async throws {
+    private func storeBlock(
+        fetcher: any Fetcher, storer: any VolumeStorer, readsState: Bool, witness: Bool = false
+    ) async throws {
         let (content, spec) = try await resolveBoundedContent(fetcher: fetcher)
         guard let block = content.node, block.transactions.node != nil else {
             throw DataErrors.nodeNotAvailable
@@ -318,6 +335,9 @@ public extension VolumeImpl where NodeType == Block {
         }
         if block.height == 0 {
             try await LatticeState.emptyHeader.storeRecursively(storer: storer)
+        }
+        if witness {
+            try await Self.storeParentReceiptWitness(of: content, fetcher: fetcher, storer: storer)
         }
     }
 
