@@ -206,6 +206,21 @@ public extension VolumeImpl where NodeType == Block {
     /// and stores nothing. That error is a reason to execute the block, not a
     /// verdict on it: execution applies the rule itself.
     func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
+        try await storeBlock(fetcher: fetcher, storer: storer, readsState: true)
+    }
+
+    /// `storeBlock` without the state the block's validation reads: the
+    /// complete block Volume (with its child index), its spec, its
+    /// transactions and its policy modules, under the same transaction-byte
+    /// bound as `storeBlock`. Nothing under the block's prev, parent or post
+    /// state is fetched or stored, except the constant empty state stored
+    /// for a genesis (height-0) block. A node that derives a block's
+    /// pre-state by executing its parent fetches a block's content this way.
+    func storeBlockContent(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
+        try await storeBlock(fetcher: fetcher, storer: storer, readsState: false)
+    }
+
+    private func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer, readsState: Bool) async throws {
         let header = try await resolve(paths: [[SPEC_PROPERTY]: .targeted], fetcher: fetcher)
         guard let spec = header.node?.spec.node else { throw DataErrors.nodeNotAvailable }
         let counter = BlockContentByteCounter(limit: spec.maxBlockSize)
@@ -223,17 +238,24 @@ public extension VolumeImpl where NodeType == Block {
               let transactionNode = block.transactions.node else {
             throw DataErrors.nodeNotAvailable
         }
-        let transactions = try transactionNode.allKeysAndValues().values
-        let transactionBodies = try transactions.map { transaction -> TransactionBody in
-            guard let body = transaction.node?.body.node else {
-                throw DataErrors.nodeNotAvailable
+        let resolutionPaths: [[String]: ResolutionStrategy]
+        if readsState {
+            let transactions = try transactionNode.allKeysAndValues().values
+            let transactionBodies = try transactions.map { transaction -> TransactionBody in
+                guard let body = transaction.node?.body.node else {
+                    throw DataErrors.nodeNotAvailable
+                }
+                return body
             }
-            return body
+            resolutionPaths = Block.validationPaths(
+                transactionBodies: transactionBodies,
+                rewardRecipient: block.rewardRecipient
+            )
+        } else {
+            var paths = Block.contentResolutionPaths
+            paths[[CHILDREN_PROPERTY]] = .targeted
+            resolutionPaths = paths
         }
-        let resolutionPaths = Block.validationPaths(
-            transactionBodies: transactionBodies,
-            rewardRecipient: block.rewardRecipient
-        )
         let resolved = try await content.resolve(paths: resolutionPaths, fetcher: fetcher)
         let storagePaths: [[String]: StorageStrategy] = resolutionPaths.compactMapValues {
             switch $0 {
