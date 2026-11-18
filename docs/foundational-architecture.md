@@ -41,8 +41,10 @@ The content graph may recurse to arbitrary depth. A Lattice runtime never does.
    is not a parent-block backlink.
 7. **The node owns operations.** Acquisition, process authentication, durability,
    pruning, pinning, routing, and projections are node policy.
-8. **Durability precedes visibility.** The staged immutable batch is the record
-   applied by both live import and recovery.
+8. **Weighed facts are durable before they are visible.** The immutable batch is
+   the record applied by both live import and recovery. An execution's batch
+   may apply before it is durable; recovery re-derives from blocks what did not
+   persist (spec §9.3).
 
 ## Runtime Boundary
 
@@ -200,7 +202,9 @@ A change preserves the architecture only if all of these remain true:
    through the immediate parent's connected accepted graph.
 5. Fork choice compares effective `trueCumWork`, then same-chain child block CID.
 6. External ingress uses one import boundary; recovery replays durable facts.
-7. Durable facts precede visible mutation.
+7. Weighed facts are durable before visible mutation; an execution's facts
+   persist in the order they apply, and recovery re-derives the rest from
+   blocks.
 9. Lattice retains consensus inputs; the node owns payload pruning.
 10. Cross-chain interfaces carry proofs and exact parent facts, never trusted
     work totals or canonical-tip commands.

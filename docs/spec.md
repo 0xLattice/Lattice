@@ -310,7 +310,9 @@ A genesis block `B` is valid if and only if ALL of the following hold:
 2. `B.height == 0`
 3. `B.timestamp <= validationContext.now`, where the import attempt captures
    `validationContext.now` once (node-local, retriable import — a future
-   timestamp is deferred until real time reaches it, not permanently rejected)
+   timestamp is deferred until real time reaches it, not permanently rejected).
+   A genesis is weighed without this check (section 9.9's genesis admission);
+   it is checked when the genesis executes, live or in recovery
 4. `B.prevState == CID(emptyState())` and `B.rewardRecipient == nil` (a
    genesis mints only its premine; there is no reward to pay). A Nexus genesis
    commits `B.parentState == CID(emptyState())`. A child genesis commits its
@@ -367,6 +369,9 @@ A non-genesis nexus block `B` with previous block `P` is valid if and only if:
    which is therefore not imposed). The `<= now` bound is node-local, retriable
    import — a future block is deferred until real time reaches its timestamp,
    never permanently rejected. The attempt captures `validationContext.now` once.
+   A block already weighed met this bound when it was weighed (section 9.9's
+   header admission holds a later one); executing it, live or in recovery,
+   does not consult the clock.
 6. `B.target <= P.nextTarget` (as hard or harder than scheduled, never easier),
    and `B.nextTarget` equals section 5.5's absolute schedule computed from the
    branch's height-1 anchor and `B`
@@ -1209,16 +1214,23 @@ Every external candidate enters one import procedure:
 5. exact-path, vertical state binding, chain-target, and immediate-parent
    state-continuity checks;
 6. deterministic genesis or non-genesis state-transition validation;
-7. targeted storage of verified local content and materialized state;
+7. targeted storage of verified local content;
 8. atomic durability of one immutable accepted-fact batch; and
 9. application of that exact batch through the reducer used by recovery.
 
-Durability MUST precede visible graph mutation. Live import MUST NOT
-re-resolve or rebuild the batch after durability, and recovery MUST apply the
-same immutable facts through the same reducer. Identical replay is idempotent;
-conflicting immutable metadata is rejected. Storage or durability failure leaves
-the accepted graph unchanged, and genesis bootstrap exposes no runtime until its
-facts are durable and restored.
+Durability MUST precede visible graph mutation for weighed-tier facts (§9.9).
+The facts an execution records (its validation, or the invalidity exclusion it
+proves) and the materialized state they name are derived from blocks: a node MAY
+apply such a batch (step 9) before it is durable (step 8) and MAY persist such
+batches in groups, as a prefix of the order in which it applied them. An
+execution's fact persists only after the materialized state it names and the
+weighed-tier facts it depends on have persisted. Recovery applies the persisted
+facts through the same reducer and then re-derives the rest from blocks, through
+this same procedure; the executed tip MAY therefore regress across a crash. Live
+import MUST NOT re-resolve or rebuild a batch once it is durable or applied.
+Identical replay is idempotent; conflicting immutable metadata is rejected. A
+failure to persist stops the node. Genesis bootstrap exposes no runtime until
+its facts are durable and restored.
 
 A current-level target miss is a proof-of-work failure at this level: it is
 not executed, inserted, or retained for this chain, and it returns no relay
@@ -1348,7 +1360,9 @@ The node durably preserves every accepted block's consensus fields, every
 distinct location fact and strengthening observation, and a monotone mutation
 order. A crash may occur after durable staging and before in-memory mutation;
 recovery therefore replays those already-authenticated facts idempotently through
-Lattice's graph and fork-choice reducer. The node does not reconstruct weights,
+Lattice's graph and fork-choice reducer. A crash may also occur after an
+execution's batch applied and before it persisted; what did not persist is
+derived again from blocks (section 9.3). The node does not reconstruct weights,
 ancestry, or canonical choice itself.
 
 Lattice exposes staged-fact replay as its recovery authority. A serialized
