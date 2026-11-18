@@ -211,11 +211,11 @@ public extension VolumeImpl where NodeType == Block {
 
     /// `storeBlock` without the state the block's validation reads: the
     /// complete block Volume (with its child index), its spec, its
-    /// transactions and its policy modules, under the same `maxBlockSize`
-    /// rule. Nothing under the block's prev, parent or post state is
-    /// fetched or stored, but the empty state a genesis starts from, which
-    /// is a constant. A node that derives a block's pre-state by executing
-    /// its parent fetches a block's content this way.
+    /// transactions and its policy modules, under the same transaction-byte
+    /// bound as `storeBlock`. Nothing under the block's prev, parent or post
+    /// state is fetched or stored, except the constant empty state stored
+    /// for a genesis (height-0) block. A node that derives a block's
+    /// pre-state by executing its parent fetches a block's content this way.
     func storeBlockContent(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
         try await storeBlock(fetcher: fetcher, storer: storer, readsState: false)
     }

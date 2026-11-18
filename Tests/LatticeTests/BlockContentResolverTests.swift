@@ -288,8 +288,9 @@ final class BlockContentResolverTests: XCTestCase {
         let header = try VolumeImpl<Block>(node: block)
         try await header.storeBlock(fetcher: source, storer: source)
         let content = StorableFetcher()
+        let read = RecordingFetcher(source)
 
-        try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: source, storer: content)
+        try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: read, storer: content)
 
         let roots = content.volumeRoots()
         XCTAssertTrue(roots.contains(header.rawCID))
@@ -300,15 +301,22 @@ final class BlockContentResolverTests: XCTestCase {
         XCTAssertFalse(content.contains(rawCid: block.postState.rawCID))
         XCTAssertFalse(content.contains(rawCid: try XCTUnwrap(block.parent).rawCID))
         XCTAssertFalse(roots.contains(try VolumeImpl<Block>(node: child).rawCID))
-        // What it stored is all it reads: the same walk over that alone
-        // stores the same, where `storeBlock` needs the pre-state.
+        // Everything it read, it stored: no state root is among them.
+        XCTAssertTrue(read.requested.isSubset(of: Set(content.entries.keys)))
+        for state in [block.prevState.rawCID, block.parentState.rawCID, block.postState.rawCID] {
+            XCTAssertFalse(read.requested.contains(state))
+        }
+        // The same walk over that alone stores the same, where `storeBlock`
+        // asks for the pre-state, which it lacks.
         let copy = StorableFetcher()
         try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: content, storer: copy)
         XCTAssertEqual(copy.entries, content.entries)
+        let validating = RecordingFetcher(content)
         do {
-            try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlock(fetcher: content, storer: StorableFetcher())
+            try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlock(fetcher: validating, storer: StorableFetcher())
             XCTFail("storeBlock read no pre-state")
         } catch {}
+        XCTAssertTrue(validating.requested.contains(block.prevState.rawCID))
     }
 
     func testStoreBlockIncludesPrevStateRootWithoutTransactions() async throws {
@@ -647,4 +655,20 @@ private func stateContentTransaction(payloadBytes: Int) -> Transaction {
         chainPath: ["Nexus"]
     )
     return Transaction(signatures: [:], body: try! HeaderImpl(node: body))
+}
+
+/// Answers from `fetcher`, remembering every CID asked of it.
+private final class RecordingFetcher: Fetcher, @unchecked Sendable {
+    private let fetcher: any Fetcher
+    private let lock = NSLock()
+    private var asked: Set<String> = []
+
+    init(_ fetcher: any Fetcher) { self.fetcher = fetcher }
+
+    var requested: Set<String> { lock.withLock { asked } }
+
+    func fetch(rawCid: String) async throws -> Data {
+        lock.withLock { _ = asked.insert(rawCid) }
+        return try await fetcher.fetch(rawCid: rawCid)
+    }
 }
