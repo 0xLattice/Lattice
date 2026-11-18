@@ -235,9 +235,10 @@ public extension VolumeImpl where NodeType == Block {
 
     /// The parent-receipt witness of this block's withdrawals
     /// (`Block.parentReceiptWitnessPaths`): the nodes of its
-    /// `parentState.receiptState` on the path to each withdrawal's receipt,
-    /// stored with the block's own Volume. A block with no withdrawal stores
-    /// nothing and reads nothing under its parent state. The transactions
+    /// `parentState.receiptState` on the path to each withdrawal's receipt:
+    /// the Volumes from the parent state's root down. The block's own Volume
+    /// is not among them (`storeBlockContent` stores it). A block with no
+    /// withdrawal stores nothing and reads nothing under its parent state. The transactions
     /// are read under the same byte bound as `storeBlock`.
     ///
     /// `storeBlockContent` and this together hold everything executing the
@@ -249,7 +250,9 @@ public extension VolumeImpl where NodeType == Block {
         let paths = Block.parentReceiptWitnessPaths(transactionBodies: try Self.transactionBodies(of: content))
         guard !paths.isEmpty else { return }
         let resolved = try await content.resolve(paths: paths, fetcher: fetcher)
-        try await resolved.store(paths: paths.mapValues { _ in .targeted }, storer: storer)
+        guard let parentState = resolved.node?.parentState else { throw DataErrors.nodeNotAvailable }
+        let statePaths = Dictionary(uniqueKeysWithValues: paths.keys.map { (Array($0.dropFirst()), StorageStrategy.targeted) })
+        try await parentState.store(paths: statePaths, storer: storer)
     }
 
     /// The block's content (`Block.contentResolutionPaths`), its transactions

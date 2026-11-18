@@ -465,7 +465,9 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         let childState = try await closure(of: deposit.postState, from: w.fetcher)
         let lacking = parentState.subtracting(childState)
         let witness = StorableFetcher()
-        try await VolumeImpl<Block>(node: withdrawal).storeParentReceiptWitness(fetcher: w.fetcher, storer: witness)
+        // From the block's CID alone, as a node holding its content reads it.
+        try await VolumeImpl<Block>(rawCID: try cid(withdrawal)).storeParentReceiptWitness(fetcher: w.fetcher, storer: witness)
+        XCTAssertFalse(witness.contains(rawCid: try cid(withdrawal)), "the block's own Volume is its content's, not the witness's")
         let witnessed = Set(witness.entries.keys).intersection(lacking)
         XCTAssertFalse(witnessed.isEmpty, "the witness is parent state")
         XCTAssertTrue(witnessed.contains(s.postState.rawCID), "rooted at the block's parentState")
@@ -517,7 +519,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         )
         XCTAssertNotNil(unrefuted.retryFailure, "without the parent's state, no verdict: only the receipt read decides")
         let absence = StorableFetcher()
-        try await VolumeImpl<Block>(node: forged).storeParentReceiptWitness(fetcher: w.fetcher, storer: absence)
+        try await VolumeImpl<Block>(rawCID: try cid(forged)).storeParentReceiptWitness(fetcher: w.fetcher, storer: absence)
         let refuted = await ChainTree.connect(
             try XCTUnwrap(child.connectJob(for: try cid(forged))),
             fetcher: ParentStateLetGo(backing: w.fetcher, denied: bareState.subtracting(absence.entries.keys)),
