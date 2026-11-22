@@ -31,7 +31,7 @@ jobs:
           critical_stats=$(jq -c '
             ["LatticeBlockTree/Chain.swift",
              "LatticePoW/WorkSum.swift",
-             "LatticeImport/ChainLocalAdmission.swift",
+             "LatticeImport/ChainTree+Admission.swift",
              "LatticeProofs/ChildBlockProof.swift",
              "LatticePoW/ProofOfWork.swift",
              "LatticeBlockTree/ChainFacts.swift"] as $critical
