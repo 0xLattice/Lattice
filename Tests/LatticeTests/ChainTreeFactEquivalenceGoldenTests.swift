@@ -11,18 +11,17 @@ import XCTest
 import UInt256
 import cashew
 
-/// The value API emits the actor path's fact bytes. Over the block topologies
-/// of the Lattice simulation corpus (`LatticeConsensusSimulator`), realized as
-/// real blocks, every block is admitted twice from the same content: through
-/// `ChainLevel` with `.header` then `.execution`, and through a `ChainTree`
-/// with `insertHeader` then `connect`/`applyConnect`. Each step's staged
-/// batch must be byte-identical — including "no batch" — and the two chains
-/// must end in the same selection and executed set. The bytes are pinned in
-/// `Goldens/chain-tree-fact-equivalence.json`.
+/// The value API emits the fact bytes the retired actor admission path
+/// emitted. Over the block topologies of the Lattice simulation corpus
+/// (`LatticeConsensusSimulator`), realized as real blocks, every block is
+/// admitted through a `ChainTree` with `insertHeader` then
+/// `connect`/`applyConnect`. Each step's applied batch — including "no
+/// batch" — must match `Goldens/chain-tree-fact-equivalence.json`, pinned
+/// while both paths ran side by side and were asserted byte-identical.
 ///
 /// Headers are delivered headers-first — each after its parent, in the
 /// corpus's release order otherwise — since `insertHeader` reads the parent
-/// from the tree while `.header` may resolve it as content.
+/// from the tree.
 final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
     static let goldenName = "chain-tree-fact-equivalence.json"
 
@@ -64,74 +63,32 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
         return update.batches.first
     }
 
-    /// One admission step on both paths.
+    /// One chain's admission steps, recorded.
     private final class Pair {
-        let level: ChainLevel
         var tree: ChainTree
         let fetcher: StorableFetcher
-        let context: ChainRuntimeContext
-        let recorder = AdmissionStageRecorder()
         var steps: [Golden.Step] = []
 
-        init(level: ChainLevel, tree: ChainTree, fetcher: StorableFetcher) {
-            self.level = level
+        init(tree: ChainTree, fetcher: StorableFetcher) {
             self.tree = tree
             self.fetcher = fetcher
-            self.context = level.context
         }
 
-        func stagedSince(_ count: Int) async -> BlockImportBatch? {
-            let batches = await recorder.recordedBatches()
-            XCTAssertLessThanOrEqual(batches.count, count + 1, "one admission stages at most one batch")
-            return batches.count > count ? batches.last : nil
+        func record(_ name: String, _ batch: BlockImportBatch?) throws {
+            steps.append(Golden.Step(name: name, facts: try hex(batch)))
         }
 
-        func record(
-            _ name: String,
-            old: BlockImportBatch?,
-            new: BlockImportBatch?,
-            file: StaticString = #filePath,
-            line: UInt = #line
-        ) throws {
-            let oldHex = try hex(old)
-            XCTAssertEqual(oldHex, try hex(new), "\(name): value API facts differ from the actor path", file: file, line: line)
-            steps.append(Golden.Step(name: name, facts: oldHex))
-        }
-
-        func header(_ name: String, _ block: Block, package: ChildValidationPackage? = nil, evidence: VerifiedChildEvidence? = nil) async throws {
-            let before = await recorder.recordedBatches().count
-            let recorder = self.recorder
-            _ = try await level.admit(
-                block, mode: .header, fetcher: fetcher, childPackage: package,
-                stage: { await recorder.stage($0) }
-            )
-            let old = await stagedSince(before)
+        func header(_ name: String, _ block: Block, evidence: VerifiedChildEvidence? = nil) async throws {
             let new = try await TreeDriver.insert(block, into: &tree, fetcher: fetcher, evidence: evidence)
-            try record("\(name)/header", old: old, new: new.update.flatMap(ChainTreeFactEquivalenceGoldenTests.onlyBatch))
+            try record("\(name)/header", new.update.flatMap(ChainTreeFactEquivalenceGoldenTests.onlyBatch))
         }
 
-        func execute(_ name: String, _ block: Block, package: ChildValidationPackage? = nil, parentFacts: (any ParentChainFacts)? = nil, grind: String? = nil) async throws {
-            let before = await recorder.recordedBatches().count
-            let recorder = self.recorder
-            _ = try await level.admit(
-                block, mode: .execution, fetcher: fetcher, childPackage: package,
-                stage: { await recorder.stage($0) }
-            )
-            let old = await stagedSince(before)
+        func execute(_ name: String, _ block: Block, parentFacts: (any ParentChainFacts)? = nil, grind: String? = nil) async throws {
             let new = try await TreeDriver.connect(
                 try BlockHeader(node: block).rawCID, on: &tree,
                 fetcher: fetcher, parentFacts: parentFacts, grind: grind
             )
-            try record("\(name)/execution", old: old, new: new.update.flatMap(ChainTreeFactEquivalenceGoldenTests.onlyBatch))
-        }
-
-        func assertSameEnd(_ hashes: [String], file: StaticString = #filePath, line: UInt = #line) async {
-            let tip = await level.chain.canonicalTip
-            XCTAssertEqual(tree.canonicalTip, tip, "same selection", file: file, line: line)
-            for hash in hashes {
-                let executed = await level.chain.hasExecutedAncestry(blockHash: hash)
-                XCTAssertEqual(tree.hasExecutedAncestry(blockHash: hash), executed, "same executed set at \(hash)", file: file, line: line)
-            }
+            try record("\(name)/execution", new.update.flatMap(ChainTreeFactEquivalenceGoldenTests.onlyBatch))
         }
     }
 
@@ -145,7 +102,7 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
         fetcher: StorableFetcher,
         context: ChainRuntimeContext,
         link: ParentStateContinuityLink? = nil
-    ) async throws -> (package: ChildValidationPackage, evidence: VerifiedChildEvidence) {
+    ) async throws -> (package: TestChildPackage, evidence: VerifiedChildEvidence) {
         let carrier = try await buildAndStoreBlock(
             previous: carrierParent, children: ["Child": child],
             timestamp: carrierParent.timestamp + 700, target: AdmissionFixture.easy,
@@ -155,7 +112,7 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
         let evidence = try proof.verifySecuringWork(child: child, chainPath: context.path).get()
-        return (ChildValidationPackage(proof: proof, parentStateContinuityLink: link), evidence)
+        return (TestChildPackage(proof: proof, parentStateContinuityLink: link), evidence)
     }
 
     /// The continuity link a node derives for `child` from `facts` — present
@@ -231,27 +188,13 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
             link: continuityLink(for: childGenesis, facts: facts)
         )
         XCTAssertNotNil(carried.package.parentStateContinuityLink)
-        let recorder = AdmissionStageRecorder()
-        let old = try await ChainLevel.bootstrap(
-            context: childContext, genesisHeader: try BlockHeader(node: childGenesis),
-            fetcher: fetcher, childPackage: carried.package,
-            validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-            stage: { await recorder.stage($0) }
-        )
-        guard case .accepted(let accepted) = old else {
-            XCTFail("child bootstrap: \(old)")
-            return []
-        }
         let new = try await ChainTree.bootstrap(
             genesis: try BlockHeader(node: childGenesis), evidence: carried.evidence, fetcher: fetcher,
             context: childContext, parentFacts: facts
         ).get()
-        let oldGenesisBatch = await recorder.recordedBatches().last
-        let genesisHex = try Self.hex(oldGenesisBatch)
-        XCTAssertEqual(genesisHex, try Self.hex(new.facts), "child genesis bootstrap facts")
-        let steps = [Golden.Step(name: "child/genesis/bootstrap", facts: genesisHex)]
+        let steps = [Golden.Step(name: "child/genesis/bootstrap", facts: try Self.hex(new.facts))]
 
-        let child = Pair(level: accepted.level, tree: (consume new).tree, fetcher: fetcher)
+        let child = Pair(tree: (consume new).tree, fetcher: fetcher)
         func childBlock(parentChainBlock: Block, nonce: UInt64) async throws -> Block {
             let onParent = try await AdmissionFixture.makeChild(
                 of: parentChainBlock, fetcher: fetcher, timestamp: parentChainBlock.timestamp + 500, nonce: 100 + nonce
@@ -275,21 +218,20 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
                 of: block, carrierParent: carrierParent, nonce: 10 + UInt64(index), fetcher: fetcher, context: childContext,
                 link: continuityLink(for: block, after: childGenesis, facts: facts, wrongPath: wrong)
             )
-            try await child.header("child/\(name)", block, package: proved.package, evidence: proved.evidence)
+            try await child.header("child/\(name)", block, evidence: proved.evidence)
             if index == 0 {
                 // A second, distinct grind on the held block: evidence.
                 let second = try await proof(of: block, carrierParent: carrierParent, nonce: 20, fetcher: fetcher, context: childContext)
-                try await child.header("child/\(name)/second-grind", block, package: second.package, evidence: second.evidence)
+                try await child.header("child/\(name)/second-grind", block, evidence: second.evidence)
             }
             let answering = wrong
                 ? ParentLevelFacts(tree: parent, path: [DEFAULT_ROOT_DIRECTORY, "Other"])
                 : facts
             try await child.execute(
-                "child/\(name)", block, package: proved.package, parentFacts: answering,
+                "child/\(name)", block, parentFacts: answering,
                 grind: proved.evidence.contribution?.id
             )
         }
-        await child.assertSameEnd(try [childGenesis, viaSide, underExcluded, wrongPath].map { try BlockHeader(node: $0).rawCID })
         return steps + child.steps
     }
 
@@ -334,14 +276,13 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
                 )
             }
             // A proven-invalid sibling of the first main block's child: it
-            // weighs, and its execution emits an exclusion on both paths.
+            // weighs, and its execution emits an exclusion.
             let invalidValid = try await AdmissionFixture.makeChild(
                 of: try XCTUnwrap(blocks["M1"]), fetcher: fetcher, timestamp: 5_500, nonce: 99
             )
             blocks["X"] = try await TreeDriver.forgedPostState(of: invalidValid, seed: entry.scenario, fetcher: fetcher)
 
             let pair = Pair(
-                level: AdmissionFixture.makeLevel(genesis: genesis),
                 tree: try await TreeDriver.tree(genesis: genesis, context: testChainContext(), fetcher: fetcher),
                 fetcher: fetcher
             )
@@ -355,10 +296,10 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
                 try await pair.header("\(entry.scenario)/\(name)", try XCTUnwrap(blocks[name]))
                 held.insert(name)
             }
-            // A re-offered header is a duplicate on both paths: no facts.
+            // A re-offered header is a duplicate: no facts.
             try await pair.header("\(entry.scenario)/M1-again", try XCTUnwrap(blocks["M1"]))
             // Execution in height order, then the root genesis, whose
-            // exclusion the root-exclusion rule refuses on both paths.
+            // exclusion the root-exclusion rule refuses.
             let byHeight = blocks.filter { $0.key != "G" }.sorted {
                 ($0.value.height, $0.key) < ($1.value.height, $1.key)
             }
@@ -366,7 +307,6 @@ final class ChainTreeFactEquivalenceGoldenTests: XCTestCase {
                 try await pair.execute("\(entry.scenario)/\(name)", block)
             }
             try await pair.execute("\(entry.scenario)/G", genesis)
-            await pair.assertSameEnd(try blocks.values.map { try BlockHeader(node: $0).rawCID })
             steps += pair.steps
         }
 

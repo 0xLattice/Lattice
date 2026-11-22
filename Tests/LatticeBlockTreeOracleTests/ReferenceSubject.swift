@@ -73,10 +73,10 @@ struct ReferenceSubject: OracleSubject {
         }
     }
 
-    mutating func apply(_ batch: OracleBatch, reserved: Bool) -> OracleOutcome {
+    mutating func apply(_ batch: OracleBatch) -> OracleOutcome {
         // The live tree refuses a block naming a non-standard link (spec
         // §3.1, `nonStandardLink`); 50.0.1 had no such rule, so the adapter
-        // refuses for it. The oracle applies such batches unreserved.
+        // refuses for it.
         if batch.facts.contains(where: {
             if case .block(let block) = $0 { return block.namesNonStandardLink }
             return false
@@ -85,16 +85,7 @@ struct ReferenceSubject: OracleSubject {
         }
         let staged = Self.batch(batch)
         do {
-            let result: SubmissionResult?
-            if reserved {
-                guard tree.reserveImportRevision() else {
-                    return OracleOutcome(rendered: "noReservation")
-                }
-                result = try tree.applyReservedStaged(staged)
-            } else {
-                result = try tree.apply(staged)
-            }
-            guard let result else { return OracleOutcome(rendered: "nil") }
+            guard let result = try tree.apply(staged) else { return OracleOutcome(rendered: "nil") }
             let weighed = result.weighed.sorted()
             return OracleOutcome(
                 rendered: "block=\(result.addedBlock) contribution=\(result.addedContribution)"

@@ -116,8 +116,8 @@ final class FactStoreRestoreTests: XCTestCase {
     }
 
     private func capture(_ tree: ChainTree, _ graph: ForkChoiceGoldenGraph) async throws -> ForkChoiceGolden {
-        let chain = ChainState(tree: tree.detached())
-        await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
+        var chain = tree.detached()
+        chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
         return try await ForkChoiceGolden.capture(chain, graph: graph)
     }
 
@@ -134,9 +134,9 @@ final class FactStoreRestoreTests: XCTestCase {
             raised += staged.raisedGrinds
 
             // Live: every batch through the reducer in journal order.
-            let live = try await ChainState.restore(replaying: [journal[0]], context: context)
-            for batch in journal.dropFirst() { _ = try await live.replay(batch) }
-            let liveRevision = await live.currentRevision()
+            var live = try ChainTree.restore(replaying: [journal[0]], context: context)
+            for batch in journal.dropFirst() { _ = try live.replay(batch) }
+            let liveRevision = live.currentRevision()
 
             let fromBatches = try ChainTree.restore(
                 replaying: journal, revisionFloor: UInt64(journal.count), context: context

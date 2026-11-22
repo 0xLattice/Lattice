@@ -144,21 +144,21 @@ final class ParentForkAttributionTests: XCTestCase {
     /// `order`, so idempotence is exercised too.
     private func run(
         _ s: Scenario, order: [Int], passes: Int = 2
-    ) async throws -> (parent: ChainState, child: ChainState, strengthened: Int) {
+    ) async throws -> (parent: ChainTree, child: ChainTree, strengthened: Int) {
         let ph = heights(s.parent, name: \.name, parent: \.parent)
         let batches = s.parent.map { parentBatch($0, height: ph[$0.name]!) }
         // The genesis must seed the restore; everything else in the given order.
         let genesisIndex = s.parent.firstIndex { $0.parent == nil }!
-        let parent = try await ChainState.restoreWithoutContext(replaying: [batches[genesisIndex]])
+        var parent = try ChainTree.restoreWithoutContext(replaying: [batches[genesisIndex]])
         // Serve the directory before OR after the graph exists — the two paths
         // (per-block settle, whole-graph settle) must agree, so alternate by
         // the order's shape and let the oracle judge both.
         let serveFirst = order.first.map { $0 % 2 == 0 } ?? true
-        if serveFirst { await parent.serveRuns(for: s.directory) }
+        if serveFirst { parent.serveRuns(for: s.directory) }
         for i in order where i != genesisIndex {
-            _ = try await parent.replay(batches[i])
+            _ = try parent.replay(batches[i])
         }
-        if !serveFirst { await parent.serveRuns(for: s.directory) }
+        if !serveFirst { parent.serveRuns(for: s.directory) }
 
         // Child: every committer's grind at the child's price; genesis its own.
         var carriers: [String: [String]] = [:]
@@ -166,7 +166,7 @@ final class ParentForkAttributionTests: XCTestCase {
         let ch = heights(s.child, name: \.name, parent: \.parent)
         var childrenOf: [String: [String]] = [:]
         for c in s.child { if let p = c.parent { childrenOf[p, default: []].append(c.name) } }
-        let child = makeChain(blocks: s.child.map { c in
+        var child = makeChain(blocks: s.child.map { c in
             let grinds = (carriers[c.name] ?? []).map(grind)
             return BlockMeta(
                 blockHash: h(c.name), parentBlockHash: c.parent.map(h), blockHeight: ch[c.name]!,
@@ -184,10 +184,10 @@ final class ParentForkAttributionTests: XCTestCase {
         }))
 
         var strengthened = 0
-        let parentTree = await parent.tree
+        let parentTree = parent
         for _ in 0..<passes {
             for i in order where s.parent[i].commits[s.directory] != nil {
-                strengthened += await child.applyParentRun(
+                strengthened += child.applyParentRun(
                     from: parentTree, directory: s.directory, parentBlocks: [h(s.parent[i].name)]
                 ).raised.count
             }
@@ -202,7 +202,7 @@ final class ParentForkAttributionTests: XCTestCase {
         XCTAssertGreaterThan(built.strengthened, 0, "\(label): the mechanism must actually have credited something",
                              file: file, line: line)
         for c in s.child {
-            let weight = await built.child.subtreeWeight(forHash: h(c.name))
+            let weight = built.child.subtreeWeight(forHash: h(c.name))
             XCTAssertEqual(weight, expected[c.name], "\(label): child block \(c.name)", file: file, line: line)
         }
     }
@@ -280,7 +280,7 @@ final class ParentForkAttributionTests: XCTestCase {
         XCTAssertEqual(oracle(s)["c1"], sum(2), "p2 and q are in p2's run, which names the competitor")
         XCTAssertEqual(oracle(s)["c1b"], sum(42))
         let built = try await run(s, order: Array(s.parent.indices))
-        let tip = await built.child.canonicalTip
+        let tip = built.child.canonicalTip
         XCTAssertEqual(tip, h("c1b"), "the branch with the parent work behind it wins the child's fork choice")
     }
 
@@ -342,7 +342,7 @@ final class ParentForkAttributionTests: XCTestCase {
             ChildBlock(name: "c1", parent: "cg", price: 2),
         ])
         let built = try await run(s, order: Array(s.parent.indices))
-        let parentTip = await built.parent.canonicalTip
+        let parentTip = built.parent.canonicalTip
         XCTAssertEqual(parentTip, h("w3"), "fixture: the committer's branch must be the losing one")
         try await assertMatchesOracle(s, "losing branch")
         XCTAssertEqual(oracle(s)["c1"], sum(4))
@@ -501,7 +501,7 @@ final class ParentForkAttributionTests: XCTestCase {
         ])
         // Child facts: block batches (carrier grind at the child's price) —
         // observations only; no attributed run is ever a fact.
-        let parent = await (try await run(s, order: Array(s.parent.indices)).parent).tree
+        let parent = try await run(s, order: Array(s.parent.indices)).parent
         func childBatch(_ name: String, parentName: String?, height: UInt64, grindID: String, price: UInt64) -> BlockImportBatch {
             BlockImportBatch(facts: [
                 .block(ChainBlockFact(
@@ -522,19 +522,19 @@ final class ParentForkAttributionTests: XCTestCase {
                 blockHash: h("c2"), contribution: VerifiedWorkContribution(id: grind("x1"), work: UInt256(2))
             ))]),
         ]
-        let live = try await ChainState.restoreWithoutContext(replaying: [facts[0]])
-        for f in facts.dropFirst() { _ = try await live.replay(f) }
-        let raised = await live.applyParentRun(from: parent, directory: d).raised
+        var live = try ChainTree.restoreWithoutContext(replaying: [facts[0]])
+        for f in facts.dropFirst() { _ = try live.replay(f) }
+        let raised = live.applyParentRun(from: parent, directory: d).raised
         XCTAssertEqual(Set(raised), [h("c1"), h("c2")])
         let expected = oracle(s)
         for c in s.child {
-            let w = await live.subtreeWeight(forHash: h(c.name))
+            let w = live.subtreeWeight(forHash: h(c.name))
             XCTAssertEqual(w, expected[c.name], "live \(c.name)")
         }
         let context = testChainContext(path: [DEFAULT_ROOT_DIRECTORY, d])
         var rng = SeededRNG(seed: 0xC01D)
         for trial in 0..<6 {
-            var cold = try ChainTree.restore(
+            let cold = try ChainTree.restore(
                 replaying: facts.shuffled(using: &rng), context: context, parent: parent
             )
             for c in s.child {

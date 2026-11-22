@@ -232,14 +232,14 @@ final class CrossChainReorgReplayEdgeTests: XCTestCase {
         let r3 = try await f.emptyNexusBlock(previous: r2, timestamp: f.t - 50_000, nonce: 13)
         XCTAssertNotEqual(r1.postState.rawCID, l1.postState.rawCID, "fixture: L and R must diverge")
         // Fork choice over both branches picks R: L is non-canonical.
-        let chain = ChainState.fromGenesis(block: f.nexusGenesis)
+        var chain = ChainTree.fromGenesis(block: f.nexusGenesis)
         for block in [l1, lCarrier, r1, r2, r3] {
-            _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
+            _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
         }
         let r3CID = try BlockHeader(node: r3).rawCID
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, r3CID, "fixture: R must be canonical")
-        let canonical = await chain.canonicalHashes
+        let canonical = chain.canonicalHashes
         XCTAssertFalse(canonical.contains(try BlockHeader(node: lCarrier).rawCID),
                        "fixture: L must be non-canonical")
 
@@ -266,11 +266,11 @@ final class CrossChainReorgReplayEdgeTests: XCTestCase {
         let r1 = try await f.emptyNexusBlock(previous: f.nexusGenesis, timestamp: f.t - 70_000, nonce: 11)
         let r2 = try await f.emptyNexusBlock(previous: r1, timestamp: f.t - 60_000, nonce: 12)
         let r3 = try await f.emptyNexusBlock(previous: r2, timestamp: f.t - 50_000, nonce: 13)
-        let chain = ChainState.fromGenesis(block: f.nexusGenesis)
+        var chain = ChainTree.fromGenesis(block: f.nexusGenesis)
         for block in [l1, lCarrier, r1, r2, r3] {
-            _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
+            _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
         }
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, try BlockHeader(node: r3).rawCID, "fixture: R must be canonical")
 
         let withdrawn = try await f.withdrawal(

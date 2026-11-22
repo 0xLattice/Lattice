@@ -82,16 +82,16 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
         let orders = permutations(siblings)
         XCTAssertEqual(orders.count, 6)
         for order in orders {
-            let live = try await ChainState.restoreWithoutContext(replaying: [genesis])
-            for name in order { _ = try await live.replay(facts[name]!) }
-            let liveTip = await live.canonicalTip
+            var live = try ChainTree.restoreWithoutContext(replaying: [genesis])
+            for name in order { _ = try live.replay(facts[name]!) }
+            let liveTip = live.canonicalTip
             XCTAssertEqual(liveTip, h(ordered[0]), "live, order \(order)")
-            let cold = try await ChainState.restoreWithoutContext(
+            let cold = try ChainTree.restoreWithoutContext(
                 replaying: [genesis] + order.map { facts[$0]! }
             )
-            let coldTip = await cold.canonicalTip
+            let coldTip = cold.canonicalTip
             XCTAssertEqual(coldTip, h(ordered[0]), "restored, order \(order)")
-            let weight = await live.subtreeWeight(forHash: h("g"))
+            let weight = live.subtreeWeight(forHash: h("g"))
             XCTAssertEqual(weight, WorkSum(UInt256(22)))
         }
     }
@@ -107,31 +107,31 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
         // Third sibling smallest: tip switches.
         do {
             let settled = [pool[2], pool[3]]
-            let chain = try await ChainState.restoreWithoutContext(replaying: [genesis])
-            for name in settled { _ = try await chain.replay(admission(name, parent: "g", height: 1, work: 5)) }
-            let incumbent = await chain.canonicalTip
+            var chain = try ChainTree.restoreWithoutContext(replaying: [genesis])
+            for name in settled { _ = try chain.replay(admission(name, parent: "g", height: 1, work: 5)) }
+            let incumbent = chain.canonicalTip
             XCTAssertEqual(incumbent, h(pool[2]))
-            _ = try await chain.replay(admission(smallest, parent: "g", height: 1, work: 5))
-            let tip = await chain.canonicalTip
+            _ = try chain.replay(admission(smallest, parent: "g", height: 1, work: 5))
+            let tip = chain.canonicalTip
             XCTAssertEqual(tip, h(smallest), "a smaller-CID equal-work late sibling takes the tip")
-            let cold = try await ChainState.restoreWithoutContext(replaying: [genesis] + (settled + [smallest]).map {
+            let cold = try ChainTree.restoreWithoutContext(replaying: [genesis] + (settled + [smallest]).map {
                 admission($0, parent: "g", height: 1, work: 5)
             })
-            let coldTip = await cold.canonicalTip
+            let coldTip = cold.canonicalTip
             XCTAssertEqual(coldTip, h(smallest))
         }
         // Third sibling not smallest: incumbent holds.
         do {
             let settled = [middle, pool[2]]
-            let chain = try await ChainState.restoreWithoutContext(replaying: [genesis])
-            for name in settled { _ = try await chain.replay(admission(name, parent: "g", height: 1, work: 5)) }
-            _ = try await chain.replay(admission(largest, parent: "g", height: 1, work: 5))
-            let tip = await chain.canonicalTip
+            var chain = try ChainTree.restoreWithoutContext(replaying: [genesis])
+            for name in settled { _ = try chain.replay(admission(name, parent: "g", height: 1, work: 5)) }
+            _ = try chain.replay(admission(largest, parent: "g", height: 1, work: 5))
+            let tip = chain.canonicalTip
             XCTAssertEqual(tip, h(middle), "a larger-CID equal-work late sibling does not displace the incumbent")
-            let cold = try await ChainState.restoreWithoutContext(replaying: [genesis] + (settled + [largest]).map {
+            let cold = try ChainTree.restoreWithoutContext(replaying: [genesis] + (settled + [largest]).map {
                 admission($0, parent: "g", height: 1, work: 5)
             })
-            let coldTip = await cold.canonicalTip
+            let coldTip = cold.canonicalTip
             XCTAssertEqual(coldTip, h(middle))
         }
     }
@@ -152,10 +152,10 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
             exclusion("x"),
             admission("u", parent: "g", height: 1, work: 10),
         ]
-        let live = try await ChainState.restoreWithoutContext(replaying: [log[0]])
-        for batch in log.dropFirst() { _ = try await live.replay(batch) }
+        var live = try ChainTree.restoreWithoutContext(replaying: [log[0]])
+        for batch in log.dropFirst() { _ = try live.replay(batch) }
         // v1 = 1+1+1+2+3 = 8 < u = 10: the rival wins for now.
-        var tip = await live.canonicalTip
+        var tip = live.canonicalTip
         XCTAssertEqual(tip, h("u"))
 
         // The excluded subtree grows below x: blocks and extra grinds.
@@ -164,37 +164,37 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
         for i in 1...6 {
             let name = "x\(i)"
             let batch = admission(name, parent: parent, height: UInt64(4 + i), work: 2)
-            _ = try await live.replay(batch)
+            _ = try live.replay(batch)
             log.append(batch)
             let grind = extraWork(name, grind: "extra-\(i)", work: 1)
-            _ = try await live.replay(grind)
+            _ = try live.replay(grind)
             log.append(grind)
             expectedV1 += 3
             parent = name
-            let v1 = await live.subtreeWeight(forHash: h("v1"))
+            let v1 = live.subtreeWeight(forHash: h("v1"))
             XCTAssertEqual(v1, WorkSum(UInt256(expectedV1)), "ancestor weight rises with invalid work (\(name))")
-            let path = await live.canonicalHashes
+            let path = live.canonicalHashes
             XCTAssertFalse(path.contains(h("x")), "excluded root never selected")
             XCTAssertFalse(path.contains(h(name)))
         }
         // v1 = 26 > u = 10: the descent goes down v1, then stops at w.
-        tip = await live.canonicalTip
+        tip = live.canonicalTip
         XCTAssertEqual(tip, h("w"), "heaviest selectable path ends at the valid tip")
-        let gWeight = await live.subtreeWeight(forHash: h("g"))
+        let gWeight = live.subtreeWeight(forHash: h("g"))
         XCTAssertEqual(gWeight, WorkSum(UInt256(1 + expectedV1 + 10)))
 
         // Restore/replay the full log, in order and shuffled.
         var rng = SeededRNG(seed: 0xED6E7)
         for trial in 0..<4 {
             let replayed = trial == 0 ? log : log.shuffled(using: &rng)
-            let cold = try await ChainState.restoreWithoutContext(replaying: replayed)
-            let coldTip = await cold.canonicalTip
+            let cold = try ChainTree.restoreWithoutContext(replaying: replayed)
+            let coldTip = cold.canonicalTip
             XCTAssertEqual(coldTip, h("w"), "cold \(trial)")
-            let coldV1 = await cold.subtreeWeight(forHash: h("v1"))
+            let coldV1 = cold.subtreeWeight(forHash: h("v1"))
             XCTAssertEqual(coldV1, WorkSum(UInt256(expectedV1)), "cold \(trial): added work replays")
-            let coldPath = await cold.canonicalHashes
+            let coldPath = cold.canonicalHashes
             XCTAssertFalse(coldPath.contains(h("x")), "cold \(trial)")
-            let roots = await cold.excludedRootsForTesting
+            let roots = cold.excludedRootsForTesting
             XCTAssertEqual(roots, [h("x")], "cold \(trial)")
         }
     }
@@ -292,7 +292,7 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
             spec: chainLocalSpec(), timestamp: 1_000, target: easy, nonce: 99, fetcher: fetcher
         )
         do {
-            _ = try await ChainState.restore(
+            _ = try ChainTree.restore(
                 replaying: [try testAdmissionBatch(for: rivalNexus)],
                 context: testChainContext(genesis: nexusGenesis)
             )

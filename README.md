@@ -75,7 +75,6 @@ The content DAG may recurse. A Lattice runtime does not.
 ```bash
 swift build
 swift test
-swift run LatticeDemo
 ```
 
 ### Use As A Dependency
@@ -89,38 +88,40 @@ dependencies: [
 
 ## Architecture
 
-One `ChainLevel` combines immutable runtime context with one actor-isolated
-`ChainState`:
-
-```text
-ChainLevel
-|- ChainRuntimeContext  absolute chain path
-`- ChainState           one accepted forest + one canonical projection
-```
+One `ChainTree` value is one chain: its runtime context (absolute chain path),
+its accepted forest, and its canonical projection.
 
 Lattice and the node have deliberately different jobs:
 
 | Lattice owns | The node owns |
 |---|---|
-| Protocol and state-transition validation | Acquisition and provider selection |
+| Protocol and state-transition validation | Acquisition, storage and provider selection |
 | Accepted same-chain graph | Process authentication and supervision |
 | Grind identity and work algebra | Atomic fact durability |
 | Chain-local GHOST and reorganizations | Pruning, pinning, projections, and RPC |
+| Which content a block's validation reads | Fetching and keeping that content |
 
-Every external candidate enters one import boundary (`ChainLevel.importBlock`):
+Lattice stores nothing: it says which content a block carries and reads
+(`Block.carriedContentPaths`, `validationPaths`, `parentReceiptWitnessPaths`,
+the `maxBlockSize` bound in `resolveBoundedContent`), and the node fetches and
+keeps it.
+
+A candidate is admitted in two steps, each emitting the facts it applies
+(`ChainTree+Admission.swift`):
 
 ```text
-acquire
-  -> verify the root floor and sparse path
-  -> execute this chain's transition if its target accepts the grind
-  -> store targeted content and materialized state
-  -> atomically stage one immutable fact batch
-  -> apply that exact batch to ChainState
-  -> return the chain-local canonical delta
+acquire (node)
+  -> weigh: insertRootHeader / insertChildHeader verifies the grind (a child's
+     by its verified ChildBlockProof) and records the block and its work
+  -> execute: connectJob -> ChainTree.connect runs this chain's transition
+     off the tree; applyConnect records the verdict (valid, or excluded)
+  -> the node persists each update's fact batches atomically, with the
+     content and materialized state it chooses to keep
 ```
 
-Recovery applies the same staged batches through the same reducer. A target miss
-creates no local consensus fact and does not tell Lattice to retain the carrier.
+Recovery replays the persisted batches through the same reducer
+(`ChainTree.restore`). A target miss creates no local consensus fact and does
+not tell Lattice to retain the carrier.
 
 ## Core Ideas
 
@@ -168,9 +169,9 @@ Sources/
 |- LatticePrimitives/  blocks, ChainSpec, transactions, actions, state, CIDs
 |- LatticePoW/         proof-of-work preimage, work, ASERT schedule, WorkSum
 |- LatticeValidation/  block, transaction, state-transition and spec validity, genesis
-|- LatticeProofs/      ChildBlockProof and child validation packages
-|- LatticeBlockTree/   block graph, fork choice, execution frontier, run attribution, ChainState
-|- LatticeImport/      the import funnel, ChainLevel, transaction preflight
+|- LatticeProofs/      ChildBlockProof and verified child evidence
+|- LatticeBlockTree/   ChainTree: block graph, fork choice, execution frontier, run attribution
+|- LatticeImport/      ChainTree admission (weigh, connect), transaction preflight
 `- Lattice/            umbrella module that re-exports the six above
 ```
 

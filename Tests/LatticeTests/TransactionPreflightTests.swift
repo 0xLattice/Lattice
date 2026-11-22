@@ -53,11 +53,11 @@ final class TransactionPreflightTests: XCTestCase {
         return Transaction(signatures: signatures, body: header)
     }
 
-    private func fundedLevel(
+    private func fundedChain(
         fetcher: StorableFetcher,
         alice: (privateKey: String, publicKey: String),
         bob: (privateKey: String, publicKey: String)
-    ) async throws -> (ChainLevel, ChainState, Block) {
+    ) async throws -> (chain: ChainTree, genesis: Block) {
         let aliceAddress = testAddress(publicKey: alice.publicKey)
         let bobAddress = testAddress(publicKey: bob.publicKey)
         let premine = transaction(
@@ -75,8 +75,7 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
-        return (ChainLevel(testChain: chain), chain, genesis)
+        return (try await testChain(genesis: genesis, fetcher: fetcher), genesis)
     }
 
     /// A recheck that leaves the signatures out still runs every rule that
@@ -85,8 +84,8 @@ final class TransactionPreflightTests: XCTestCase {
         let fetcher = StorableFetcher()
         let alice = CryptoUtils.generateKeyPair()
         let bob = CryptoUtils.generateKeyPair()
-        let (level, _, _) = try await fundedLevel(fetcher: fetcher, alice: alice, bob: bob)
-        let tip = await level.chain.transactionPreflightTip(at: nil)
+        let chain = try await fundedChain(fetcher: fetcher, alice: alice, bob: bob).chain
+        let tip = chain.transactionPreflightTip(at: nil)
         func classify(_ transaction: Transaction, checksSignatures: Bool) async -> TransactionPreflightDisposition {
             await TransactionPreflight.classify(
                 transaction, tipCID: tip.cid, snapshot: tip.snapshot,
@@ -139,27 +138,25 @@ final class TransactionPreflightTests: XCTestCase {
         let bob = CryptoUtils.generateKeyPair()
         // Genesis is signed by [alice, bob] at nonce 0: alice's next nonce is
         // 1, and bob, a co-signer only, has never used a nonce.
-        let (level, chain, genesis) = try await fundedLevel(
-            fetcher: fetcher,
-            alice: alice,
-            bob: bob
-        )
+        var chain: ChainTree
+        let genesis: Block
+        (chain, genesis) = try await fundedChain(fetcher: fetcher, alice: alice, bob: bob)
 
-        let ready = await level.preflightTransaction(
+        let ready = await chain.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 1),
             fetcher: fetcher
         )
         XCTAssertEqual(ready.disposition, .ready)
         XCTAssertEqual(ready.tipCID, try BlockHeader(node: genesis).rawCID)
 
-        let future = await level.preflightTransaction(
+        let future = await chain.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 2),
             fetcher: fetcher
         )
         XCTAssertEqual(future.disposition, .future)
 
         // Bob first: his own floor (0) decides, whatever alice's is.
-        let bobFirst = await level.preflightTransaction(
+        let bobFirst = await chain.preflightTransaction(
             transaction(signers: [bob, alice], nonce: 0),
             fetcher: fetcher
         )
@@ -174,23 +171,23 @@ final class TransactionPreflightTests: XCTestCase {
             fetcher: fetcher
         )
         let blockHeader = try BlockHeader(node: block)
-        _ = await chain.submitTestBlock(blockHeader: blockHeader, block: block)
-        await chain.markValidated(blockHash: blockHeader.rawCID)
+        _ = chain.submitTestBlock(blockHeader: blockHeader, block: block)
+        chain.markValidated(blockHash: blockHeader.rawCID)
 
-        let stale = await level.preflightTransaction(
+        let stale = await chain.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 1),
             fetcher: fetcher
         )
         XCTAssertEqual(stale.disposition, .invalid)
         XCTAssertEqual(stale.tipCID, blockHeader.rawCID)
 
-        let next = await level.preflightTransaction(
+        let next = await chain.preflightTransaction(
             transaction(signers: [alice, bob], nonce: 2),
             fetcher: fetcher
         )
         XCTAssertEqual(next.disposition, .ready)
 
-        let bobStillFirst = await level.preflightTransaction(
+        let bobStillFirst = await chain.preflightTransaction(
             transaction(signers: [bob, alice], nonce: 0),
             fetcher: fetcher
         )
@@ -204,11 +201,9 @@ final class TransactionPreflightTests: XCTestCase {
         let fetcher = StorableFetcher()
         let alice = CryptoUtils.generateKeyPair()
         let bob = CryptoUtils.generateKeyPair()
-        let (level, chain, genesis) = try await fundedLevel(
-            fetcher: fetcher,
-            alice: alice,
-            bob: bob
-        )
+        var chain: ChainTree
+        let genesis: Block
+        (chain, genesis) = try await fundedChain(fetcher: fetcher, alice: alice, bob: bob)
         let executed = try await buildAndStoreBlock(
             previous: genesis,
             transactions: [],
@@ -217,8 +212,8 @@ final class TransactionPreflightTests: XCTestCase {
             fetcher: fetcher
         )
         let executedHeader = try BlockHeader(node: executed)
-        _ = await chain.submitTestBlock(blockHeader: executedHeader, block: executed)
-        await chain.markValidated(blockHash: executedHeader.rawCID)
+        _ = chain.submitTestBlock(blockHeader: executedHeader, block: executed)
+        chain.markValidated(blockHash: executedHeader.rawCID)
         let weighed = try await buildAndStoreBlock(
             previous: executed,
             transactions: [transaction(signers: [alice], nonce: 1)],
@@ -227,27 +222,27 @@ final class TransactionPreflightTests: XCTestCase {
             fetcher: fetcher
         )
         let weighedHeader = try BlockHeader(node: weighed)
-        _ = await chain.submitTestBlock(blockHeader: weighedHeader, block: weighed)
-        let canonicalTip = await chain.canonicalTip
+        _ = chain.submitTestBlock(blockHeader: weighedHeader, block: weighed)
+        let canonicalTip = chain.canonicalTip
         XCTAssertEqual(canonicalTip, weighedHeader.rawCID)
-        let executedTipIsExecuted = await chain.hasExecutedAncestry(
+        let executedTipIsExecuted = chain.hasExecutedAncestry(
             blockHash: executedHeader.rawCID
         )
-        let weighedTipIsExecuted = await chain.hasExecutedAncestry(
+        let weighedTipIsExecuted = chain.hasExecutedAncestry(
             blockHash: weighedHeader.rawCID
         )
         XCTAssertTrue(executedTipIsExecuted)
         XCTAssertFalse(weighedTipIsExecuted)
 
         let aliceNext = transaction(signers: [alice], nonce: 1)
-        let atExecuted = await level.preflightTransaction(
+        let atExecuted = await chain.preflightTransaction(
             aliceNext,
             at: executedHeader.rawCID,
             fetcher: fetcher
         )
         XCTAssertEqual(atExecuted.disposition, .ready)
         XCTAssertEqual(atExecuted.tipCID, executedHeader.rawCID)
-        let futureAtExecuted = await level.preflightTransaction(
+        let futureAtExecuted = await chain.preflightTransaction(
             transaction(signers: [alice], nonce: 2),
             at: executedHeader.rawCID,
             fetcher: fetcher
@@ -257,7 +252,7 @@ final class TransactionPreflightTests: XCTestCase {
         // Neither naming the weighed block nor defaulting to the canonical tip
         // classifies against its declared state.
         for (tip, label) in [(Optional(weighedHeader.rawCID), "named"), (nil, "default")] {
-            let result = await level.preflightTransaction(
+            let result = await chain.preflightTransaction(
                 aliceNext,
                 at: tip,
                 fetcher: fetcher
@@ -268,8 +263,8 @@ final class TransactionPreflightTests: XCTestCase {
 
         // Once the weighed block is executed it is a valid tip, and its state
         // has spent Alice's nonce 1.
-        await chain.markValidated(blockHash: weighedHeader.rawCID)
-        let afterExecution = await level.preflightTransaction(
+        chain.markValidated(blockHash: weighedHeader.rawCID)
+        let afterExecution = await chain.preflightTransaction(
             aliceNext,
             fetcher: fetcher
         )
@@ -286,7 +281,7 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
         let address = testAddress(publicKey: signer.publicKey)
 
         let overspend = transaction(
@@ -294,7 +289,7 @@ final class TransactionPreflightTests: XCTestCase {
             nonce: 0,
             accountActions: [AccountAction(owner: address, delta: -1)]
         )
-        let overspendResult = await level.preflightTransaction(
+        let overspendResult = await chain.preflightTransaction(
             overspend,
             fetcher: fetcher
         )
@@ -305,14 +300,14 @@ final class TransactionPreflightTests: XCTestCase {
             signatures: [signer.publicKey: "00"],
             body: valid.body
         )
-        let badSignatureResult = await level.preflightTransaction(
+        let badSignatureResult = await chain.preflightTransaction(
             badSignature,
             fetcher: fetcher
         )
         XCTAssertEqual(badSignatureResult.disposition, .invalid)
     }
 
-    func testClassifyFromTheTreesBasisMatchesTheLevel() async throws {
+    func testClassifyFromTheTreesBasis() async throws {
         let fetcher = StorableFetcher()
         let signer = CryptoUtils.generateKeyPair()
         let genesis = try await buildAndStoreGenesis(
@@ -321,10 +316,8 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
-        let level = ChainLevel(testChain: chain)
+        let tree = try await testChain(genesis: genesis, fetcher: fetcher)
         let address = testAddress(publicKey: signer.publicKey)
-        let tree = await chain.tree
 
         let ready = transaction(signers: [signer], nonce: 0)
         let overspend = transaction(
@@ -349,11 +342,9 @@ final class TransactionPreflightTests: XCTestCase {
                 tx,
                 tipCID: basis.cid,
                 snapshot: basis.snapshot,
-                chainPath: level.context.path,
+                chainPath: tree.context!.path,
                 fetcher: fetcher
             )
-            let viaLevel = await level.preflightTransaction(tx, at: tipCID, fetcher: fetcher)
-            XCTAssertEqual(classified, viaLevel)
             XCTAssertEqual(classified.disposition, expected)
         }
     }
@@ -367,7 +358,7 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
         let address = testAddress(publicKey: signer.publicKey)
 
         // Credits with nothing debited: negative miner surplus. The block
@@ -377,11 +368,11 @@ final class TransactionPreflightTests: XCTestCase {
             nonce: 0,
             accountActions: [AccountAction(owner: address, delta: 5)]
         )
-        let mintingResult = await level.preflightTransaction(minting, fetcher: fetcher)
+        let mintingResult = await chain.preflightTransaction(minting, fetcher: fetcher)
         XCTAssertEqual(mintingResult.disposition, .invalid)
 
         let neutral = transaction(signers: [signer], nonce: 0)
-        let neutralResult = await level.preflightTransaction(neutral, fetcher: fetcher)
+        let neutralResult = await chain.preflightTransaction(neutral, fetcher: fetcher)
         XCTAssertEqual(neutralResult.disposition, .ready)
     }
 
@@ -398,9 +389,9 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
 
-        let missingPolicyResult = await level.preflightTransaction(
+        let missingPolicyResult = await chain.preflightTransaction(
             transaction(signers: [signer], nonce: 0),
             fetcher: fetcher
         )
@@ -410,7 +401,7 @@ final class TransactionPreflightTests: XCTestCase {
             signatures: [:],
             body: HeaderImpl<TransactionBody>(rawCID: testCID("missing-body"))
         )
-        let missingBodyResult = await level.preflightTransaction(
+        let missingBodyResult = await chain.preflightTransaction(
             missingBody,
             fetcher: fetcher
         )
@@ -440,7 +431,7 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
         let bobAddress = testAddress(publicKey: bob.publicKey)
 
         let cases: [(String, Transaction, TransactionPreflightDisposition)] = [
@@ -459,14 +450,13 @@ final class TransactionPreflightTests: XCTestCase {
             ("ready: the policy runs", transaction(signers: [alice], nonce: 1), .unavailable),
         ]
         for (label, tx, expected) in cases {
-            let result = await level.preflightTransaction(tx, fetcher: fetcher)
+            let result = await chain.preflightTransaction(tx, fetcher: fetcher)
             XCTAssertEqual(result.disposition, expected, label)
         }
 
         // Without the policies, the same ready transaction is ready, and the
         // state checks still refuse what they refused.
-        let tree = await level.chain.tree
-        let basis = tree.transactionPreflightTip(at: nil)
+        let basis = chain.transactionPreflightTip(at: nil)
         let unjudged: [(String, Transaction, TransactionPreflightDisposition)] = [
             ("ready", transaction(signers: [alice], nonce: 1), .ready),
             ("stale nonce", transaction(signers: [alice], nonce: 0), .invalid),
@@ -477,7 +467,7 @@ final class TransactionPreflightTests: XCTestCase {
                 tx,
                 tipCID: basis.cid,
                 snapshot: basis.snapshot,
-                chainPath: level.context.path,
+                chainPath: chain.context!.path,
                 fetcher: fetcher,
                 checksPolicies: false
             )
@@ -505,10 +495,10 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
 
         for (label, nonce) in [("ready", UInt64(1)), ("future", 2), ("far future", 40)] {
-            let result = await level.preflightTransaction(
+            let result = await chain.preflightTransaction(
                 transaction(signers: [alice], nonce: nonce),
                 fetcher: fetcher
             )
@@ -529,10 +519,10 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
         let signer = CryptoUtils.generateKeyPair()
 
-        let rejected = await level.preflightTransaction(
+        let rejected = await chain.preflightTransaction(
             transaction(signers: [signer], nonce: 0),
             fetcher: fetcher
         )
@@ -554,8 +544,8 @@ final class TransactionPreflightTests: XCTestCase {
                 target: easy,
                 fetcher: fetcher
             )
-            let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-            let result = await level.preflightTransaction(
+            let chain = try await testChain(genesis: genesis, fetcher: fetcher)
+            let result = await chain.preflightTransaction(
                 transaction(signers: [CryptoUtils.generateKeyPair()], nonce: 0),
                 fetcher: fetcher
             )
@@ -585,8 +575,8 @@ final class TransactionPreflightTests: XCTestCase {
                 target: easy,
                 fetcher: fetcher
             )
-            let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-            let result = await level.preflightTransaction(
+            let chain = try await testChain(genesis: genesis, fetcher: fetcher)
+            let result = await chain.preflightTransaction(
                 transaction(signers: [CryptoUtils.generateKeyPair()], nonce: 0),
                 fetcher: fetcher,
                 validationContext: ValidationContext(nowMilliseconds: now)
@@ -614,7 +604,7 @@ final class TransactionPreflightTests: XCTestCase {
             .nondeterministicConstruct("c"),
         ]
         for error in cases {
-            let imported = ChainLevel.classifyValidationFailureForTesting(error)
+            let imported = classifyValidationFailure(error)
             let preflightUnavailable = transactionPreflightEvidenceUnavailable(error)
             let isVerdict: Bool
             if case .missingModule = error { isVerdict = false } else { isVerdict = true }
@@ -771,18 +761,19 @@ final class TransactionPreflightTests: XCTestCase {
                 backing: store, failing: policy.moduleCID, error: testCase.fetchError
             )
 
-            let preflight = await ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-                .preflightTransaction(tx, fetcher: fetcher)
-            let imported = try await ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-                .admit(block, fetcher: fetcher, storer: store)
+            var chain = try await testChain(genesis: genesis, fetcher: store)
+            let preflight = await chain.preflightTransaction(tx, fetcher: fetcher)
+            let imported = try await chain.admit(block, fetcher: fetcher)
 
             switch testCase.expected {
             case .accepted:
                 XCTAssertEqual(preflight.disposition, .ready, testCase.name)
-                XCTAssertNil(imported.failure, testCase.name)
+                XCTAssertEqual(imported.update?.excluded, false, testCase.name)
             case .invalid:
+                // Execution proves the block invalid: it keeps its work and
+                // is excluded.
                 XCTAssertEqual(preflight.disposition, .invalid, testCase.name)
-                XCTAssertEqual(imported.failure, .protocolInvalid, testCase.name)
+                XCTAssertEqual(imported.update?.excluded, true, testCase.name)
             case .unavailable:
                 XCTAssertEqual(preflight.disposition, .unavailable, testCase.name)
                 XCTAssertEqual(imported.failure, .unavailableEvidence, testCase.name)
@@ -823,7 +814,7 @@ final class TransactionPreflightTests: XCTestCase {
             )) { error in
                 XCTAssertEqual(String(reflecting: type(of: error)), typeName)
                 XCTAssertEqual(
-                    ChainLevel.classifyValidationFailureForTesting(error), .protocolInvalid, typeName
+                    classifyValidationFailure(error), .protocolInvalid, typeName
                 )
                 XCTAssertFalse(transactionPreflightEvidenceUnavailable(error), typeName)
             }
@@ -848,8 +839,8 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-        let result = await level.preflightTransaction(
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
+        let result = await chain.preflightTransaction(
             transaction(signers: [CryptoUtils.generateKeyPair()], nonce: 0),
             fetcher: fetcher
         )
@@ -866,9 +857,8 @@ final class TransactionPreflightTests: XCTestCase {
             target: easy,
             fetcher: fetcher
         )
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: genesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        let chain = try await testChain(
+            genesis: genesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"], fetcher: fetcher
         )
         let address = testAddress(publicKey: signer.publicKey)
         let withdrawal = transaction(
@@ -884,7 +874,7 @@ final class TransactionPreflightTests: XCTestCase {
             )]
         )
 
-        let result = await level.preflightTransaction(
+        let result = await chain.preflightTransaction(
             withdrawal,
             fetcher: fetcher
         )
@@ -893,7 +883,7 @@ final class TransactionPreflightTests: XCTestCase {
         // A parent state without the receipt: it may be a block away, so a
         // retry, never a verdict.
         try await LatticeState.emptyHeader.storeRecursively(storer: fetcher)
-        let unproven = await level.preflightTransaction(
+        let unproven = await chain.preflightTransaction(
             withdrawal,
             parentState: LatticeState.emptyHeader,
             fetcher: fetcher
@@ -911,7 +901,7 @@ final class TransactionPreflightTests: XCTestCase {
             depositState: empty.depositState, receiptState: receipts
         ))
         try await parent.storeRecursively(storer: fetcher)
-        let contradicted = await level.preflightTransaction(withdrawal, parentState: parent, fetcher: fetcher)
+        let contradicted = await chain.preflightTransaction(withdrawal, parentState: parent, fetcher: fetcher)
         XCTAssertEqual(contradicted.disposition, .invalid)
     }
 }

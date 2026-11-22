@@ -39,18 +39,6 @@ private func now() -> Int64 {
     Int64(Date().timeIntervalSince1970 * 1000)
 }
 
-private actor AdmissionBatchCollector {
-    private var batches: [BlockImportBatch] = []
-
-    func append(_ batch: BlockImportBatch) {
-        batches.append(batch)
-    }
-
-    func snapshot() -> [BlockImportBatch] {
-        batches
-    }
-}
-
 // MARK: - Block Minting Tests
 
 @MainActor
@@ -144,7 +132,7 @@ final class BlockMintingTests: XCTestCase {
         XCTAssertTrue(absolute)
     }
 
-    func testAdmissionStagesBlockAndWorkFactsOnceAndReturnsCommit() async throws {
+    func testAdmissionEmitsBlockAndWorkFactsOnceAndReturnsCommit() async throws {
         let fetcher = makeFetcher()
         let base = now() - 100_000
         let spec = noPremine()
@@ -164,63 +152,48 @@ final class BlockMintingTests: XCTestCase {
             fetcher: fetcher
         )
         let block1 = try await storeBuiltBlock(built1, in: fetcher)
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-        let collector = AdmissionBatchCollector()
-        let stage: @Sendable (BlockImportStagingContext) async throws -> Void = { context in
-            await collector.append(context.batch)
-        }
+        var chain = try AdmissionFixture.makeChain(genesis: genesis, spec: spec)
 
-        let first = try await level.importBlock(
-            try BlockHeader(node: block1),
-            fetcher: fetcher,
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: stage
-        )
-        guard case .accepted(let acceptance) = first else {
-            return XCTFail("first block should be accepted")
+        // The header weighs the block and moves the tip; its execution then
+        // records the transition.
+        let weighed = try await chain.admit(try BlockHeader(node: block1), mode: .header, fetcher: fetcher)
+        guard let commit = weighed.update?.commit else {
+            return XCTFail("first block should be weighed and selected")
         }
-        XCTAssertEqual(acceptance.stateDiff, built1.stateDiff)
-        XCTAssertTrue(acceptance.commit.canonicalChanged)
+        XCTAssertTrue(commit.canonicalChanged)
+        let first = try await chain.admit(try BlockHeader(node: block1), mode: .execution, fetcher: fetcher)
+        guard let acceptance = first.update, !acceptance.excluded else {
+            return XCTFail("first block should be executed")
+        }
+        XCTAssertEqual(chain.canonicalTip, try BlockHeader(node: block1).rawCID)
 
-        let chain = await level.chain
         let block1Hash = try BlockHeader(node: block1).rawCID
-        let liveValue = await chain.getConsensusBlock(hash: block1Hash)
-        let live = try XCTUnwrap(liveValue)
+        let live = try XCTUnwrap(chain.getConsensusBlock(hash: block1Hash))
         XCTAssertEqual(live.workContributions.count, 1)
-        let revision = await chain.currentRevision()
-        XCTAssertEqual(revision, acceptance.commit.revision)
+        let revision = chain.currentRevision()
 
-        let staged = await collector.snapshot()
-        XCTAssertEqual(staged.count, 1)
-        // block + work + validation, atomically: the eager tier weighs and
-        // validates in one gate, so execution is recorded with possession.
-        XCTAssertEqual(staged[0].facts.count, 3)
-        XCTAssertEqual(Set(staged[0].facts.map(\.id)).count, 3)
-        guard case .block(let blockFact) = staged[0].facts[0],
-              case .work(let workFact) = staged[0].facts[1],
-              case .validation(let validationFact) = staged[0].facts[2] else {
-            return XCTFail("new block admission should atomically stage block, work then validation facts")
+        XCTAssertEqual(acceptance.batches.count, 1)
+        // block + work + validation, atomically: execution is recorded with
+        // the block it executed.
+        let facts = try XCTUnwrap(acceptance.batches.first).facts
+        XCTAssertEqual(facts.count, 3)
+        XCTAssertEqual(Set(facts.map(\.id)).count, 3)
+        guard case .block(let blockFact) = facts[0],
+              case .work(let workFact) = facts[1],
+              case .validation(let validationFact) = facts[2] else {
+            return XCTFail("execution should emit block, work then validation facts in one batch")
         }
         XCTAssertEqual(validationFact.blockHash, block1Hash)
         XCTAssertEqual(blockFact.blockHash, block1Hash)
         XCTAssertEqual(blockFact.stateDiff, built1.stateDiff)
         XCTAssertEqual(workFact.blockHash, block1Hash)
 
-        let duplicate = try await level.importBlock(
-            try BlockHeader(node: block1),
-            fetcher: fetcher,
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: stage
-        )
+        let duplicate = try await chain.admit(try BlockHeader(node: block1), fetcher: fetcher)
         guard case .duplicate = duplicate else {
             return XCTFail("duplicate contribution should not replay admission facts")
         }
-        let batchesAfterDuplicate = await collector.snapshot()
-        let revisionAfterDuplicate = await chain.currentRevision()
-        XCTAssertEqual(batchesAfterDuplicate.count, 1)
-        XCTAssertEqual(revisionAfterDuplicate, acceptance.commit.revision)
+        XCTAssertEqual(chain.currentRevision(), revision)
+        XCTAssertEqual(chain.getConsensusBlock(hash: block1Hash)?.workContributions.count, 1)
     }
 
     func test_validateGenesis_usesSameTimestampRuleAsBlocks() async throws {
@@ -422,13 +395,13 @@ final class BlockMintingTests: XCTestCase {
         XCTAssertNotNil(mined)
     }
 
-    func testMintAndSubmitToChainState() async throws {
+    func testMintAndSubmitToChainTree() async throws {
         let fetcher = makeFetcher()
         let t = now()
         let genesis = try await buildAndStoreGenesis(
             spec: noPremine(), timestamp: t - 100_000, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var prev = genesis
         for i in 1...5 {
@@ -436,16 +409,16 @@ final class BlockMintingTests: XCTestCase {
                 previous: prev, timestamp: t - 100_000 + Int64(i) * 1000,
                 target: UInt256(1000), nonce: UInt64(i), fetcher: fetcher
             )
-            let result = await chain.submitTestBlock(
+            let result = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
             XCTAssertTrue(result.extendsCanonical, "Block \(i) should extend main chain")
             prev = block
         }
 
-        let height = await chain.getHighestBlockHeight()
+        let height = chain.getHighestBlockHeight()
         XCTAssertEqual(height, 5)
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, try! VolumeImpl<Block>(node: prev).rawCID)
     }
 
@@ -864,7 +837,7 @@ final class BlockLifecycleTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: t - 100_000, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var mainPrev = genesis
         for i in 1...3 {
@@ -872,13 +845,13 @@ final class BlockLifecycleTests: XCTestCase {
                 previous: mainPrev, timestamp: t - 100_000 + Int64(i) * 1000,
                 target: UInt256(1000), nonce: UInt64(i), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
             mainPrev = block
         }
 
-        let mainTip = await chain.canonicalTip
+        let mainTip = chain.canonicalTip
         XCTAssertEqual(mainTip, try! VolumeImpl<Block>(node: mainPrev).rawCID)
 
         var forkPrev = genesis
@@ -887,13 +860,13 @@ final class BlockLifecycleTests: XCTestCase {
                 previous: forkPrev, timestamp: t - 100_000 + Int64(i) * 500,
                 target: UInt256(1000), nonce: UInt64(i + 100), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
             forkPrev = block
         }
 
-        let newTip = await chain.canonicalTip
+        let newTip = chain.canonicalTip
         let forkTipHash = try! VolumeImpl<Block>(node: forkPrev).rawCID
         XCTAssertEqual(newTip, forkTipHash, "Longer fork should become main chain")
     }
@@ -919,7 +892,7 @@ final class BlockLifecycleTests: XCTestCase {
         )
         try await storeBuiltBlock(genesis, in: fetcher)
 
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let transferBody = TransactionBody(
             accountActions: [
@@ -940,12 +913,12 @@ final class BlockLifecycleTests: XCTestCase {
         let mined = BlockBuilder.mine(block: block1, target: UInt256.max, maxAttempts: 10)
         XCTAssertNotNil(mined)
 
-        let result = await chain.submitTestBlock(
+        let result = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: mined!), block: mined!
         )
         XCTAssertTrue(result.extendsCanonical)
 
-        let height = await chain.getHighestBlockHeight()
+        let height = chain.getHighestBlockHeight()
         XCTAssertEqual(height, 1)
     }
 

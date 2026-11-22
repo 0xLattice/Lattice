@@ -13,11 +13,11 @@ import Foundation
 // MARK: - Bucket-A block-tx validation gaps test phase)
 //
 // BTV-A1: unavailable evidence vs permanent rejection at admission.
-//   importBlock must report `.unavailableEvidence` when block
+//   admission must report `.unavailableEvidence` when block
 //   content cannot be resolved because of a *transient* fetch failure (the data
 //   is re-requestable and a later attempt succeeds), while a genuinely-invalid
-//   but fully-resolvable block must be permanently rejected on reprocessing.
-//   Exercised through the real chain-local admission entry point with an
+//   but fully-resolvable block must be permanently excluded on reprocessing.
+//   Exercised through `ChainTree` admission (header, then connect) with an
 //   injectable resolution-failing Fetcher.
 //
 // BTV-A2: a leaf-chain withdrawal whose deposit exists (so block building /
@@ -66,8 +66,8 @@ final class BlockHeaderDeferVsRejectGapTests: XCTestCase {
     /// A transient resolution failure for an *ancestor* (the parent block body,
     /// fetched by CID during validation) reports unavailable evidence, and
     /// reprocessing the SAME header through the SAME fetcher once the data
-    /// resolves canonicalizes it. This proves the outcome is transient and
-    /// re-requestable rather than poisoning the block.
+    /// resolves executes and canonicalizes it. This proves the outcome is
+    /// transient and re-requestable rather than poisoning the block.
     func testTransientAncestorFetchFailureReportsUnavailableThenAcceptsOnReRequest() async throws {
         let backing = StorableFetcher()
         let t = gapNow()
@@ -88,42 +88,33 @@ final class BlockHeaderDeferVsRejectGapTests: XCTestCase {
         let parentCID = gapHeader(g).rawCID
         let fetcher = DenyingFetcher(backing: backing, denied: [parentCID])
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: g))
+        var chain = try AdmissionFixture.makeChain(genesis: g, spec: gapSpec())
+        let blockHash = gapHeader(block).rawCID
 
-        let unavailable = try await level.importBlock(
-            gapHeader(block),
-            fetcher: fetcher,
-            validationContentStorer: backing,
-            materializedVolumeStorer: backing,
-            stage: testAdmissionStage
+        let unavailable = try await chain.admit(gapHeader(block), fetcher: fetcher)
+        XCTAssertEqual(
+            unavailable.failure, .unavailableEvidence,
+            "transient ancestor-resolution failure must be unavailable"
         )
-        guard case .rejected(.unavailableEvidence, _) = unavailable else {
-            return XCTFail("transient ancestor-resolution failure must be unavailable")
-        }
-        let heightWhileUnavailable = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(heightWhileUnavailable, 0, "Unavailable blocks must not be submitted")
+        XCTAssertFalse(chain.isExecuted(blockHash: blockHash), "Unavailable blocks must not be executed")
+        XCTAssertFalse(chain.isExcludedRoot(blockHash), "Unavailable blocks must not be excluded")
 
         // Simulate the re-request succeeding: clear the failure and reprocess
         // the SAME header through the SAME fetcher instance.
         await fetcher.setDenied([])
-        let accepted = try await level.importBlock(
-            gapHeader(block),
-            fetcher: fetcher,
-            validationContentStorer: backing,
-            materializedVolumeStorer: backing,
-            stage: testAdmissionStage
+        let accepted = try await chain.admit(gapHeader(block), fetcher: fetcher)
+        XCTAssertEqual(
+            accepted.update?.excluded, false,
+            "an unavailable block must execute once evidence arrives"
         )
-        guard case .accepted = accepted else {
-            return XCTFail("an unavailable block must canonicalize once evidence arrives")
-        }
-        let heightAfterAccept = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(heightAfterAccept, 1, "Block must extend the chain after the re-request resolves")
+        XCTAssertTrue(chain.isExecuted(blockHash: blockHash))
+        XCTAssertEqual(chain.canonicalTip, blockHash, "Block must extend the chain after the re-request resolves")
     }
 
     /// A genuinely-invalid block (tampered postState) that is FULLY resolvable
-    /// must be permanently rejected with a protocol failure and must stay
-    /// rejected when reprocessed, so a bad block cannot masquerade as missing
-    /// data to be re-requested forever.
+    /// must be permanently excluded and must stay excluded when reprocessed,
+    /// so a bad block cannot masquerade as missing data to be re-requested
+    /// forever.
     func testGenuinelyInvalidBlockRejectsPermanentlyEvenWhenResolvable() async throws {
         let f = StorableFetcher()
         let t = gapNow()
@@ -144,31 +135,20 @@ final class BlockHeaderDeferVsRejectGapTests: XCTestCase {
         try await storeBlock(g, fetcher: f)
         try await storeBlock(minedTampered, fetcher: f)
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: g))
+        var chain = try AdmissionFixture.makeChain(genesis: g, spec: gapSpec())
+        let tamperedHash = gapHeader(minedTampered).rawCID
 
-        let rejected = try await level.importBlock(
-            gapHeader(minedTampered),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
-        )
-        guard case .rejected(.protocolInvalid, _) = rejected else {
-            return XCTFail("a fully-resolvable invalid block must be rejected")
-        }
+        let rejected = try await chain.admit(gapHeader(minedTampered), fetcher: f)
+        XCTAssertEqual(rejected.update?.excluded, true, "a fully-resolvable invalid block must be excluded")
 
-        let rejectedAgain = try await level.importBlock(
-            gapHeader(minedTampered),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
+        let rejectedAgain = try await chain.admit(gapHeader(minedTampered), fetcher: f)
+        XCTAssertEqual(
+            rejectedAgain.update?.excluded, true,
+            "reprocessing a fully-resolvable invalid block must stay excluded"
         )
-        guard case .rejected(.protocolInvalid, _) = rejectedAgain else {
-            return XCTFail("reprocessing a fully-resolvable invalid block must stay rejected")
-        }
-        let finalHeight = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(finalHeight, 0)
+        XCTAssertTrue(chain.isExcludedRoot(tamperedHash))
+        XCTAssertFalse(chain.isExecuted(blockHash: tamperedHash))
+        XCTAssertEqual(chain.canonicalTip, gapHeader(g).rawCID)
     }
 }
 

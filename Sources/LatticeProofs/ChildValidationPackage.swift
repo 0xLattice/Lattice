@@ -22,25 +22,9 @@ public struct ParentStateContinuityLink: Hashable, Sendable {
     }
 }
 
-/// Structural proof plus facts derived by this node's chain processes.
-/// The facts deliberately are not Codable: peers send bytes to validate, not
-/// verdicts to decode.
-public struct ChildValidationPackage: Sendable {
-    public let proof: ChildBlockProof
-    public let parentStateContinuityLink: ParentStateContinuityLink?
-
-    public init(
-        proof: ChildBlockProof,
-        parentStateContinuityLink: ParentStateContinuityLink? = nil
-    ) {
-        self.proof = proof
-        self.parentStateContinuityLink = parentStateContinuityLink
-    }
-}
-
 /// Node-owned acquisition needed before child-chain admission can continue.
 /// Providers supply content-addressed evidence; the node derives every
-/// state-validity fact locally before constructing this package.
+/// state-validity fact locally before the child is admitted.
 public enum CrossChainEvidenceRequirement: Sendable, Equatable {
     case childProof(chainPath: [String], childCID: String)
     case parentStateContinuity(

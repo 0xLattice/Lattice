@@ -601,7 +601,7 @@ final class HeaderAdmissionTests: XCTestCase {
     }
 
     /// The configured Nexus genesis that misses its own target is a
-    /// proof-of-work failure at bootstrap, on both admission paths.
+    /// proof-of-work failure at bootstrap.
     func testAGenesisTargetMissIsAProofOfWorkFailureAtBootstrap() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await buildAndStoreGenesis(
@@ -616,16 +616,6 @@ final class HeaderAdmissionTests: XCTestCase {
             return XCTFail("a target miss bootstraps nothing")
         }
         XCTAssertEqual(failure, .proofOfWorkInvalid)
-        do {
-            _ = try await ChainLevel.bootstrap(
-                context: pinned, genesisHeader: header, fetcher: fetcher,
-                validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-                stage: testAdmissionStage
-            )
-            XCTFail("a target miss bootstraps nothing")
-        } catch let error as BlockImportError {
-            XCTAssertEqual(error, .proofOfWorkInvalid)
-        }
     }
 
     /// Nexus → Middle → Leaf, with one share: its hash misses Nexus's and

@@ -50,7 +50,7 @@ final class ParentRunAttributionTests: XCTestCase {
     private func anchoredChain(
         _ blocks: [BlockMeta], anchors: [String: String] = [:],
         canonicalHashes: Set<String>? = nil
-    ) throws -> ChainState {
+    ) throws -> ChainTree {
         var snapshots: [String: TipBlockSnapshot] = [:]
         for block in blocks {
             let name = try XCTUnwrap(names[block.blockHash])
@@ -121,49 +121,49 @@ final class ParentRunAttributionTests: XCTestCase {
     /// The worked example: parent P1 ← P2 ← P3, P1 commits child C, P2 and P3
     /// commit nothing. Both build paths.
     /// Built wholesale, then served: the whole-graph settle path.
-    private func linearByInit() async throws -> ChainState {
-        let chain = try anchoredChain([
+    private func linearByInit() async throws -> ChainTree {
+        var chain = try anchoredChain([
             meta("g", parent: nil, height: 0, children: ["p1"], work: 1),
             meta("p1", parent: "g", height: 1, children: ["p2"], work: 5, commits: [d: h("c")]),
             meta("p2", parent: "p1", height: 2, children: ["p3"], work: 3),
             meta("p3", parent: "p2", height: 3, work: 7),
         ])
-        await chain.serveRuns(for: d)
+        chain.serveRuns(for: d)
         return chain
     }
 
     /// Served first, then built block by block: the live per-block path.
-    private func linearByReplay() async throws -> ChainState {
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+    private func linearByReplay() async throws -> ChainTree {
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             batch("g", parent: nil, height: 0, work: 1),
         ])
-        await chain.serveRuns(for: d)
-        _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
-        _ = try await chain.replay(batch("p2", parent: "p1", height: 2, work: 3))
-        _ = try await chain.replay(batch("p3", parent: "p2", height: 3, work: 7))
+        chain.serveRuns(for: d)
+        _ = try chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
+        _ = try chain.replay(batch("p2", parent: "p1", height: 2, work: 3))
+        _ = try chain.replay(batch("p3", parent: "p2", height: 3, work: 7))
         return chain
     }
 
     /// Child chain: genesis cg ← c, where c was committed by parent block p1
     /// and so is credited under p1's grind at the child's own price.
-    private func childChain(existing: UInt256) throws -> ChainState {
+    private func childChain(existing: UInt256) throws -> ChainTree {
         try anchoredChain([
             meta("cg", parent: nil, height: 0, children: ["c"], work: 1),
             childMeta("c", parent: "cg", height: 1, grind: grind("p1"), work: existing),
         ], anchors: ["c": "p1"])
     }
 
-    private func run(_ chain: ChainState, at hash: String, in directory: String? = nil) async -> WorkSum? {
-        await chain.runWork(of: h(hash), directory: directory ?? d)
+    private func run(_ chain: ChainTree, at hash: String, in directory: String? = nil) async -> WorkSum? {
+        chain.runWork(of: h(hash), directory: directory ?? d)
     }
 
     /// The credited work of a block's own grinds — what a child subtracts.
-    private func own(_ chain: ChainState, at hash: String) async -> WorkSum? {
-        await chain.grindWork(of: h(hash))
+    private func own(_ chain: ChainTree, at hash: String) async -> WorkSum? {
+        chain.grindWork(of: h(hash))
     }
 
-    private func credited(_ chain: ChainState) async -> UInt256? {
-        await chain.workContribution(id: grind("p1"), at: h("c"))?.work
+    private func credited(_ chain: ChainTree) async -> UInt256? {
+        chain.workContribution(id: grind("p1"), at: h("c"))?.work
     }
 
     // MARK: - Partition
@@ -172,7 +172,7 @@ final class ParentRunAttributionTests: XCTestCase {
         for (label, chain) in [("init", try await linearByInit()), ("replay", try await linearByReplay())] {
             let runWork = await run(chain, at: "p1")
             let ownWork = await own(chain, at: "p1")
-            let commitments = await chain.recordedChildCommitments(of: h("p1"))
+            let commitments = chain.recordedChildCommitments(of: h("p1"))
             XCTAssertEqual(runWork, sum(5, 3, 7), "\(label): w(P1)+w(P2)+w(P3)")
             XCTAssertEqual(ownWork, sum(5), label)
             XCTAssertEqual(commitments, [d: h("c")], "\(label): the block it commits")
@@ -200,20 +200,20 @@ final class ParentRunAttributionTests: XCTestCase {
         //    p2    x        p2 commits c2; x commits nothing
         //    |
         //    q              q commits nothing
-        let byInit = makeChain(blocks: [
+        var byInit = makeChain(blocks: [
             meta("g", parent: nil, height: 0, children: ["p1"], work: 1),
             meta("p1", parent: "g", height: 1, children: ["p2", "x"], work: 5, commits: [d: testCID("c1")]),
             meta("p2", parent: "p1", height: 2, children: ["q"], work: 3, commits: [d: testCID("c2")]),
             meta("x", parent: "p1", height: 2, work: 11),
             meta("q", parent: "p2", height: 3, work: 7),
         ])
-        await byInit.serveRuns(for: d)
-        let byReplay = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await byReplay.serveRuns(for: d)
-        _ = try await byReplay.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("c1")]))
-        _ = try await byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
-        _ = try await byReplay.replay(batch("x", parent: "p1", height: 2, work: 11))
-        _ = try await byReplay.replay(batch("q", parent: "p2", height: 3, work: 7))
+        byInit.serveRuns(for: d)
+        var byReplay = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        byReplay.serveRuns(for: d)
+        _ = try byReplay.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("c1")]))
+        _ = try byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
+        _ = try byReplay.replay(batch("x", parent: "p1", height: 2, work: 11))
+        _ = try byReplay.replay(batch("q", parent: "p2", height: 3, work: 7))
 
         for (label, chain) in [("init", byInit), ("replay", byReplay)] {
             let r1 = await run(chain, at: "p1")
@@ -244,7 +244,7 @@ final class ParentRunAttributionTests: XCTestCase {
         //    q
         let e = "Markets"
         let work: [String: UInt64] = ["g": 1, "p1": 5, "p2": 3, "x": 11, "q": 7]
-        let byInit = makeChain(blocks: [
+        var byInit = makeChain(blocks: [
             meta("g", parent: nil, height: 0, children: ["p1"], work: 1),
             meta("p1", parent: "g", height: 1, children: ["p2", "x"], work: 5,
                  commits: [d: testCID("c1"), e: testCID("b1")]),
@@ -252,25 +252,25 @@ final class ParentRunAttributionTests: XCTestCase {
             meta("x", parent: "p1", height: 2, work: 11),
             meta("q", parent: "p2", height: 3, work: 7),
         ])
-        await byInit.serveRuns(for: d)
-        let byReplay = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await byReplay.serveRuns(for: d)
-        _ = try await byReplay.replay(batch("p1", parent: "g", height: 1, work: 5,
+        byInit.serveRuns(for: d)
+        var byReplay = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        byReplay.serveRuns(for: d)
+        _ = try byReplay.replay(batch("p1", parent: "g", height: 1, work: 5,
                                             commits: [d: testCID("c1"), e: testCID("b1")]))
-        _ = try await byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
-        _ = try await byReplay.replay(batch("x", parent: "p1", height: 2, work: 11))
-        _ = try await byReplay.replay(batch("q", parent: "p2", height: 3, work: 7))
+        _ = try byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
+        _ = try byReplay.replay(batch("x", parent: "p1", height: 2, work: 11))
+        _ = try byReplay.replay(batch("q", parent: "p2", height: 3, work: 7))
 
         let expected: [String: String?] = ["g": nil, "p1": "p1", "p2": "p2", "x": "p1", "q": "p2"]
         for (label, chain) in [("init", byInit), ("replay", byReplay)] {
             var runOf: [String: WorkSum] = [:]
             for (block, carrier) in expected {
-                let actual = await chain.nearestCarrier(of: h(block), directory: d)
+                let actual = chain.nearestCarrier(of: h(block), directory: d)
                 XCTAssertEqual(actual, carrier.map(h), "\(label): carrier of \(block)")
                 if let carrier {
                     runOf[carrier] = (runOf[carrier] ?? .zero) + sum(work[block]!)
                 }
-                let unserved = await chain.nearestCarrier(of: h(block), directory: e)
+                let unserved = chain.nearestCarrier(of: h(block), directory: e)
                 XCTAssertNil(unserved, "\(label): \(block) in an unserved directory, though p1 commits into it")
             }
             // The blocks naming a carrier are exactly the run it serves.
@@ -278,22 +278,22 @@ final class ParentRunAttributionTests: XCTestCase {
                 let served = await run(chain, at: carrier)
                 XCTAssertEqual(served, total, "\(label): \(carrier)'s run is the blocks naming it")
             }
-            let unknown = await chain.nearestCarrier(of: h("nope"), directory: d)
+            let unknown = chain.nearestCarrier(of: h("nope"), directory: d)
             XCTAssertNil(unknown, "\(label): unknown block")
         }
 
         // An orphan has no carrier until it connects; then it inherits one.
-        _ = try await byReplay.replay(batch("r2", parent: "r1", height: 5, work: 2))
-        let orphaned = await byReplay.nearestCarrier(of: h("r2"), directory: d)
+        _ = try byReplay.replay(batch("r2", parent: "r1", height: 5, work: 2))
+        let orphaned = byReplay.nearestCarrier(of: h("r2"), directory: d)
         XCTAssertNil(orphaned, "an unconnected block has no carrier yet")
-        _ = try await byReplay.replay(batch("r1", parent: "q", height: 4, work: 2))
-        let connected = await byReplay.nearestCarrier(of: h("r2"), directory: d)
+        _ = try byReplay.replay(batch("r1", parent: "q", height: 4, work: 2))
+        let connected = byReplay.nearestCarrier(of: h("r2"), directory: d)
         XCTAssertEqual(connected, h("p2"), "connecting through q inherits p2")
 
         // Serving a directory late settles the same pointers.
-        await byReplay.serveRuns(for: e)
-        let lateP2 = await byReplay.nearestCarrier(of: h("p2"), directory: e)
-        let lateG = await byReplay.nearestCarrier(of: h("g"), directory: e)
+        byReplay.serveRuns(for: e)
+        let lateP2 = byReplay.nearestCarrier(of: h("p2"), directory: e)
+        let lateG = byReplay.nearestCarrier(of: h("g"), directory: e)
         XCTAssertEqual(lateP2, h("p1"), "p2 commits nothing into e, so p1 carries it")
         XCTAssertNil(lateG)
     }
@@ -308,56 +308,56 @@ final class ParentRunAttributionTests: XCTestCase {
         //      /  \
         //    p2    x        p2 and x both commit c2 into d
         let e = "Markets"
-        let byInit = makeChain(blocks: [
+        var byInit = makeChain(blocks: [
             meta("g", parent: nil, height: 0, children: ["p1"], work: 1),
             meta("p1", parent: "g", height: 1, children: ["p2", "x"], work: 5,
                  commits: [d: testCID("c1"), e: testCID("b1")]),
             meta("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]),
             meta("x", parent: "p1", height: 2, work: 11, commits: [d: testCID("c2")]),
         ])
-        await byInit.serveRuns(for: d)
-        let byReplay = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await byReplay.serveRuns(for: d)
-        _ = try await byReplay.replay(batch("p1", parent: "g", height: 1, work: 5,
+        byInit.serveRuns(for: d)
+        var byReplay = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        byReplay.serveRuns(for: d)
+        _ = try byReplay.replay(batch("p1", parent: "g", height: 1, work: 5,
                                             commits: [d: testCID("c1"), e: testCID("b1")]))
-        _ = try await byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
-        _ = try await byReplay.replay(batch("x", parent: "p1", height: 2, work: 11, commits: [d: testCID("c2")]))
+        _ = try byReplay.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
+        _ = try byReplay.replay(batch("x", parent: "p1", height: 2, work: 11, commits: [d: testCID("c2")]))
 
         for (label, chain) in [("init", byInit), ("replay", byReplay)] {
-            let c1 = await chain.committers(of: testCID("c1"), directory: d)
+            let c1 = chain.committers(of: testCID("c1"), directory: d)
             XCTAssertEqual(c1, [h("p1")], label)
-            let c2 = await chain.committers(of: testCID("c2"), directory: d)
+            let c2 = chain.committers(of: testCID("c2"), directory: d)
             XCTAssertEqual(c2, [h("p2"), h("x")].sorted(), "\(label): both forks")
-            let unserved = await chain.committers(of: testCID("b1"), directory: e)
+            let unserved = chain.committers(of: testCID("b1"), directory: e)
             XCTAssertEqual(unserved, [], "\(label): unserved directory")
-            let unknown = await chain.committers(of: testCID("nope"), directory: d)
+            let unknown = chain.committers(of: testCID("nope"), directory: d)
             XCTAssertEqual(unknown, [], label)
         }
 
         // An orphan commits nothing until it connects.
-        _ = try await byReplay.replay(batch("r2", parent: "r1", height: 4, work: 2, commits: [d: testCID("c3")]))
-        let orphaned = await byReplay.committers(of: testCID("c3"), directory: d)
+        _ = try byReplay.replay(batch("r2", parent: "r1", height: 4, work: 2, commits: [d: testCID("c3")]))
+        let orphaned = byReplay.committers(of: testCID("c3"), directory: d)
         XCTAssertEqual(orphaned, [])
-        _ = try await byReplay.replay(batch("r1", parent: "p2", height: 3, work: 2))
-        let connected = await byReplay.committers(of: testCID("c3"), directory: d)
+        _ = try byReplay.replay(batch("r1", parent: "p2", height: 3, work: 2))
+        let connected = byReplay.committers(of: testCID("c3"), directory: d)
         XCTAssertEqual(connected, [h("r2")])
 
         // Serving a directory late indexes what was already held.
-        await byReplay.serveRuns(for: e)
-        let late = await byReplay.committers(of: testCID("b1"), directory: e)
+        byReplay.serveRuns(for: e)
+        let late = byReplay.committers(of: testCID("b1"), directory: e)
         XCTAssertEqual(late, [h("p1")])
     }
 
     func testDirectoriesAreIndependentPartitions() async throws {
         let e = "Markets"
-        let chain = makeChain(blocks: [
+        var chain = makeChain(blocks: [
             meta("g", parent: nil, height: 0, children: ["p1"], work: 1),
             meta("p1", parent: "g", height: 1, children: ["p2"], work: 5,
                  commits: [d: testCID("a"), e: testCID("b")]),
             meta("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("a2")]),
         ])
-        await chain.serveRuns(for: d)
-        await chain.serveRuns(for: e)
+        chain.serveRuns(for: d)
+        chain.serveRuns(for: e)
         let p1d = await run(chain, at: "p1", in: d)
         let p2d = await run(chain, at: "p2", in: d)
         let p1e = await run(chain, at: "p1", in: e)
@@ -385,32 +385,32 @@ final class ParentRunAttributionTests: XCTestCase {
     /// block's commitments are not compared: the block keeps those it was
     /// recorded with.
     func testRedeliveredBlockKeepsItsRecordedCommitments() async throws {
-        let chain = try await linearByReplay()
-        let same = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
+        var chain = try await linearByReplay()
+        let same = try chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
         XCTAssertNil(same, "same block, same map: a no-op replay")
-        let other = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("other")]))
+        let other = try chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("other")]))
         XCTAssertNil(other, "re-delivery is a no-op")
-        let recorded = await chain.getConsensusBlock(hash: h("p1"))?.childCommitments
+        let recorded = chain.getConsensusBlock(hash: h("p1"))?.childCommitments
         XCTAssertEqual(recorded, [d: h("c")])
     }
 
     /// Runs exist only for directories this node serves: a block committing
     /// into two hundred directories costs a node that serves one exactly one.
     func testUnservedDirectoriesCostNothingAndServeNothing() async throws {
-        let chain = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await chain.serveRuns(for: d)
+        var chain = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        chain.serveRuns(for: d)
         var commits = [d: testCID("c")]
         for i in 0..<200 { commits["junk-\(i)"] = testCID("j\(i)") }
-        let start = await chain.runAttributionUpdateCount
-        _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: commits))
-        _ = try await chain.replay(batch("p2", parent: "p1", height: 2, work: 3))
-        let end = await chain.runAttributionUpdateCount
+        let start = chain.runAttributionUpdateCount
+        _ = try chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: commits))
+        _ = try chain.replay(batch("p2", parent: "p1", height: 2, work: 3))
+        let end = chain.runAttributionUpdateCount
         XCTAssertEqual(end - start, 2, "one update per block for the ONE served directory, not 201")
         let junk = await run(chain, at: "p1", in: "junk-7")
         XCTAssertNil(junk, "an unserved directory keeps no run, even though the block commits into it")
         let served = await run(chain, at: "p1")
         XCTAssertEqual(served, sum(5, 3))
-        let recorded = await chain.recordedChildCommitments(of: h("p1"))
+        let recorded = chain.recordedChildCommitments(of: h("p1"))
         XCTAssertEqual(recorded, commits, "every commitment is held exactly, served or not")
     }
 
@@ -418,16 +418,16 @@ final class ParentRunAttributionTests: XCTestCase {
     /// would have built: the whole-graph settle and the per-block settle are
     /// one algorithm.
     func testServingLateEqualsServingFirst() async throws {
-        func build(serveFirst: Bool) async throws -> ChainState {
-            let chain = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-            if serveFirst { await chain.serveRuns(for: d) }
-            _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("c1")]))
-            _ = try await chain.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
-            _ = try await chain.replay(batch("x", parent: "p1", height: 2, work: 11))
-            _ = try await chain.replay(batch("q", parent: "p2", height: 3, work: 7))
-            _ = try await chain.replay(batch("orphan", parent: "missing", height: 9, work: 100, commits: [d: testCID("c9")]))
-            if !serveFirst { await chain.serveRuns(for: d) }
-            await chain.serveRuns(for: d) // idempotent
+        func build(serveFirst: Bool) async throws -> ChainTree {
+            var chain = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+            if serveFirst { chain.serveRuns(for: d) }
+            _ = try chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("c1")]))
+            _ = try chain.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c2")]))
+            _ = try chain.replay(batch("x", parent: "p1", height: 2, work: 11))
+            _ = try chain.replay(batch("q", parent: "p2", height: 3, work: 7))
+            _ = try chain.replay(batch("orphan", parent: "missing", height: 9, work: 100, commits: [d: testCID("c9")]))
+            if !serveFirst { chain.serveRuns(for: d) }
+            chain.serveRuns(for: d) // idempotent
             return chain
         }
         let first = try await build(serveFirst: true)
@@ -458,10 +458,10 @@ final class ParentRunAttributionTests: XCTestCase {
     // MARK: - Maintenance
 
     func testStrengtheningARunMemberRaisesTheRunByExactlyTheDelta() async throws {
-        let chain = try await linearByReplay()
+        var chain = try await linearByReplay()
         let before = await run(chain, at: "p1")
         // p2's grind observed stronger: 3 -> 10, delta 7.
-        let result = await chain.addWorkContribution(
+        let result = chain.addWorkContribution(
             VerifiedWorkContribution(id: grind("p2"), work: UInt256(10)), to: h("p2")
         )
         XCTAssertTrue(result.addedContribution, "fixture must actually strengthen")
@@ -471,8 +471,8 @@ final class ParentRunAttributionTests: XCTestCase {
     }
 
     func testStrengtheningTheCommitterItselfRaisesItsOwnRun() async throws {
-        let chain = try await linearByReplay()
-        let result = await chain.addWorkContribution(
+        var chain = try await linearByReplay()
+        let result = chain.addWorkContribution(
             VerifiedWorkContribution(id: grind("p1"), work: UInt256(50)), to: h("p1")
         )
         XCTAssertTrue(result.addedContribution)
@@ -483,9 +483,9 @@ final class ParentRunAttributionTests: XCTestCase {
     }
 
     func testWeakerObservationChangesNothing() async throws {
-        let chain = try await linearByReplay()
+        var chain = try await linearByReplay()
         let before = await run(chain, at: "p1")
-        let result = await chain.addWorkContribution(
+        let result = chain.addWorkContribution(
             VerifiedWorkContribution(id: grind("p2"), work: UInt256(2)), to: h("p2")
         )
         XCTAssertFalse(result.addedContribution)
@@ -494,18 +494,18 @@ final class ParentRunAttributionTests: XCTestCase {
     }
 
     func testOrphanIsCreditedWhenItConnectsNotBefore() async throws {
-        let chain = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await chain.serveRuns(for: d)
-        _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("c")]))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        chain.serveRuns(for: d)
+        _ = try chain.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: testCID("c")]))
         // p3 arrives before its parent p2, and so does a strengthening of it.
-        _ = try await chain.replay(batch("p3", parent: "p2", height: 3, work: 7))
-        let strengthened = await chain.addWorkContribution(
+        _ = try chain.replay(batch("p3", parent: "p2", height: 3, work: 7))
+        let strengthened = chain.addWorkContribution(
             VerifiedWorkContribution(id: grind("p3"), work: UInt256(9)), to: h("p3")
         )
         XCTAssertTrue(strengthened.addedContribution)
         let orphaned = await run(chain, at: "p1")
         XCTAssertEqual(orphaned, sum(5), "an orphan's work must not be credited before it is connected")
-        _ = try await chain.replay(batch("p2", parent: "p1", height: 2, work: 3))
+        _ = try chain.replay(batch("p2", parent: "p1", height: 2, work: 3))
         let connected = await run(chain, at: "p1")
         XCTAssertEqual(connected, sum(5, 3, 9),
                        "connecting p2 connects p3 too, and credits p3 at its CURRENT work, once")
@@ -514,13 +514,13 @@ final class ParentRunAttributionTests: XCTestCase {
     /// A committer that arrives as an orphan is not a committer yet: its run
     /// exists only once it is connected, and then holds its whole subtree.
     func testOrphanCommitterHasNoRunUntilConnected() async throws {
-        let chain = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await chain.serveRuns(for: d)
-        _ = try await chain.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c")]))
-        _ = try await chain.replay(batch("p3", parent: "p2", height: 3, work: 7))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        chain.serveRuns(for: d)
+        _ = try chain.replay(batch("p2", parent: "p1", height: 2, work: 3, commits: [d: testCID("c")]))
+        _ = try chain.replay(batch("p3", parent: "p2", height: 3, work: 7))
         let orphaned = await run(chain, at: "p2")
         XCTAssertNil(orphaned, "an unconnected committer has no run")
-        _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 5))
+        _ = try chain.replay(batch("p1", parent: "g", height: 1, work: 5))
         let connected = await run(chain, at: "p2")
         XCTAssertEqual(connected, sum(3, 7))
     }
@@ -529,26 +529,26 @@ final class ParentRunAttributionTests: XCTestCase {
     /// run untouched, and a block descending from an excluded block is still
     /// connected and still credited.
     func testExclusionNeitherRevokesNorBlocksRunCredit() async throws {
-        let chain = try await linearByReplay()
+        var chain = try await linearByReplay()
         let before = await run(chain, at: "p1")
-        _ = try await chain.replay(BlockImportBatch(facts: [
+        _ = try chain.replay(BlockImportBatch(facts: [
             .exclusion(ChainExclusionFact(blockHash: h("p2"))),
         ]))
         // Fixture guard: the exclusion really took p2 out of THIS chain's
         // selection (work weighs, validity selects — §9.9), or the invariant
         // below is not being exercised.
-        let path = await chain.canonicalHashes
+        let path = chain.canonicalHashes
         XCTAssertFalse(path.contains(h("p2")), "p2 must be unselectable")
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, h("p1"), "the descent stops above the excluded block")
         let afterExclusion = await run(chain, at: "p1")
         XCTAssertEqual(afterExclusion, before, "a run is never revoked by exclusion")
         // A new block under the excluded p2 is still connected and credited.
-        _ = try await chain.replay(batch("p4", parent: "p2", height: 3, work: 13))
+        _ = try chain.replay(batch("p4", parent: "p2", height: 3, work: 13))
         let afterInsert = await run(chain, at: "p1")
         XCTAssertEqual(afterInsert, (before ?? .zero) + sum(13), "run credit is independent of exclusion")
         // And so is a strengthening of the excluded block itself.
-        let strengthened = await chain.addWorkContribution(
+        let strengthened = chain.addWorkContribution(
             VerifiedWorkContribution(id: grind("p2"), work: UInt256(4)), to: h("p2")
         )
         XCTAssertTrue(strengthened.addedContribution)
@@ -570,9 +570,9 @@ final class ParentRunAttributionTests: XCTestCase {
                 contribution: VerifiedWorkContribution(id: grind("x"), work: UInt256(20))
             ))]),
         ]
-        let live = try await ChainState.restoreWithoutContext(replaying: [facts[0]])
-        await live.serveRuns(for: d)
-        for fact in facts.dropFirst() { _ = try await live.replay(fact) }
+        var live = try ChainTree.restoreWithoutContext(replaying: [facts[0]])
+        live.serveRuns(for: d)
+        for fact in facts.dropFirst() { _ = try live.replay(fact) }
         let liveP1 = await run(live, at: "p1")
         let liveP2 = await run(live, at: "p2")
         XCTAssertEqual(liveP1, sum(5, 20))
@@ -581,8 +581,8 @@ final class ParentRunAttributionTests: XCTestCase {
         let seed = propertySeed()
         var generator = seed.generator()
         for _ in 0..<5 {
-            let cold = try await ChainState.restoreWithoutContext(replaying: facts.shuffled(using: &generator))
-            await cold.serveRuns(for: d) // served AFTER restore: the whole-graph settle
+            var cold = try ChainTree.restoreWithoutContext(replaying: facts.shuffled(using: &generator))
+            cold.serveRuns(for: d) // served AFTER restore: the whole-graph settle
             let coldP1 = await run(cold, at: "p1")
             let coldP2 = await run(cold, at: "p2")
             XCTAssertEqual(coldP1, liveP1, seed.note)
@@ -592,18 +592,18 @@ final class ParentRunAttributionTests: XCTestCase {
 
     // MARK: - The child's side: derivation
 
-    private func attributed(_ chain: ChainState, committer: String = "p1", at child: String = "c",
+    private func attributed(_ chain: ChainTree, committer: String = "p1", at child: String = "c",
                             directory: String? = nil) async -> UInt256? {
         let id = AttributedRunIdentity(carrierBlockHash: h(committer), directory: directory ?? d).contributionID!
-        return await chain.workContribution(id: id, at: h(child))?.work
+        return chain.workContribution(id: id, at: h(child))?.work
     }
 
     /// Derive `child`'s attributed runs from `parent`'s tree; the blocks raised.
     @discardableResult
-    private func derive(_ child: ChainState, from parent: ChainState,
+    private func derive(_ child: inout ChainTree, from parent: ChainTree,
                         parentBlocks: Set<String>? = nil, held: Set<String> = []) async -> [String] {
-        await child.applyParentRun(
-            from: await parent.tree, directory: d,
+        child.applyParentRun(
+            from: parent, directory: d,
             parentBlocks: parentBlocks.map { Set($0.map(h)) }, held: Set(held.map(h))
         ).raised
     }
@@ -613,36 +613,36 @@ final class ParentRunAttributionTests: XCTestCase {
     /// the grind, which is untouched.
     func testNonCommittingParentWorkReachesTheChild() async throws {
         let parent = try await linearByReplay()
-        let child = try childChain(existing: UInt256(5))
-        let raised = await derive(child, from: parent)
+        var child = try childChain(existing: UInt256(5))
+        let raised = await derive(&child, from: parent)
         XCTAssertEqual(raised, [h("c")])
         let base = await credited(child)
         let extra = await attributed(child)
         XCTAssertEqual(base, UInt256(5), "the committer's own grind stays at the child's price, once")
         XCTAssertEqual(extra, UInt256(10), "3 + 7: the run minus the committer's grinds")
-        let weight = await child.subtreeWeight(forHash: h("cg"))
+        let weight = child.subtreeWeight(forHash: h("cg"))
         XCTAssertEqual(weight, sum(1, 5, 10), "the child's fork choice sees own + attributed")
     }
 
     func testDerivationKeepsTheChildsOwnRaise() async throws {
         // C's existing credit (9) exceeds the parent's price for the same grind (5).
-        let child = try childChain(existing: UInt256(9))
-        await derive(child, from: try await linearByReplay())
+        var child = try childChain(existing: UInt256(9))
+        await derive(&child, from: try await linearByReplay())
         let base = await credited(child)
         let extra = await attributed(child)
         XCTAssertEqual(base, UInt256(9), "the terminal-target raise survives")
         XCTAssertEqual(extra, UInt256(10))
-        let weight = await child.subtreeWeight(forHash: h("cg"))
+        let weight = child.subtreeWeight(forHash: h("cg"))
         XCTAssertEqual(weight, sum(1, 9, 10))
     }
 
     /// A run with no blocks beyond the committer attributes nothing.
     func testDerivationNeverCountsTheCommittersOwnGrindTwice() async throws {
-        let parent = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await parent.serveRuns(for: d)
-        _ = try await parent.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
-        let child = try childChain(existing: UInt256(5))
-        let raised = await derive(child, from: parent)
+        var parent = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        parent.serveRuns(for: d)
+        _ = try parent.replay(batch("p1", parent: "g", height: 1, work: 5, commits: [d: h("c")]))
+        var child = try childChain(existing: UInt256(5))
+        let raised = await derive(&child, from: parent)
         XCTAssertEqual(raised, [])
         let extra = await attributed(child)
         XCTAssertNil(extra)
@@ -651,24 +651,24 @@ final class ParentRunAttributionTests: XCTestCase {
     /// Idempotent: deriving again from the same parent credits nothing more.
     func testRepeatedDerivationIsOneCredit() async throws {
         let parent = try await linearByReplay()
-        let child = try childChain(existing: UInt256(5))
+        var child = try childChain(existing: UInt256(5))
         var raisedCounts: [Int] = []
-        for _ in 0..<3 { raisedCounts.append(await derive(child, from: parent).count) }
+        for _ in 0..<3 { raisedCounts.append(await derive(&child, from: parent).count) }
         XCTAssertEqual(raisedCounts, [1, 0, 0])
         let extra = await attributed(child)
         XCTAssertEqual(extra, UInt256(10))
-        let weight = await child.subtreeWeight(forHash: h("cg"))
+        let weight = child.subtreeWeight(forHash: h("cg"))
         XCTAssertEqual(weight, sum(1, 5, 10))
     }
 
     /// A committer mined under TWO grinds is one run and is credited once —
     /// the identity is the committer's, not a grind's.
     func testCommitterWithTwoGrindsIsCreditedOnce() async throws {
-        let parent = try await linearByReplay()
-        _ = try await parent.replay(BlockImportBatch(facts: [.work(ChainWorkFact(
+        var parent = try await linearByReplay()
+        _ = try parent.replay(BlockImportBatch(facts: [.work(ChainWorkFact(
             blockHash: h("p1"), contribution: VerifiedWorkContribution(id: grind("p1-alt"), work: UInt256(4))
         ))]))
-        let child = try anchoredChain([
+        var child = try anchoredChain([
             meta("cg", parent: nil, height: 0, children: ["c"], work: 1),
             BlockMeta(blockHash: h("c"), parentBlockHash: h("cg"), blockHeight: 1, childHashes: [],
                       workContributions: [
@@ -676,11 +676,11 @@ final class ParentRunAttributionTests: XCTestCase {
                           VerifiedWorkContribution(id: grind("p1-alt"), work: UInt256(4)),
                       ]),
         ], anchors: ["c": "p1"])
-        await derive(child, from: parent)
-        await derive(child, from: parent)
+        await derive(&child, from: parent)
+        await derive(&child, from: parent)
         let extra = await attributed(child)
         XCTAssertEqual(extra, UInt256(10), "run (9+3+7) − own (5+4), once")
-        let weight = await child.subtreeWeight(forHash: h("cg"))
+        let weight = child.subtreeWeight(forHash: h("cg"))
         XCTAssertEqual(weight, sum(1, 5, 4, 10), "both grinds at the child's price, plus the run once")
     }
 
@@ -692,15 +692,15 @@ final class ParentRunAttributionTests: XCTestCase {
     /// carrier — still takes the committer's run.
     func testInvertedHierarchyIsCredited() async throws {
         let parent = try await linearByReplay()
-        let child = try anchoredChain([
+        var child = try anchoredChain([
             meta("cg", parent: nil, height: 0, children: ["c"], work: 1),
             childMeta("c", parent: "cg", height: 1, grind: grind("elsewhere"), work: UInt256(2)),
         ], anchors: ["c": "p1"])
-        let raised = await derive(child, from: parent)
+        let raised = await derive(&child, from: parent)
         XCTAssertEqual(raised, [h("c")])
         let extra = await attributed(child)
         XCTAssertEqual(extra, UInt256(10))
-        let weight = await child.subtreeWeight(forHash: h("cg"))
+        let weight = child.subtreeWeight(forHash: h("cg"))
         XCTAssertEqual(weight, sum(1, 2, 10))
     }
 
@@ -708,11 +708,11 @@ final class ParentRunAttributionTests: XCTestCase {
     /// is held and the derivation runs again — never before.
     func testUnheldChildBlockIsCreditedOnceHeld() async throws {
         let parent = try await linearByReplay()
-        let child = try await ChainState.restoreWithoutContext(replaying: [batch("cg", parent: nil, height: 0, work: 1)])
-        let before = await derive(child, from: parent)
+        var child = try ChainTree.restoreWithoutContext(replaying: [batch("cg", parent: nil, height: 0, work: 1)])
+        let before = await derive(&child, from: parent)
         XCTAssertEqual(before, [], "C is not held: nothing to credit")
-        _ = try await child.replay(batch("c", parent: "cg", height: 1, work: 5, anchor: "p1"))
-        let after = await derive(child, from: parent, parentBlocks: [], held: ["c"])
+        _ = try child.replay(batch("c", parent: "cg", height: 1, work: 5, anchor: "p1"))
+        let after = await derive(&child, from: parent, parentBlocks: [], held: ["c"])
         XCTAssertEqual(after, [h("c")])
         let extra = await attributed(child)
         XCTAssertEqual(extra, UInt256(10))
@@ -722,28 +722,28 @@ final class ParentRunAttributionTests: XCTestCase {
     /// the committer never lower the child's credit; new work in the run
     /// raises it, excluded or not.
     func testDerivationIsMonotoneUnderParentReorgsAndExclusions() async throws {
-        let parent = try await linearByReplay()
-        let child = try childChain(existing: UInt256(5))
+        var parent = try await linearByReplay()
+        var child = try childChain(existing: UInt256(5))
         var seen: [UInt256] = []
         func step() async throws {
-            await derive(child, from: parent)
+            await derive(&child, from: parent)
             let value = await attributed(child)
             seen.append(try XCTUnwrap(value))
         }
         try await step()
         // A heavier rival branch reorgs the parent away from p1's run.
-        _ = try await parent.replay(batch("r1", parent: "g", height: 1, work: 100))
-        let parentTip = await parent.canonicalTip
+        _ = try parent.replay(batch("r1", parent: "g", height: 1, work: 100))
+        let parentTip = parent.canonicalTip
         XCTAssertEqual(parentTip, h("r1"), "fixture: the parent reorged")
         try await step()
         // Excluding a run member on the parent revokes nothing.
-        _ = try await parent.replay(BlockImportBatch(facts: [.exclusion(ChainExclusionFact(blockHash: h("p2")))]))
+        _ = try parent.replay(BlockImportBatch(facts: [.exclusion(ChainExclusionFact(blockHash: h("p2")))]))
         try await step()
         // New work under the excluded block still joins the run.
-        _ = try await parent.replay(batch("p4", parent: "p2", height: 3, work: 13))
+        _ = try parent.replay(batch("p4", parent: "p2", height: 3, work: 13))
         try await step()
         // A stronger grind at the committer raises both terms alike.
-        _ = try await parent.replay(BlockImportBatch(facts: [.work(ChainWorkFact(
+        _ = try parent.replay(BlockImportBatch(facts: [.work(ChainWorkFact(
             blockHash: h("p1"), contribution: VerifiedWorkContribution(id: grind("p1"), work: UInt256(50))
         ))]))
         try await step()
@@ -757,26 +757,26 @@ final class ParentRunAttributionTests: XCTestCase {
         //   cg
         //  /  \
         // a    b     equal own work, different parent runs behind them
-        let child = try anchoredChain([
+        var child = try anchoredChain([
             meta("cg", parent: nil, height: 0, children: ["a", "b"], work: 1),
             childMeta("a", parent: "cg", height: 1, grind: grind("pa"), work: UInt256(5)),
             childMeta("b", parent: "cg", height: 1, grind: grind("pb"), work: UInt256(5)),
         ], anchors: ["a": "pa", "b": "pb"], canonicalHashes: [h("cg"), h("a")])
-        let tipBefore = await child.canonicalTip
+        let tipBefore = child.canonicalTip
         XCTAssertEqual(tipBefore, h("a"))
         // b's carrier gathered 40 of descendant parent work; a's gathered 0.
-        let parent = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-        await parent.serveRuns(for: d)
-        _ = try await parent.replay(batch("pa", parent: "g", height: 1, work: 5, commits: [d: h("a")]))
-        _ = try await parent.replay(batch("pb", parent: "g", height: 1, work: 5, commits: [d: h("b")]))
-        _ = try await parent.replay(batch("pbx", parent: "pb", height: 2, work: 40))
-        let applied = await child.applyParentRun(from: await parent.tree, directory: d)
+        var parent = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+        parent.serveRuns(for: d)
+        _ = try parent.replay(batch("pa", parent: "g", height: 1, work: 5, commits: [d: h("a")]))
+        _ = try parent.replay(batch("pb", parent: "g", height: 1, work: 5, commits: [d: h("b")]))
+        _ = try parent.replay(batch("pbx", parent: "pb", height: 2, work: 40))
+        let applied = child.applyParentRun(from: parent, directory: d)
         XCTAssertEqual(applied.raised, [h("b")])
         XCTAssertEqual(applied.commit?.tipHash, h("b"))
-        let tipAfter = await child.canonicalTip
+        let tipAfter = child.canonicalTip
         XCTAssertEqual(tipAfter, h("b"), "parent work behind b's carrier moved the child's fork choice")
-        let wa = await child.subtreeWeight(forHash: h("a"))
-        let wb = await child.subtreeWeight(forHash: h("b"))
+        let wa = child.subtreeWeight(forHash: h("a"))
+        let wb = child.subtreeWeight(forHash: h("b"))
         XCTAssertEqual(wa, sum(5))
         XCTAssertEqual(wb, sum(45))
     }
@@ -904,9 +904,8 @@ final class ParentRunAttributionTests: XCTestCase {
 
     /// A genesis is just a block: a child-root genesis committing a
     /// grandchild records that commitment on every admission path — weighed
-    /// and executed in one step (value and actor bootstraps) or weighed
-    /// first — so the grandchild weighs the same whichever path its node
-    /// took.
+    /// and executed in one step (`ChainTree.bootstrap`) or weighed first —
+    /// so the grandchild weighs the same whichever path its node took.
     func testAGenesisCommittingAGrandchildWeighsTheSameEagerOrWeighedFirst() async throws {
         let fetcher = StorableFetcher()
         let grandchild = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000, nonce: 21)
@@ -925,13 +924,6 @@ final class ParentRunAttributionTests: XCTestCase {
             genesis: try BlockHeader(node: genesis), evidence: evidence, fetcher: fetcher,
             context: context, parentFacts: try await testParentFacts(fetcher: fetcher)
         ).get().tree
-        let actorResult = try await ChainLevel.bootstrap(
-            context: context, genesisHeader: try BlockHeader(node: genesis), fetcher: fetcher,
-            childPackage: package, validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-            stage: testAdmissionStage
-        )
-        guard case .accepted(let accepted) = actorResult else { return XCTFail("actor bootstrap: \(actorResult)") }
-        let actor = await accepted.level.chain.tree
         var weighed = ChainTree.empty(context: context)
         let resolvedIndex = try await genesis.children.resolve(fetcher: fetcher).node
         XCTAssertNotNil(weighed.insertGenesis(
@@ -950,7 +942,7 @@ final class ParentRunAttributionTests: XCTestCase {
             .work(ChainWorkFact(blockHash: h("a1"), contribution: VerifiedWorkContribution(id: grind("a1"), work: UInt256(7)))),
         ])
         var weights: [WorkSum?] = []
-        for (label, tree) in [("eager", eager), ("actor eager", actor), ("weighed first", weighed)] {
+        for (label, tree) in [("eager", eager), ("weighed first", weighed)] {
             XCTAssertEqual(tree.recordedChildCommitments(of: genesisCID), [directoryB: grandchildCID], label)
             var level = tree.detached()
             _ = try level.replay(below)
@@ -960,8 +952,7 @@ final class ParentRunAttributionTests: XCTestCase {
             XCTAssertEqual(raised, [grandchildCID], label)
             weights.append(lower.subtreeWeight(forHash: grandchildCID))
         }
-        XCTAssertEqual(weights[0], weights[1], "eager value and actor paths agree")
-        XCTAssertEqual(weights[0], weights[2], "eager and weighed-first agree")
+        XCTAssertEqual(weights[0], weights[1], "eager and weighed-first agree")
     }
 
     // MARK: - Recursion: Nexus → A → B
@@ -969,8 +960,8 @@ final class ParentRunAttributionTests: XCTestCase {
     /// A strengthening A received raises the run A keeps for B, because the
     /// run is over A's own `work`.
     func testWorkAttributedToTheParentFlowsIntoItsRun() async throws {
-        let a = try await linearByReplay() // A: g ← p1(commits into B's dir) ← p2 ← p3
-        let up = await a.addWorkContribution(
+        var a = try await linearByReplay() // A: g ← p1(commits into B's dir) ← p2 ← p3
+        let up = a.addWorkContribution(
             VerifiedWorkContribution(id: grind("p3"), work: UInt256(107)), to: h("p3")
         )
         XCTAssertTrue(up.addedContribution)
@@ -1044,7 +1035,7 @@ final class ParentRunAttributionTests: XCTestCase {
 
     /// `subtreeWeight` rebuilds a diagnostic cache, so it reads a copy.
     private func weight(_ tree: ChainTree, _ name: String) -> WorkSum? {
-        var copy = tree
+        let copy = tree
         return copy.subtreeWeight(forHash: h(name))
     }
 
@@ -1186,18 +1177,18 @@ final class ParentRunAttributionTests: XCTestCase {
     /// connected block — never O(height). Asserted exactly, and by ratio.
     func testRunUpdatesArePerDirectoryNotPerHeight() async throws {
         func build(depth: Int, directories: [String]) async throws -> UInt64 {
-            let chain = try await ChainState.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
-            for directory in directories { await chain.serveRuns(for: directory) }
+            var chain = try ChainTree.restoreWithoutContext(replaying: [batch("g", parent: nil, height: 0, work: 1)])
+            for directory in directories { chain.serveRuns(for: directory) }
             let commits = Dictionary(uniqueKeysWithValues: directories.map { ($0, testCID("c-\($0)")) })
-            _ = try await chain.replay(batch("p1", parent: "g", height: 1, work: 2, commits: commits))
-            let start = await chain.runAttributionUpdateCount
+            _ = try chain.replay(batch("p1", parent: "g", height: 1, work: 2, commits: commits))
+            let start = chain.runAttributionUpdateCount
             var parent = "p1"
             for i in 2...depth {
                 let h = "p\(i)"
-                _ = try await chain.replay(batch(h, parent: parent, height: UInt64(i), work: 2))
+                _ = try chain.replay(batch(h, parent: parent, height: UInt64(i), work: 2))
                 parent = h
             }
-            let end = await chain.runAttributionUpdateCount
+            let end = chain.runAttributionUpdateCount
             return end - start
         }
         let oneDir64 = try await build(depth: 64, directories: [d])

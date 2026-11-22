@@ -48,9 +48,9 @@ private func buildChain(length: Int, startTimestamp: Int64 = 1_000_000) async th
     return blocks
 }
 
-private func submitChain(_ chain: ChainState, blocks: [Block]) async {
+private func submitChain(_ chain: inout ChainTree, blocks: [Block]) {
     for block in blocks.dropFirst() {
-        let _ = await chain.submitTestBlock(
+        let _ = chain.submitTestBlock(
             blockHeader: header(block), block: block
         )
     }
@@ -63,13 +63,13 @@ final class DoubleSpendTests: XCTestCase {
 
     func testSameBlockSubmittedTwiceIsRejected() async throws {
         let g = try await genesis()
-        let chain = ChainState.fromGenesis(block: g)
+        var chain = ChainTree.fromGenesis(block: g)
         let b1 = try await next(g, ts: 2_000_000, nonce: 1)
 
-        let first = await chain.submitTestBlock(blockHeader: header(b1), block: b1)
+        let first = chain.submitTestBlock(blockHeader: header(b1), block: b1)
         XCTAssertTrue(first.addedBlock)
 
-        let second = await chain.submitTestBlock(blockHeader: header(b1), block: b1)
+        let second = chain.submitTestBlock(blockHeader: header(b1), block: b1)
         XCTAssertFalse(second.addedBlock, "Duplicate block must be rejected")
     }
 
@@ -809,31 +809,31 @@ final class ConsensusStressTests: XCTestCase {
 
     func testLongChainMaintainsInvariants() async throws {
         let blocks = try await buildChain(length: 100)
-        let chain = ChainState.fromGenesis(block: blocks[0])
-        await submitChain(chain, blocks: blocks)
+        var chain = ChainTree.fromGenesis(block: blocks[0])
+        submitChain(&chain, blocks: blocks)
 
-        let tip = await chain.canonicalTip
-        let highest = await chain.getHighestBlockHeight()
+        let tip = chain.canonicalTip
+        let highest = chain.getHighestBlockHeight()
         XCTAssertEqual(highest, 99)
 
-        let tipOnMain = await chain.isCanonical(hash: tip)
+        let tipOnMain = chain.isCanonical(hash: tip)
         XCTAssertTrue(tipOnMain)
 
-        let genesisOnMain = await chain.isCanonical(hash: header(blocks[0]).rawCID)
+        let genesisOnMain = chain.isCanonical(hash: header(blocks[0]).rawCID)
         XCTAssertTrue(genesisOnMain)
     }
 
     func testManyForksFromSameBlock() async throws {
         let g = try await genesis()
-        let chain = ChainState.fromGenesis(block: g)
+        var chain = ChainTree.fromGenesis(block: g)
 
         let b1 = try await next(g, ts: 2_000_000, nonce: 1)
-        let _ = await chain.submitTestBlock(blockHeader: header(b1), block: b1)
+        let _ = chain.submitTestBlock(blockHeader: header(b1), block: b1)
 
         var candidates = [b1]
         for i in 0..<20 {
             let fork = try await next(g, ts: 2_000_000, nonce: UInt64(100 + i))
-            let _ = await chain.submitTestBlock(blockHeader: header(fork), block: fork)
+            let _ = chain.submitTestBlock(blockHeader: header(fork), block: fork)
             candidates.append(fork)
         }
 
@@ -843,14 +843,14 @@ final class ConsensusStressTests: XCTestCase {
             guard let best else { return cid }
             return forkChoicePrefersBlock(cid, over: best) ? cid : best
         }
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, expected, "Equal-work bases should converge on the stable CID tie-break")
     }
 
     func testDeepReorgPreservesCommonAncestor() async throws {
         let blocks = try await buildChain(length: 20)
-        let chain = ChainState.fromGenesis(block: blocks[0])
-        await submitChain(chain, blocks: blocks)
+        var chain = ChainTree.fromGenesis(block: blocks[0])
+        submitChain(&chain, blocks: blocks)
 
         let forkPoint = blocks[5]
         var forkBlocks: [Block] = [forkPoint]
@@ -859,29 +859,29 @@ final class ConsensusStressTests: XCTestCase {
             forkBlocks.append(b)
         }
         for b in forkBlocks.dropFirst() {
-            let _ = await chain.submitTestBlock(blockHeader: header(b), block: b)
+            let _ = chain.submitTestBlock(blockHeader: header(b), block: b)
         }
 
-        let newTip = await chain.canonicalTip
+        let newTip = chain.canonicalTip
         XCTAssertEqual(newTip, header(forkBlocks.last!).rawCID)
 
         for i in 0...5 {
-            let onMain = await chain.isCanonical(hash: header(blocks[i]).rawCID)
+            let onMain = chain.isCanonical(hash: header(blocks[i]).rawCID)
             XCTAssertTrue(onMain, "Common ancestor block \(i) must survive deep reorg")
         }
 
         for i in 6..<20 {
-            let onMain = await chain.isCanonical(hash: header(blocks[i]).rawCID)
+            let onMain = chain.isCanonical(hash: header(blocks[i]).rawCID)
             XCTAssertFalse(onMain, "Replaced block \(i) must be off main chain")
         }
     }
 
     func testOutOfOrderBlockSubmission() async throws {
         let blocks = try await buildChain(length: 5)
-        let chain = ChainState.fromGenesis(block: blocks[0])
+        var chain = ChainTree.fromGenesis(block: blocks[0])
 
-        _ = await chain.submitTestBlock(blockHeader: header(blocks[3]), block: blocks[3])
-        let requirements = await chain.unresolvedSameChainPredecessors()
+        _ = chain.submitTestBlock(blockHeader: header(blocks[3]), block: blocks[3])
+        let requirements = chain.unresolvedSameChainPredecessors()
         XCTAssertEqual(
             requirements,
             [SameChainPredecessorRequirement(
@@ -890,17 +890,17 @@ final class ConsensusStressTests: XCTestCase {
             )]
         )
 
-        let r1 = await chain.submitTestBlock(blockHeader: header(blocks[1]), block: blocks[1])
+        let r1 = chain.submitTestBlock(blockHeader: header(blocks[1]), block: blocks[1])
         XCTAssertTrue(r1.extendsCanonical)
 
-        let r2 = await chain.submitTestBlock(blockHeader: header(blocks[2]), block: blocks[2])
+        let r2 = chain.submitTestBlock(blockHeader: header(blocks[2]), block: blocks[2])
         XCTAssertTrue(r2.extendsCanonical)
 
-        let r4 = await chain.submitTestBlock(blockHeader: header(blocks[4]), block: blocks[4])
+        let r4 = chain.submitTestBlock(blockHeader: header(blocks[4]), block: blocks[4])
         XCTAssertTrue(r4.addedBlock)
 
-        let tipHash = await chain.canonicalTip
-        let tipIndex = await chain.getHighestBlockHeight()
+        let tipHash = chain.canonicalTip
+        let tipIndex = chain.getHighestBlockHeight()
         XCTAssertEqual(tipIndex, 4)
         XCTAssertEqual(tipHash, header(blocks[4]).rawCID)
     }
@@ -1013,20 +1013,20 @@ final class BugRegressionTests: XCTestCase {
 
     func testBestChainCacheInvalidationWalksFullAncestorChain() async throws {
         let blocks = try await buildChain(length: 5)
-        let chain = ChainState.fromGenesis(block: blocks[0])
-        await submitChain(chain, blocks: blocks)
+        var chain = ChainTree.fromGenesis(block: blocks[0])
+        submitChain(&chain, blocks: blocks)
 
-        let tipBefore = await chain.canonicalTip
+        let tipBefore = chain.canonicalTip
         XCTAssertEqual(tipBefore, header(blocks[4]).rawCID)
 
         var forkBlocks: [Block] = [blocks[2]]
         for i in 3..<8 {
             let b = try await next(forkBlocks.last!, ts: 1_000_000 + Int64(i) * 1000, nonce: UInt64(300 + i))
             forkBlocks.append(b)
-            let _ = await chain.submitTestBlock(blockHeader: header(b), block: b)
+            let _ = chain.submitTestBlock(blockHeader: header(b), block: b)
         }
 
-        let tipAfter = await chain.canonicalTip
+        let tipAfter = chain.canonicalTip
         XCTAssertEqual(tipAfter, header(forkBlocks.last!).rawCID,
             "Cache must be invalidated so the longer fork wins")
     }
@@ -1083,15 +1083,16 @@ final class StateChainInvariantTests: XCTestCase {
 // MARK: - State Root Validation (header-first gossip correctness)
 
 /// Verifies that blocks with valid PoW + valid structure but a tampered/wrong
-/// state root are rejected before being submitted to ChainState.
-/// This is the critical invariant for the header-first gossip design:
-/// gossip relay happens before state validation, so chain-local admission MUST
-/// reject invalid state roots synchronously before submitBlock is called.
+/// state root are never executed or selected. This is the critical invariant
+/// for the header-first gossip design: gossip relay happens before state
+/// validation, so a header that weighs must still be proven invalid by its
+/// execution, its work weighing but never selectable.
 @MainActor
 final class StateRootValidationTests: XCTestCase {
 
     /// A block with valid PoW and valid structure but a tampered postState CID
-    /// must be rejected by chain-local admission before submitBlock is called.
+    /// weighs from its header, and its execution proves it invalid: excluded,
+    /// never executed, never canonical.
     func testNexusBlockWithTamperedPostStateIsRejected() async throws {
         let f = StorableFetcher()
         let t = Int64(Date().timeIntervalSince1970 * 1000)
@@ -1119,20 +1120,15 @@ final class StateRootValidationTests: XCTestCase {
         }
         try await storeBlockToFetcher(minedTampered, fetcher: f)
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: g))
-        let result = try await level.importBlock(
-            header(minedTampered),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
-        )
+        var chain = try AdmissionFixture.makeChain(genesis: g, spec: spec())
+        let result = try await chain.admit(header(minedTampered), fetcher: f)
 
-        guard case .rejected(.protocolInvalid, _) = result else {
-            return XCTFail("block with tampered postState must be rejected")
-        }
-        let tip = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(tip, 0, "submitBlock must not have been called for a block with bad state root")
+        XCTAssertEqual(result.update?.excluded, true,
+            "block with tampered postState must be proven invalid by its execution")
+        XCTAssertFalse(chain.isExecuted(blockHash: header(minedTampered).rawCID))
+        XCTAssertEqual(chain.canonicalTip, header(g).rawCID)
+        XCTAssertEqual(chain.getHighestBlockHeight(), 0,
+            "a block with a bad state root must never be selected")
     }
 
     func testAcceptedBlockReturnsMaterializedPostStateAndRejectedBlockDoesNot() async throws {
@@ -1149,19 +1145,14 @@ final class StateRootValidationTests: XCTestCase {
         )
         try await storeBlockToFetcher(validBlock, fetcher: f)
 
-        let acceptingLevel = ChainLevel(testChain: ChainState.fromGenesis(block: g))
-        let accepted = try await acceptingLevel.importBlock(
-            header(validBlock),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
-        )
+        var acceptingChain = try AdmissionFixture.makeChain(genesis: g, spec: spec())
+        let accepted = try await acceptingChain.admit(header(validBlock), fetcher: f)
 
-        guard case let .accepted(acceptance) = accepted,
+        guard let acceptance = accepted.update, !acceptance.excluded,
               let materializedPostState = acceptance.materializedPostState else {
-            return XCTFail("accepted block should canonicalize with its materialized post-state")
+            return XCTFail("accepted block should execute with its materialized post-state")
         }
+        XCTAssertEqual(acceptingChain.canonicalTip, header(validBlock).rawCID)
         XCTAssertEqual(
             try LatticeStateHeader(node: materializedPostState).rawCID,
             validBlock.postState.rawCID,
@@ -1178,18 +1169,12 @@ final class StateRootValidationTests: XCTestCase {
         }
         try await storeBlockToFetcher(minedTampered, fetcher: f)
 
-        let rejectingLevel = ChainLevel(testChain: ChainState.fromGenesis(block: g))
-        let rejected = try await rejectingLevel.importBlock(
-            header(minedTampered),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
-        )
+        var rejectingChain = try AdmissionFixture.makeChain(genesis: g, spec: spec())
+        let rejected = try await rejectingChain.admit(header(minedTampered), fetcher: f)
 
-        guard case .rejected(.protocolInvalid, _) = rejected else {
-            return XCTFail("tampered block must be rejected")
-        }
+        XCTAssertEqual(rejected.update?.excluded, true, "tampered block must be proven invalid")
+        XCTAssertNil(rejected.update?.materializedPostState,
+            "a proven-invalid block carries no post-state")
     }
 
     func testWithheldParentReportsUnavailableThenAccepts() async throws {
@@ -1211,36 +1196,28 @@ final class StateRootValidationTests: XCTestCase {
             storer: incompleteFetcher
         )
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: g))
-        let unavailable = try await level.importBlock(
-            header(block),
-            fetcher: incompleteFetcher,
-            validationContentStorer: incompleteFetcher,
-            materializedVolumeStorer: incompleteFetcher,
-            stage: testAdmissionStage
-        )
+        var chain = try AdmissionFixture.makeChain(genesis: g, spec: spec())
+        let unavailable = try await chain.admit(header(block), fetcher: incompleteFetcher)
 
-        guard case .rejected(.unavailableEvidence, _) = unavailable else {
-            return XCTFail("a block whose parent data is unavailable must not be admitted")
-        }
-        let unavailableHeight = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(unavailableHeight, 0, "Unavailable blocks must not be submitted")
+        XCTAssertEqual(unavailable.failure, .unavailableEvidence,
+            "a block whose parent data is unavailable must not be executed")
+        // Unavailability is a retry, never a verdict: the block weighs (and,
+        // validity being consulted lazily, may lead the descent) but is
+        // neither executed nor excluded, and nothing acts on it.
+        XCTAssertFalse(chain.isExecuted(blockHash: header(block).rawCID))
+        XCTAssertFalse(chain.excludedRootsForTesting.contains(header(block).rawCID),
+            "an unavailable block must never be excluded")
+        XCTAssertEqual(chain.heaviestExecutedTip(), header(g).rawCID,
+            "Unavailable blocks must not be acted upon")
 
         try await VolumeImpl<Block>(node: g).storeBlock(fetcher: producerFetcher, storer: completeFetcher)
         try await VolumeImpl<Block>(node: block).storeBlock(fetcher: producerFetcher, storer: completeFetcher)
-        let accepted = try await level.importBlock(
-            header(block),
-            fetcher: completeFetcher,
-            validationContentStorer: completeFetcher,
-            materializedVolumeStorer: completeFetcher,
-            stage: testAdmissionStage
-        )
+        let accepted = try await chain.admit(header(block), fetcher: completeFetcher)
 
-        guard case .accepted = accepted else {
-            return XCTFail("an unavailable block must canonicalize once evidence arrives")
-        }
-        let acceptedHeight = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(acceptedHeight, 1)
+        XCTAssertEqual(accepted.update?.excluded, false,
+            "an unavailable block must execute once evidence arrives")
+        XCTAssertEqual(chain.canonicalTip, header(block).rawCID)
+        XCTAssertEqual(chain.getHighestBlockHeight(), 1)
     }
 
     func testGenuinelyInvalidBlockRejects() async throws {
@@ -1266,34 +1243,20 @@ final class StateRootValidationTests: XCTestCase {
         }
         try await storeBlockToFetcher(minedTampered, fetcher: f)
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: g))
-        let rejected = try await level.importBlock(
-            header(minedTampered),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
-        )
-        let rejectedAgain = try await level.importBlock(
-            header(minedTampered),
-            fetcher: f,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
-        )
+        var chain = try AdmissionFixture.makeChain(genesis: g, spec: spec())
+        let rejected = try await chain.admit(header(minedTampered), fetcher: f)
+        let rejectedAgain = try await chain.admit(header(minedTampered), fetcher: f)
 
-        guard case .rejected(.protocolInvalid, _) = rejected else {
-            return XCTFail("fully-resolvable invalid blocks must reject")
-        }
-        guard case .rejected(.protocolInvalid, _) = rejectedAgain else {
-            return XCTFail("reprocessing complete invalid data must not become accepted")
-        }
-        let rejectedHeight = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(rejectedHeight, 0)
+        XCTAssertEqual(rejected.update?.excluded, true, "fully-resolvable invalid blocks must be excluded")
+        XCTAssertNil(rejectedAgain.update.flatMap { $0.excluded ? nil : $0 },
+            "reprocessing complete invalid data must not become accepted")
+        XCTAssertFalse(chain.isExecuted(blockHash: header(minedTampered).rawCID),
+            "reprocessing complete invalid data must not execute it")
+        XCTAssertEqual(chain.getHighestBlockHeight(), 0)
     }
 
     /// A child block with valid PoW and valid structure but a tampered postState
-    /// must not be submitted to the child chain.
+    /// must not be executed on the child chain.
     func testChildBlockWithTamperedPostStateIsRejected() async throws {
         let f = StorableFetcher()
         let t = Int64(Date().timeIntervalSince1970 * 1000)
@@ -1326,8 +1289,8 @@ final class StateRootValidationTests: XCTestCase {
         }
         try await storeBlockToFetcher(minedTamperedChild, fetcher: f)
 
-        // The child process receives the complete root-to-child proof package;
-        // it does not depend on an in-process parent-chain runtime.
+        // The child chain receives the complete root-to-child proof; it does
+        // not depend on an in-process parent-chain runtime.
         let nexusCarrier = try await buildAndStoreGenesis(
             spec: nexusSpec, children: ["Child": minedTamperedChild],
             timestamp: t - 10_000, target: easyDifficulty, nonce: 0, fetcher: f
@@ -1338,24 +1301,19 @@ final class StateRootValidationTests: XCTestCase {
             fetcher: f,
         )
         let package = try await childValidationPackage(proof: proof, fetcher: f)
-        let childLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        var childChain = try ChainTree.fromGenesis(
+            block: childGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: childSpec
         )
-        let result = try await childLevel.importBlock(
-            header(minedTamperedChild),
-            fetcher: f,
-            childPackage: package,
-            validationContentStorer: f,
-            materializedVolumeStorer: f,
-            stage: testAdmissionStage
+        let result = try await childChain.admit(
+            header(minedTamperedChild), fetcher: f, child: package
         )
 
-        guard case .rejected(.protocolInvalid, _) = result else {
-            return XCTFail("tampered child block must be rejected")
-        }
-        let childTip = await childLevel.chain.getHighestBlockHeight()
-        XCTAssertEqual(childTip, 0, "Tampered child block must not be submitted to child chain")
+        XCTAssertEqual(result.update?.excluded, true, "tampered child block must be proven invalid")
+        XCTAssertFalse(childChain.isExecuted(blockHash: header(minedTamperedChild).rawCID))
+        XCTAssertEqual(childChain.getHighestBlockHeight(), 0,
+            "Tampered child block must never be selected on the child chain")
     }
 }
 

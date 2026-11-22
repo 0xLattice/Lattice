@@ -20,10 +20,10 @@ The three default scenarios pin the chain-local edges in the current library:
 For custom fixtures, `LatticeConsensusSimulator.runDiscreteEventScenario(_:)`
 accepts a `ConsensusSimScenarioSpec` with block topology, release times
 (`atMillis`), and per-block work weights. The harness turns those inputs into
-`BlockMeta` fixtures and still evaluates them through `ChainState`.
+`BlockMeta` fixtures and still evaluates them through `ChainTree`.
 
 The simulator does not implement a second fork-choice rule. It constructs
-`BlockMeta` fixtures and records `ChainState.forkChoiceSnapshot(startingAt:)`,
+`BlockMeta` fixtures and records `ChainTree.forkChoiceSnapshot(startingAt:)`,
 which wraps the library's real same-chain GHOST decision. Cross-chain proof and
 contribution derivation are tested at import rather than simulated by a live
 parent-weight provider.
@@ -33,7 +33,7 @@ parent-weight provider.
 The same run regenerates the checked-in adversarial report
 (`docs/consensus/adversarial-report.md` and its `.json`), and
 `ConsensusSimulatorTests` fails if the committed files differ from what the
-seed produces. Every scenario drives the real chain-local `ChainState` fork
+seed produces. Every scenario drives the real chain-local `ChainTree` fork
 choice: greatest true cumulative work first, then the smaller canonical CID of
 the competing child blocks. Parent canonicity and sibling state are not inputs.
 With seed 42 it establishes three results, as a function of the attacker's

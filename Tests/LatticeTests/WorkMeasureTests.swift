@@ -124,11 +124,11 @@ final class WorkMeasureTests: XCTestCase {
             workContributions: [original]
         )
         root.childHashes = [blockCID("child")]
-        let chain = makeChain(blocks: [root, child])
-        let result = await chain.addWorkContribution(stronger, to: blockCID("child"))
+        var chain = makeChain(blocks: [root, child])
+        let result = chain.addWorkContribution(stronger, to: blockCID("child"))
 
-        let cumulative = await chain.getCumulativeWork(forHash: blockCID("child"))
-        let subtree = await chain.subtreeWeight(forHash: blockCID("root"))
+        let cumulative = chain.getCumulativeWork(forHash: blockCID("child"))
+        let subtree = chain.subtreeWeight(forHash: blockCID("root"))
 
         XCTAssertTrue(result.addedContribution)
         XCTAssertEqual(cumulative, WorkSum(UInt256(14)))

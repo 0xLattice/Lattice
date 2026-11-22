@@ -19,7 +19,7 @@ private let fetcher = StorableFetcher()
 private struct RuntimeGenesisResult {
     let block: Block
     let blockHash: String
-    let chainState: ChainState
+    var chain: ChainTree
 }
 
 private func makeRuntimeGenesis(
@@ -30,7 +30,7 @@ private func makeRuntimeGenesis(
     return RuntimeGenesisResult(
         block: result.block,
         blockHash: result.blockHash,
-        chainState: ChainState.fromGenesis(block: result.block)
+        chain: ChainTree.fromGenesis(block: result.block)
     )
 }
 
@@ -48,8 +48,8 @@ final class GenesisCeremonyTests: XCTestCase {
         XCTAssertEqual(result1.blockHash, result2.blockHash,
             "Same genesis config must produce identical genesis block")
 
-        let tip1 = await result1.chainState.canonicalTip
-        let tip2 = await result2.chainState.canonicalTip
+        let tip1 = result1.chain.canonicalTip
+        let tip2 = result2.chain.canonicalTip
         XCTAssertEqual(tip1, tip2)
     }
 
@@ -105,24 +105,24 @@ final class GenesisCeremonyTests: XCTestCase {
         XCTAssertFalse(GenesisCeremony.verify(block: result.block, config: configC))
     }
 
-    func testGenesisChainStateIsUsable() async throws {
+    func testGenesisChainTreeIsUsable() async throws {
         let config = GenesisConfig(spec: ChainSpec.test(halfLife: 10), timestamp: 500)
-        let result = try await makeRuntimeGenesis(config: config, fetcher: fetcher)
+        var result = try await makeRuntimeGenesis(config: config, fetcher: fetcher)
 
-        let height = await result.chainState.getHighestBlockHeight()
+        let height = result.chain.getHighestBlockHeight()
         XCTAssertEqual(height, 0)
 
-        let contains = await result.chainState.contains(blockHash: result.blockHash)
+        let contains = result.chain.contains(blockHash: result.blockHash)
         XCTAssertTrue(contains)
 
-        let onMain = await result.chainState.isCanonical(hash: result.blockHash)
+        let onMain = result.chain.isCanonical(hash: result.blockHash)
         XCTAssertTrue(onMain)
 
         let block1 = try await buildAndStoreBlock(
             previous: result.block, timestamp: 1_000, target: UInt256.max,
             nonce: 1, fetcher: fetcher
         )
-        let submitResult = await result.chainState.submitTestBlock(
+        let submitResult = result.chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block1),
             block: block1
         )
@@ -166,20 +166,20 @@ final class BlockReceptionTests: XCTestCase {
 
     func testSubmitBlockAfterStoringData() async throws {
         let config = GenesisConfig(spec: ChainSpec.test(halfLife: 10), timestamp: 500)
-        let result = try await makeRuntimeGenesis(config: config, fetcher: fetcher)
+        var result = try await makeRuntimeGenesis(config: config, fetcher: fetcher)
 
         let block1 = try await buildAndStoreBlock(
             previous: result.block, timestamp: 1_000,
             target: UInt256.max, nonce: 1, fetcher: fetcher
         )
         let header = try! VolumeImpl<Block>(node: block1)
-        let submitResult = await result.chainState.submitTestBlock(
+        let submitResult = result.chain.submitTestBlock(
             blockHeader: header,
             block: block1
         )
         XCTAssertTrue(submitResult.extendsCanonical)
 
-        let tip = await result.chainState.canonicalTip
+        let tip = result.chain.canonicalTip
         XCTAssertEqual(tip, header.rawCID)
     }
 }
@@ -192,7 +192,7 @@ final class GenesisToBlockE2ETests: XCTestCase {
     func testFullCycle() async throws {
         let spec = ChainSpec.test(halfLife: 10)
         let genesisConfig = GenesisConfig(spec: spec, timestamp: 500)
-        let genesis = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
+        var genesis = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
 
         XCTAssertTrue(GenesisCeremony.verify(block: genesis.block, config: genesisConfig))
 
@@ -209,7 +209,7 @@ final class GenesisToBlockE2ETests: XCTestCase {
             try await VolumeImpl<Block>(node: mined).storeBlock(storer: fetcher)
 
             let header = try! VolumeImpl<Block>(node: mined)
-            let result = await genesis.chainState.submitTestBlock(
+            let result = genesis.chain.submitTestBlock(
                 blockHeader: header,
                 block: mined
             )
@@ -217,13 +217,13 @@ final class GenesisToBlockE2ETests: XCTestCase {
             prev = mined
         }
 
-        let height = await genesis.chainState.getHighestBlockHeight()
+        let height = genesis.chain.getHighestBlockHeight()
         XCTAssertEqual(height, 10)
 
-        let tipHash = await genesis.chainState.canonicalTip
+        let tipHash = genesis.chain.canonicalTip
         XCTAssertEqual(tipHash, try! VolumeImpl<Block>(node: prev).rawCID)
 
-        let genesisOnMain = await genesis.chainState.isCanonical(hash: genesis.blockHash)
+        let genesisOnMain = genesis.chain.isCanonical(hash: genesis.blockHash)
         XCTAssertTrue(genesisOnMain)
     }
 
@@ -231,8 +231,8 @@ final class GenesisToBlockE2ETests: XCTestCase {
         let spec = ChainSpec.test(halfLife: 10)
         let genesisConfig = GenesisConfig(spec: spec, timestamp: 500)
 
-        let nodeA = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
-        let nodeB = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
+        var nodeA = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
+        var nodeB = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
 
         XCTAssertEqual(nodeA.blockHash, nodeB.blockHash, "Both nodes must agree on genesis")
 
@@ -242,26 +242,26 @@ final class GenesisToBlockE2ETests: XCTestCase {
         )
         let headerA1 = try! VolumeImpl<Block>(node: blockA1)
 
-        let resultOnA = await nodeA.chainState.submitTestBlock(
+        let resultOnA = nodeA.chain.submitTestBlock(
             blockHeader: headerA1, block: blockA1
         )
         XCTAssertTrue(resultOnA.extendsCanonical)
 
-        let resultOnB = await nodeB.chainState.submitTestBlock(
+        let resultOnB = nodeB.chain.submitTestBlock(
             blockHeader: headerA1, block: blockA1
         )
         XCTAssertTrue(resultOnB.extendsCanonical, "Node B accepts block mined by Node A")
 
-        let tipA = await nodeA.chainState.canonicalTip
-        let tipB = await nodeB.chainState.canonicalTip
+        let tipA = nodeA.chain.canonicalTip
+        let tipB = nodeB.chain.canonicalTip
         XCTAssertEqual(tipA, tipB, "Both nodes must agree on chain tip")
     }
 
     func testTwoNodesReachConsensusAfterFork() async throws {
         let spec = ChainSpec.test(halfLife: 10)
         let genesisConfig = GenesisConfig(spec: spec, timestamp: 500)
-        let nodeA = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
-        let nodeB = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
+        var nodeA = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
+        var nodeB = try await makeRuntimeGenesis(config: genesisConfig, fetcher: fetcher)
 
         let blockA1 = try await buildAndStoreBlock(
             previous: nodeA.block, timestamp: 1_000,
@@ -277,24 +277,24 @@ final class GenesisToBlockE2ETests: XCTestCase {
             target: UInt256.max, nonce: 100, fetcher: fetcher
         )
 
-        let _ = await nodeA.chainState.submitTestBlock(
+        let _ = nodeA.chain.submitTestBlock(
             blockHeader: try! VolumeImpl(node: blockA1), block: blockA1
         )
-        let _ = await nodeA.chainState.submitTestBlock(
+        let _ = nodeA.chain.submitTestBlock(
             blockHeader: try! VolumeImpl(node: blockA2), block: blockA2
         )
 
-        let _ = await nodeB.chainState.submitTestBlock(
+        let _ = nodeB.chain.submitTestBlock(
             blockHeader: try! VolumeImpl(node: blockB1), block: blockB1
         )
 
-        let tipB_before = await nodeB.chainState.canonicalTip
+        let tipB_before = nodeB.chain.canonicalTip
         XCTAssertEqual(tipB_before, try! VolumeImpl<Block>(node: blockB1).rawCID)
 
-        let resultA1onB = await nodeB.chainState.submitTestBlock(
+        let resultA1onB = nodeB.chain.submitTestBlock(
             blockHeader: try! VolumeImpl(node: blockA1), block: blockA1
         )
-        let resultA2onB = await nodeB.chainState.submitTestBlock(
+        let resultA2onB = nodeB.chain.submitTestBlock(
             blockHeader: try! VolumeImpl(node: blockA2), block: blockA2
         )
 
@@ -303,8 +303,8 @@ final class GenesisToBlockE2ETests: XCTestCase {
             "Node B should reorg when A wins the stable tie or becomes strictly heavier"
         )
 
-        let tipA = await nodeA.chainState.canonicalTip
-        let tipB = await nodeB.chainState.canonicalTip
+        let tipA = nodeA.chain.canonicalTip
+        let tipB = nodeB.chain.canonicalTip
         XCTAssertEqual(tipA, tipB, "Both nodes must converge on same tip after reorg")
     }
 }

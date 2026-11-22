@@ -90,7 +90,7 @@ protocol OracleSubject {
         specs: [ChainSpec],
         parent: Self
     ) -> Result<Self, OracleRestoreFailure>
-    mutating func apply(_ batch: OracleBatch, reserved: Bool) -> OracleOutcome
+    mutating func apply(_ batch: OracleBatch) -> OracleOutcome
     mutating func serveRuns(_ directory: String)
     mutating func applyParentRun(
         from parent: Self,

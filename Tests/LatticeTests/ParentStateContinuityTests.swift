@@ -44,8 +44,7 @@ final class ParentStateContinuityTests: XCTestCase {
         ])
     }
 
-    func testContinuityIsReflexiveTransitiveAndCanonicityIndependent()
-        async throws {
+    func testContinuityIsReflexiveTransitiveAndCanonicityIndependent() throws {
         let a = testCID("state-a")
         let b = testCID("state-b")
         let c = testCID("state-c")
@@ -58,7 +57,7 @@ final class ParentStateContinuityTests: XCTestCase {
         let leftTip = testCID("parent-left-tip")
         let rightTip = testCID("parent-right-tip")
         let orphan = testCID("parent-orphan")
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             batch(root, parent: nil, height: 0, from: a, to: b, nonce: 1),
             batch(left, parent: root, height: 1, from: b, to: c, nonce: 2),
             batch(right, parent: root, height: 1, from: b, to: d, nonce: 3),
@@ -74,21 +73,21 @@ final class ParentStateContinuityTests: XCTestCase {
             ),
         ])
 
-        let reflexive = await chain.hasStateContinuity(from: b, to: b)
-        let transitive = await chain.hasStateContinuity(from: a, to: c)
-        let leftBranch = await chain.hasStateContinuity(from: b, to: c)
-        let rightBranch = await chain.hasStateContinuity(from: b, to: d)
-        let backward = await chain.hasStateContinuity(from: c, to: a)
-        let sideways = await chain.hasStateContinuity(from: c, to: d)
+        let reflexive = chain.hasStateContinuity(from: b, to: b)
+        let transitive = chain.hasStateContinuity(from: a, to: c)
+        let leftBranch = chain.hasStateContinuity(from: b, to: c)
+        let rightBranch = chain.hasStateContinuity(from: b, to: d)
+        let backward = chain.hasStateContinuity(from: c, to: a)
+        let sideways = chain.hasStateContinuity(from: c, to: d)
         XCTAssertTrue(reflexive)
         XCTAssertTrue(transitive)
         XCTAssertTrue(leftBranch)
         XCTAssertTrue(rightBranch)
         XCTAssertFalse(backward)
         XCTAssertFalse(sideways)
-        let repeatedLeft = await chain.hasStateContinuity(from: c, to: e)
-        let repeatedRight = await chain.hasStateContinuity(from: d, to: e)
-        let disconnected = await chain.hasStateContinuity(from: d, to: z)
+        let repeatedLeft = chain.hasStateContinuity(from: c, to: e)
+        let repeatedRight = chain.hasStateContinuity(from: d, to: e)
+        let disconnected = chain.hasStateContinuity(from: d, to: z)
         XCTAssertTrue(repeatedLeft)
         XCTAssertTrue(repeatedRight)
         XCTAssertFalse(disconnected)
@@ -96,21 +95,21 @@ final class ParentStateContinuityTests: XCTestCase {
         // graph, not of how hard a node is willing to look. A budget would make
         // the same question answerable on one node and unanswerable on another
         // from identical data, splitting honest nodes by local policy.
-        let unbudgeted = await chain.hasStateContinuity(from: a, to: c)
+        let unbudgeted = chain.hasStateContinuity(from: a, to: c)
         XCTAssertTrue(unbudgeted)
 #if DEBUG
-        let visits = await chain.stateContinuityBlockVisitCount
-        let absent = await chain.hasStateContinuity(
+        let visits = chain.stateContinuityBlockVisitCount
+        let absent = chain.hasStateContinuity(
             from: a,
             to: testCID("absent-target")
         )
-        let visitsAfterAbsent = await chain.stateContinuityBlockVisitCount
+        let visitsAfterAbsent = chain.stateContinuityBlockVisitCount
         XCTAssertFalse(absent)
         XCTAssertEqual(visitsAfterAbsent, visits)
 #endif
     }
 
-    func testContinuityReverseSearchSkipsNoOpStateTransitions() async throws {
+    func testContinuityReverseSearchSkipsNoOpStateTransitions() throws {
         let a = testCID("state-a")
         let b = testCID("state-b")
         let root = testCID("parent-root")
@@ -130,20 +129,20 @@ final class ParentStateContinuityTests: XCTestCase {
             ))
             parent = block
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: batches)
+        var chain = try ChainTree.restoreWithoutContext(replaying: batches)
 
-        let reflexive = await chain.hasStateContinuity(from: b, to: b)
+        let reflexive = chain.hasStateContinuity(from: b, to: b)
         XCTAssertTrue(reflexive)
 #if DEBUG
-        let visits = await chain.stateContinuityBlockVisitCount
+        let visits = chain.stateContinuityBlockVisitCount
 #endif
-        let unrelated = await chain.hasStateContinuity(
+        let unrelated = chain.hasStateContinuity(
             from: testCID("unrelated-state"),
             to: b
         )
         XCTAssertFalse(unrelated)
 #if DEBUG
-        let visitsAfterQuery = await chain.stateContinuityBlockVisitCount
+        let visitsAfterQuery = chain.stateContinuityBlockVisitCount
         XCTAssertEqual(visitsAfterQuery - visits, 1)
 #endif
     }

@@ -19,7 +19,7 @@ final class FinalityFloorTests: XCTestCase {
 
     /// Main chain G→A1→A2→A3→A4 (tip height 4); a heavier fork B2→B3→B4→B5
     /// branches off A1 (so its earliest orphan B2 is at height 2, buried 2 deep).
-    private func forkedChain() -> ChainState {
+    private func forkedChain() -> ChainTree {
         let g  = makeBlockMeta(hash: blockCID("G"),  height: 0, childHashes: [blockCID("A1")])
         let a1 = makeBlockMeta(hash: blockCID("A1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("A2"), blockCID("B2")])
         let a2 = makeBlockMeta(hash: blockCID("A2"), previousHash: blockCID("A1"), height: 2, childHashes: [blockCID("A3")])
@@ -39,10 +39,10 @@ final class FinalityFloorTests: XCTestCase {
 
     /// A strictly-heavier fork always reorgs — no depth floor can refuse it.
     func testHeavierForkAlwaysReorgs() async {
-        let chain = forkedChain()
-        let reorg = await chain.reevaluateForkChoice()
+        var chain = forkedChain()
+        let reorg = chain.reevaluateForkChoice()
         XCTAssertNotNil(reorg, "heavier fork reorgs — there is no finality floor")
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("B5"), "tip moves to the heavier fork")
     }
 
@@ -51,14 +51,14 @@ final class FinalityFloorTests: XCTestCase {
     /// and a third block makes the fork strictly heavier; the old floor would
     /// have refused this. Pure heaviest-chain must follow it.
     func testDeepStrictlyHeavierForkIsAccepted() async {
-        let chain = forkedChain()
-        let reorg = await chain.reevaluateForkChoice()
+        var chain = forkedChain()
+        let reorg = chain.reevaluateForkChoice()
         XCTAssertNotNil(reorg, "deep but strictly-heavier fork must NOT be refused for being too deep")
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("B5"))
         // The whole old suffix is gone; the heavier fork is now canonical.
         for (idx, hash) in [(0, blockCID("G")), (1, blockCID("A1")), (2, blockCID("B2")), (3, blockCID("B3")), (4, blockCID("B4")), (5, blockCID("B5"))] {
-            let onMain = await chain.canonicalBlockHash(atHeight: UInt64(idx))
+            let onMain = chain.canonicalBlockHash(atHeight: UInt64(idx))
             XCTAssertEqual(onMain, hash, "main chain index \(idx) follows the heavier fork")
         }
     }
@@ -72,13 +72,13 @@ final class FinalityFloorTests: XCTestCase {
         // Lighter fork: only 1 block off A1 vs the 2 main blocks A2/A3.
         let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("A1"), height: 2)
 
-        let chain = makeChain(
+        var chain = makeChain(
             blocks: [g, a1, a2, a3, b2],
             canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2"), blockCID("A3")])
         )
-        let reorg = await chain.reevaluateForkChoice()
+        let reorg = chain.reevaluateForkChoice()
         XCTAssertNil(reorg, "lighter fork must be rejected (heaviest-chain only)")
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("A3"), "tip stays on the heavier original chain")
     }
 

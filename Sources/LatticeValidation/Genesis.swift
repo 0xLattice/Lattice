@@ -29,8 +29,8 @@ public struct GenesisResult: Sendable {
 
 public enum GenesisCeremony {
 
-    /// Build a deterministic root-genesis candidate. Runtime creation belongs to
-    /// the store-and-stage `ChainLevel.bootstrap` admission boundary.
+    /// Build a deterministic root-genesis candidate. A chain is made from it
+    /// by `ChainTree.bootstrap`.
     public static func create(
         config: GenesisConfig,
         fetcher: Fetcher

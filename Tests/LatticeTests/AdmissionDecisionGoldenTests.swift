@@ -140,7 +140,7 @@ private struct AdmissionFixtures {
     let bodyless = StorableFetcher()
     private(set) var names: [String: String] = [:]
     private(set) var blocks: [String: Block] = [:]
-    private(set) var packages: [String: ChildValidationPackage] = [:]
+    private(set) var packages: [String: TestChildPackage] = [:]
 
     static func fixedKey(_ seed: Data) throws -> (privateKey: String, publicKey: String, address: String) {
         let key = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
@@ -263,7 +263,7 @@ private struct AdmissionFixtures {
             childDirectory: childDirectory,
             fetcher: fixtures.fetcher
         )
-        fixtures.packages["childCandidate"] = ChildValidationPackage(proof: proof)
+        fixtures.packages["childCandidate"] = TestChildPackage(proof: proof)
 
         // Roots of the child chain, each weighed by a carrier's proof: the
         // genesis, a rival genesis, and one block under the rival.
@@ -294,7 +294,7 @@ private struct AdmissionFixtures {
                     spec: spec, children: [childDirectory: block],
                     timestamp: 3_000, target: easy, nonce: 20 + UInt64(index), fetcher: fixtures.fetcher
                 ))
-            fixtures.packages[name] = ChildValidationPackage(proof: try await ChildBlockProof.generate(
+            fixtures.packages[name] = TestChildPackage(proof: try await ChildBlockProof.generate(
                 rootHeader: try BlockHeader(node: rootCarrier),
                 childDirectory: childDirectory,
                 fetcher: fixtures.fetcher
@@ -319,7 +319,7 @@ private struct AdmissionFixtures {
         guard missCarrier.proofOfWorkHash() > hardTarget else {
             throw AdmissionFixtureError.carrierHitsTheHardTarget
         }
-        fixtures.packages["missedChild"] = ChildValidationPackage(proof: try await ChildBlockProof.generate(
+        fixtures.packages["missedChild"] = TestChildPackage(proof: try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: missCarrier),
             childDirectory: childDirectory,
             fetcher: fixtures.fetcher

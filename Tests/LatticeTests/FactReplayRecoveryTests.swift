@@ -36,14 +36,14 @@ final class FactReplayRecoveryTests: XCTestCase {
             try testAdmissionBatch(for: $0)
         }
 
-        let forward = try await ChainState.restoreWithoutContext(replaying: batches)
-        let reverse = try await ChainState.restoreWithoutContext(replaying: Array(batches.reversed()))
+        let forward = try ChainTree.restoreWithoutContext(replaying: batches)
+        let reverse = try ChainTree.restoreWithoutContext(replaying: Array(batches.reversed()))
         let heavyCID = try BlockHeader(node: heavy).rawCID
 
-        let forwardTip = await forward.canonicalTip
-        let reverseTip = await reverse.canonicalTip
-        let forwardWork = await forward.getTipCumulativeWork()
-        let reverseWork = await reverse.getTipCumulativeWork()
+        let forwardTip = forward.canonicalTip
+        let reverseTip = reverse.canonicalTip
+        let forwardWork = forward.getTipCumulativeWork()
+        let reverseWork = reverse.getTipCumulativeWork()
         XCTAssertEqual(forwardTip, heavyCID)
         XCTAssertEqual(reverseTip, heavyCID)
         XCTAssertEqual(forwardWork, reverseWork)
@@ -69,12 +69,12 @@ final class FactReplayRecoveryTests: XCTestCase {
         let encoded = try JSONEncoder().encode(batches)
         let decoded = try JSONDecoder().decode([BlockImportBatch].self, from: encoded)
 
-        let restored = try await ChainState.restoreWithoutContext(
+        let restored = try ChainTree.restoreWithoutContext(
             replaying: decoded + Array(decoded.reversed())
         )
 
-        let restoredTip = await restored.canonicalTip
-        let revision = await restored.currentRevision()
+        let restoredTip = restored.canonicalTip
+        let revision = restored.currentRevision()
         XCTAssertEqual(restoredTip, try BlockHeader(node: block).rawCID)
         // The genesis insert and the block: two mutations, replayed once.
         XCTAssertEqual(revision, 2)
@@ -98,7 +98,7 @@ final class FactReplayRecoveryTests: XCTestCase {
         let blockBatch = try testAdmissionBatch(for: block)
 
         await XCTAssertThrowsErrorAsync(
-            try await ChainState.restoreWithoutContext(replaying: [blockBatch])
+            try ChainTree.restoreWithoutContext(replaying: [blockBatch])
         )
 
         guard case .block(let fact) = blockBatch.facts[0] else {
@@ -120,7 +120,7 @@ final class FactReplayRecoveryTests: XCTestCase {
             blockBatch.facts[1],
         ])
         await XCTAssertThrowsErrorAsync(
-            try await ChainState.restoreWithoutContext(
+            try ChainTree.restoreWithoutContext(
                 replaying: [genesisBatch, blockBatch, conflicting]
             )
         )
@@ -146,7 +146,7 @@ final class FactReplayRecoveryTests: XCTestCase {
         }
 
         do {
-            _ = try await ChainState.restoreWithoutContext(replaying: [batch])
+            _ = try ChainTree.restoreWithoutContext(replaying: [batch])
             XCTFail("a zero-work genesis must not restore")
         } catch {
             // expected: zero-work genesis is not a valid consensus graph
@@ -171,17 +171,17 @@ final class FactReplayRecoveryTests: XCTestCase {
             try testAdmissionBatch(for: $0)
         }
 
-        let first = try await ChainState.restoreWithoutContext(
+        let first = try ChainTree.restoreWithoutContext(
             replaying: batches,
             revisionFloor: 100
         )
-        let second = try await ChainState.restoreWithoutContext(
+        let second = try ChainTree.restoreWithoutContext(
             replaying: batches,
-            revisionFloor: await first.currentRevision()
+            revisionFloor: first.currentRevision()
         )
 
-        let firstRevision = await first.currentRevision()
-        let secondRevision = await second.currentRevision()
+        let firstRevision = first.currentRevision()
+        let secondRevision = second.currentRevision()
         XCTAssertEqual(firstRevision, 100)
         XCTAssertEqual(secondRevision, 100)
     }

@@ -33,7 +33,7 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
 
     /// Explicit so `childCommitments` can default to nil: a defaulted `let`
     /// would drop it from the synthesized memberwise init entirely, and the
-    /// one real construction site (`PreparedImport.facts`) must set it.
+    /// one real construction site (`BlockImport.admissionFacts`) must set it.
     public init(
         blockHash: String,
         parentBlockHash: String?,

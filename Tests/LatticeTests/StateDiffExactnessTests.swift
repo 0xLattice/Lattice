@@ -6,7 +6,7 @@ import cashew
 
 /// A transition's state diff, netted per CID, is the change in how many
 /// places each CID holds in the whole state tree: what pruning by diffs,
-/// and `storeMaterialized(createdBy:)`, rely on. Keys share long prefixes,
+/// and a node storing a post-state by its diff, rely on. Keys share long prefixes,
 /// so insertions split radix nodes and deletions merge them.
 @MainActor
 final class StateDiffExactnessTests: XCTestCase {
@@ -116,9 +116,9 @@ final class StateDiffExactnessTests: XCTestCase {
         assertExact(next, from: after, to: try await places(updated, fetcher), "the update's diff")
     }
 
-    /// A block's whole post-state, stored by its diff alone, as admission
-    /// stores it (`storeMaterialized(createdBy:)`), resolves whole from the
-    /// store, when the block's insertions split a node.
+    /// A block's whole post-state, stored by its diff alone, as a node
+    /// stores it (the `storeMaterialized(createdBy:)` fixture), resolves
+    /// whole from the store, when the block's insertions split a node.
     func testAPostStateStoredByItsDiffResolvesWholeAfterASplit() async throws {
         let fetcher = StorableFetcher()
         let account = try AccountStateHeader(node: AccountState().inserting(key: "bbba", value: 1).inserting(key: "bbbb", value: 1))
@@ -145,8 +145,8 @@ final class StateDiffExactnessTests: XCTestCase {
     /// Over seeded blocks of inserts, updates and deletes of accounts and
     /// general state, deposits, and withdrawals that spend earlier deposits
     /// (the deposit tree transformed twice in one block), each block's
-    /// whole post-state is stored by its diff alone, as admission stores
-    /// it, and each diff is the change in places of the whole tree.
+    /// whole post-state is stored by its diff alone, as a node stores it,
+    /// and each diff is the change in places of the whole tree.
     func testTheNettedDiffIsTheChangeInPlacesUnderSplitsAndMerges() async throws {
         let empty = LatticeState.emptyState()
         for seed in UInt64(0)..<40 {

@@ -11,6 +11,20 @@ import UInt256
 import cashew
 import WAT
 
+/// Answers difficulty anchors from a tree, for validating a block against it
+/// directly.
+private struct TreeAnchors: DifficultyAnchorSource {
+    let tree: ChainTree
+    func difficultyAnchor(forBlockHash hash: String) async -> DifficultyAnchor? {
+        tree.difficultyAnchor(forBlockHash: hash)
+    }
+}
+
+/// A child tree seeded by `genesis` on `path`.
+private func childChain(_ genesis: Block, path: [String]) throws -> ChainTree {
+    try ChainTree.fromGenesis(block: genesis, context: testChainContext(path: path), spec: chainLocalSpec())
+}
+
 final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
     private func verifiedMultiHopContribution(
         outerTarget: UInt256,
@@ -21,7 +35,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         fetcher: StorableFetcher,
         leafGenesis: Block,
         candidate: Block,
-        package: ChildValidationPackage,
+        package: TestChildPackage,
         downstreamCID: String,
         contribution: VerifiedWorkContribution,
         rootHash: UInt256,
@@ -90,10 +104,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             fetcher: fetcher
         )
         let proof = rootHop.composing(hop: leafHop)
-        let package = try await childValidationPackage(
-            proof: proof,
-            fetcher: fetcher
-        )
+        let package = TestChildPackage(proof: proof)
         let verification = proof.verifySecuringWork(
             child: leaf,
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]
@@ -113,7 +124,10 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         )
     }
 
-    func testTargetHitInvalidTransitionIsRejectedWithoutPredecessor() async throws {
+    /// A target-hit block whose transition is invalid weighs, and its
+    /// execution proves it invalid: excluded, never executed. Without its
+    /// predecessor it is held — linkage comes before any verdict (§9.9).
+    func testTargetHitInvalidTransitionIsExcludedAndHeldWithoutPredecessor() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await AdmissionFixture.makeGenesis(
             fetcher: fetcher,
@@ -148,34 +162,35 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         )
         try await storeBuiltBlock(invalid, in: fetcher)
         let header = try BlockHeader(node: invalid)
-        let recorder = AdmissionStageRecorder()
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis)
-            .admit(header, fetcher: fetcher, stage: { batch in await recorder.stage(batch) })
+        var chain = try AdmissionFixture.makeChain(genesis: genesis)
+        let result = try await chain.admit(header, fetcher: fetcher)
 
-        guard case .rejected(let failure, _) = result else {
-            return XCTFail("local invalidity must remain visible")
+        guard let update = result.update, update.excluded else {
+            return XCTFail("local invalidity must remain visible, got \(result)")
         }
-        XCTAssertEqual(failure, .protocolInvalid)
-        let stageCount = await recorder.count(for: header.rawCID)
-        XCTAssertEqual(stageCount, 0)
+        XCTAssertTrue(chain.isExcludedRoot(header.rawCID))
+        XCTAssertFalse(chain.isExecuted(blockHash: header.rawCID))
+        XCTAssertNil(update.materializedPostState)
+        XCTAssertEqual(chain.canonicalTip, try BlockHeader(node: genesis).rawCID)
 
         let otherGenesis = try await AdmissionFixture.makeGenesis(
             fetcher: fetcher,
             timestamp: 500,
             nonce: 99
         )
-        let disconnected = try await AdmissionFixture.makeLevel(genesis: otherGenesis)
-            .admit(header, fetcher: fetcher)
-        XCTAssertEqual(disconnected.failure, .protocolInvalid)
-        // A predecessor requirement does not survive a proven invalidity — a verdict asks the node to acquire nothing
-        // (see testProvenInvalidBlockRequestsNoPredecessor).
-        XCTAssertNil(disconnected.sameChainPredecessor)
+        var disconnectedChain = try AdmissionFixture.makeChain(genesis: otherGenesis)
+        let disconnected = try await disconnectedChain.admit(header, fetcher: fetcher)
+        XCTAssertEqual(disconnected.failure, .unavailableEvidence)
+        XCTAssertFalse(BlockImport.isDeterministicInvalidity(.unavailableEvidence), "a hold, not a verdict")
+        XCTAssertFalse(disconnectedChain.contains(blockHash: header.rawCID))
     }
 
     func testActiveChildRelaysAuthenticatedAlternateGenesisTargetMiss() async throws {
         let fetcher = StorableFetcher()
-        let nexusGenesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
+        // A real parent state, so the alternate genesis is admissible but for
+        // its target.
+        let nexusGenesis = try await testAnchorParentGenesis(fetcher: fetcher)
         let alternate = try await BlockBuilder.buildChildGenesis(
             spec: chainLocalSpec(),
             parentState: nexusGenesis.postState,
@@ -195,9 +210,9 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         )
         XCTAssertGreaterThan(root.proofOfWorkHash(), alternate.target)
 
-        let nexusLevel = AdmissionFixture.makeLevel(genesis: nexusGenesis)
+        var nexusChain = try AdmissionFixture.makeChain(genesis: nexusGenesis)
         let rootHeader = try BlockHeader(node: root)
-        _ = try await nexusLevel.admit(rootHeader, fetcher: fetcher)
+        _ = try await nexusChain.admit(rootHeader, fetcher: fetcher)
         let proof = try await ChildBlockProof.generate(
             rootHeader: rootHeader,
             childDirectory: "Child",
@@ -208,19 +223,17 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             timestamp: 1_000,
             nonce: 9,
         )
-        let activeLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: activeGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
-        )
-        let result = try await activeLevel.admit(
-            alternateHeader,
-            fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: proof)
+        var activeChain = try childChain(activeGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        let evidence = try proof.verifySecuringWork(
+            child: alternate, chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
+        ).get()
+        XCTAssertNil(evidence.contribution, "authenticated, but the grind misses the genesis's target")
+        let result = activeChain.insertGenesis(
+            alternate, spec: chainLocalSpec(), childIndex: testChildIndex(alternate), evidence: evidence
         )
 
         XCTAssertEqual(result.failure, .proofOfWorkInvalid)
-        let stored = await activeLevel.chain.contains(blockHash: alternateHeader.rawCID)
-        XCTAssertFalse(stored)
+        XCTAssertFalse(activeChain.contains(blockHash: alternateHeader.rawCID))
     }
 
     func testChildAcceptsWhenAncestorCarrierMissesItsOwnTarget() async throws {
@@ -242,29 +255,26 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             nonce: 3,
             fetcher: fetcher
         )
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
-        )
+        var level = try childChain(childGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"])
         let proof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier),
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let package = try await childValidationPackage(proof: proof, fetcher: fetcher)
+        let package = TestChildPackage(proof: proof)
         let candidateHeader = try BlockHeader(node: candidate)
 
         let result = try await level.admit(
             candidateHeader,
             fetcher: fetcher,
-            childPackage: package
+            child: package
         )
 
-        if case .rejected(let failure, _) = result {
+        if let failure = result.failure {
             return XCTFail("an ancestor target miss must not invalidate its child: \(failure)")
         }
-        let containsCandidate = await level.chain.contains(blockHash: candidateHeader.rawCID)
-        XCTAssertTrue(containsCandidate)
+        XCTAssertEqual(result.update?.excluded, false)
+        XCTAssertTrue(level.contains(blockHash: candidateHeader.rawCID))
     }
 
     func testCurrentChainTargetMissIsAProofOfWorkFailureWithoutMutation() async throws {
@@ -309,30 +319,20 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let package = try await childValidationPackage(proof: proof, fetcher: fetcher)
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
-        )
-        let recorder = AdmissionStageRecorder()
-        let durable = RecordingAdmissionStorer()
+        let package = TestChildPackage(proof: proof)
+        var level = try childChain(childGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"])
         let candidateHeader = try BlockHeader(node: candidate)
+        let revision = level.currentRevision()
 
         let result = try await level.admit(
             candidateHeader,
             fetcher: fetcher,
-            storer: durable,
-            childPackage: package,
-            stage: { record in await recorder.stage(record) }
+            child: package
         )
 
         XCTAssertEqual(result.failure, .proofOfWorkInvalid)
-        let stageCount = await recorder.count(for: candidateHeader.rawCID)
-        let containsCarrier = await level.chain.contains(blockHash: candidateHeader.rawCID)
-        XCTAssertEqual(stageCount, 0)
-        XCTAssertFalse(containsCarrier)
-        let storeCalls = await durable.storeCallCount()
-        XCTAssertEqual(storeCalls, 0)
+        XCTAssertFalse(level.contains(blockHash: candidateHeader.rawCID))
+        XCTAssertEqual(level.currentRevision(), revision, "no mutation")
     }
 
     func testDisconnectedTargetMissRelaysWithoutAcquiringPredecessor() async throws {
@@ -376,23 +376,18 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
-        )
+        var level = try childChain(childGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"])
         let candidateHeader = try BlockHeader(node: candidate)
-        let candidatePackage = try await childValidationPackage(
-            proof: proof,
-            fetcher: fetcher
-        )
+        let candidatePackage = TestChildPackage(proof: proof)
         let result = try await level.admit(
             candidateHeader,
             fetcher: fetcher,
-            childPackage: candidatePackage
+            child: candidatePackage
         )
 
+        // A work failure, not a hold on the missing predecessor.
         XCTAssertEqual(result.failure, .proofOfWorkInvalid)
-        XCTAssertNil(result.sameChainPredecessor)
+        XCTAssertFalse(level.contains(blockHash: candidateHeader.rawCID))
     }
 
     func testUnbootstrappedIntermediateGenesisRelaysTargetMissToGrandchild() async throws {
@@ -442,25 +437,17 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             fetcher: fetcher
         )
         let leafProof = rootHop.composing(hop: leafHop)
-        let leafLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: leafGenesis),
-            context: testChainContext(
-                path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]
-            )
-        )
+        var leafLevel = try childChain(leafGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"])
         let admitted = try await leafLevel.admit(
             leaf,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: leafProof)
+            child: TestChildPackage(proof: leafProof)
         )
 
-        if case .rejected(let failure, _) = admitted {
+        if let failure = admitted.failure {
             return XCTFail("grandchild must accept through target-miss parent: \(failure)")
         }
-        let containsLeaf = await leafLevel.chain.contains(
-            blockHash: try BlockHeader(node: leaf).rawCID
-        )
-        XCTAssertTrue(containsLeaf)
+        XCTAssertTrue(leafLevel.contains(blockHash: try BlockHeader(node: leaf).rawCID))
     }
 
     func testTargetHitInvalidIntermediateStillRelaysGrandchild() async throws {
@@ -529,49 +516,35 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             childDirectory: "Middle",
             fetcher: fetcher
         )
-        let recorder = AdmissionStageRecorder()
-        let middleResult = try await ChainLevel.bootstrap(
-            context: testChainContext(
-                path: [DEFAULT_ROOT_DIRECTORY, "Middle"]
-            ),
-            genesisHeader: middleHeader,
+        let middlePath = [DEFAULT_ROOT_DIRECTORY, "Middle"]
+        let middleResult = await ChainTree.bootstrap(
+            genesis: middleHeader,
+            evidence: try rootHop.verifySecuringWork(child: invalidMiddle, chainPath: middlePath).get(),
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: rootHop),
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: { batch in await recorder.stage(batch) }
+            context: testChainContext(path: middlePath),
+            parentFacts: LinkFacts(link: nil)
         )
-        guard case .rejected(let failure) = middleResult else {
+        guard case .failure(let failure) = middleResult else {
             return XCTFail("the invalid intermediate must report local rejection")
         }
         XCTAssertEqual(failure, .protocolInvalid)
-        let stagedMiddle = await recorder.count(for: middleHeader.rawCID)
-        XCTAssertEqual(stagedMiddle, 0)
 
         let leafHop = try await ChildBlockProof.generate(
             rootHeader: middleHeader,
             childDirectory: "Leaf",
             fetcher: fetcher
         )
-        let leafLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: leafGenesis),
-            context: testChainContext(
-                path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]
-            )
-        )
+        var leafLevel = try childChain(leafGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"])
         let admitted = try await leafLevel.admit(
             leaf,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(
+            child: TestChildPackage(
                 proof: rootHop.composing(hop: leafHop)
             )
         )
 
         XCTAssertNil(admitted.failure)
-        let containsLeaf = await leafLevel.chain.contains(
-            blockHash: try BlockHeader(node: leaf).rawCID
-        )
-        XCTAssertTrue(containsLeaf)
+        XCTAssertTrue(leafLevel.contains(blockHash: try BlockHeader(node: leaf).rawCID))
     }
 
     func testMissingParentContinuityFactStillRelaysGrandchildWork() async throws {
@@ -642,12 +615,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             nonce: validMiddle.nonce
         )
         try await storeBuiltBlock(invalidMiddle, in: fetcher)
-        let middleLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: middleGenesis),
-            context: testChainContext(
-                path: [DEFAULT_ROOT_DIRECTORY, "Middle"]
-            )
-        )
+        var middleLevel = try childChain(middleGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Middle"])
         let predecessorRoot = try await buildAndStoreGenesis(
             spec: chainLocalSpec(),
             children: ["Middle": middlePredecessor],
@@ -665,16 +633,16 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             .admit(
                 middlePredecessor,
                 fetcher: fetcher,
-                childPackage: ChildValidationPackage(
+                child: TestChildPackage(
                     proof: predecessorProof
                 )
             )
-        guard case .accepted = predecessorResult else {
-            return XCTFail("middle predecessor must connect")
+        guard let predecessorUpdate = predecessorResult.update, !predecessorUpdate.excluded else {
+            return XCTFail("middle predecessor must connect, got \(predecessorResult)")
         }
         let validLocal = try await validMiddle.validateNexus(
             fetcher: fetcher,
-            chain: middleLevel.chain,
+            chain: TreeAnchors(tree: middleLevel),
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Middle"],
             reportTemporalFailure: true
         )
@@ -707,7 +675,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         }
         let localValidation = try await invalidMiddle.validateNexus(
             fetcher: fetcher,
-            chain: middleLevel.chain,
+            chain: TreeAnchors(tree: middleLevel),
             chainPath: [DEFAULT_ROOT_DIRECTORY, "Middle"],
             reportTemporalFailure: true
         )
@@ -716,7 +684,7 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         let middleResult = try await middleLevel.admit(
             middleHeader,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: rootHop)
+            child: TestChildPackage(proof: rootHop)
         )
         guard case .some(
             .crossChainEvidenceRequired(.parentStateContinuity)
@@ -732,16 +700,11 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             childDirectory: "Leaf",
             fetcher: fetcher
         )
-        let leafLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: leafGenesis),
-            context: testChainContext(
-                path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]
-            )
-        )
+        var leafLevel = try childChain(leafGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"])
         let leafResult = try await leafLevel.admit(
             leaf,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(
+            child: TestChildPackage(
                 proof: rootHop.composing(hop: leafHop)
             )
         )
@@ -784,7 +747,8 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         try await storeBuiltBlock(malformedCarrier, in: fetcher)
         XCTAssertGreaterThan(malformedCarrier.proofOfWorkHash(), hardTarget)
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(
+        var chain = try AdmissionFixture.makeChain(genesis: genesis)
+        let result = try await chain.admit(
             malformedCarrier,
             fetcher: fetcher
         )
@@ -825,16 +789,24 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             fetcher: fetcher
         )
 
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: validChild),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
-        )
+        var level = try childChain(validChild, path: [DEFAULT_ROOT_DIRECTORY, "Child"])
         let result = try await level.admit(
             invalidChild,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: proof)
+            child: TestChildPackage(proof: proof)
         )
         XCTAssertEqual(result.failure, .protocolInvalid)
+        let evidence = try proof.verifySecuringWork(
+            child: invalidChild, chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
+        ).get()
+        XCTAssertEqual(
+            level.insertGenesis(
+                invalidChild, spec: chainLocalSpec(), childIndex: testChildIndex(invalidChild), evidence: evidence
+            ).failure,
+            .protocolInvalid,
+            "nor does it weigh as a root"
+        )
+        XCTAssertFalse(level.contains(blockHash: try BlockHeader(node: invalidChild).rawCID))
     }
 
     func testCreditComesFromTheRootMostMetTargetWhenTargetsEaseDownward() async throws {
@@ -862,42 +834,44 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
             miningTarget: UInt256.max / UInt256(16)
         )
         let expectedWork = UInt256(16)
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: fixture.leafGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"])
-        )
+        let path = [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]
+        var level = try childChain(fixture.leafGenesis, path: path)
         let genesisBatch = try testAdmissionBatch(for: fixture.leafGenesis)
-        let recorder = AdmissionStageRecorder()
         let candidateHeader = try BlockHeader(node: fixture.candidate)
 
-        let admitted = try await level.admit(
-            candidateHeader,
-            fetcher: fixture.fetcher,
-            childPackage: fixture.package,
-            stage: { batch in await recorder.stage(batch) }
+        // Header, then execution, keeping every batch each emits.
+        let evidence = try fixture.package.proof.verifySecuringWork(
+            child: fixture.candidate, chainPath: path
+        ).get()
+        let weighed = try await TreeDriver.insert(
+            fixture.candidate, into: &level, fetcher: fixture.fetcher, evidence: evidence
         )
-        guard case .accepted = admitted else {
-            return XCTFail("the real multi-hop proof should admit")
+        let connected = try await TreeDriver.connect(
+            candidateHeader.rawCID, on: &level, fetcher: fixture.fetcher,
+            parentFacts: fixture.package.parentFacts
+        )
+        guard let weighedUpdate = weighed.update, let connectedUpdate = connected.update,
+              !connectedUpdate.excluded else {
+            return XCTFail("the real multi-hop proof should admit: \(weighed), \(connected)")
         }
         XCTAssertEqual(fixture.contribution.work, expectedWork)
-        let liveRecord = await level.chain.workContribution(id: fixture.rootCID)
+        let liveRecord = level.workContribution(id: fixture.rootCID)
         XCTAssertEqual(try XCTUnwrap(liveRecord).contribution, fixture.contribution)
 
-        let batches = await recorder.recordedBatches()
-        XCTAssertEqual(batches.count, 1)
-        XCTAssertEqual(
-            batches.flatMap(\.facts).compactMap { fact -> VerifiedWorkContribution? in
-                guard case .work(let work) = fact else { return nil }
-                return work.contribution
-            },
-            [fixture.contribution]
-        )
+        let batches = weighedUpdate.batches + connectedUpdate.batches
+        let credited = batches.flatMap(\.facts).compactMap { fact -> VerifiedWorkContribution? in
+            guard case .work(let work) = fact else { return nil }
+            return work.contribution
+        }
+        XCTAssertFalse(credited.isEmpty)
+        XCTAssertEqual(Set(credited.map(\.id)), [fixture.contribution.id], "the one grind, re-stated")
+        XCTAssertTrue(credited.allSatisfy { $0 == fixture.contribution })
         let snapshotData = try JSONEncoder().encode(genesisBatch)
         let batchData = try JSONEncoder().encode(batches)
         let decodedGenesis = try JSONDecoder().decode(BlockImportBatch.self, from: snapshotData)
         let decodedBatches = try JSONDecoder().decode([BlockImportBatch].self, from: batchData)
-        let restored = try await ChainState.restoreWithoutContext(replaying: [decodedGenesis] + decodedBatches)
-        let restoredRecord = await restored.workContribution(id: fixture.rootCID)
+        let restored = try ChainTree.restoreWithoutContext(replaying: [decodedGenesis] + decodedBatches)
+        let restoredRecord = restored.workContribution(id: fixture.rootCID)
         XCTAssertEqual(try XCTUnwrap(restoredRecord).contribution, fixture.contribution)
     }
 

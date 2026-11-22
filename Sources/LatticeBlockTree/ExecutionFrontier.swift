@@ -397,7 +397,7 @@ extension ChainTree {
     /// Recompute canonical projection after local simulation/test mutation.
     @discardableResult
     public mutating func reevaluateForkChoice() -> ChainCommit? {
-        guard hasUnreservedMutationCapacity else { return nil }
+        guard hasMutationCapacity(for: 1) else { return nil }
         // No graph or weight fact has changed since the projection was last
         // brought current, so re-projection is provably a no-op: a duplicate
         // delivery that added nothing cannot promote anything.

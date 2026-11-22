@@ -11,56 +11,60 @@ import UInt256
 import cashew
 import WAT
 
+/// A child block weighs only by a `ChildBlockProof` that verifies for
+/// exactly it on exactly this chain's path. A proof whose bytes do not prove
+/// the child is a proof-of-work failure (`ChainTree.headerFailure`); one
+/// that proves it against a carrier it does not enter from is structural.
 final class ChainLocalAdmissionChildProofTests: XCTestCase {
     func testChildAdmissionRequiresVerifiedProofAndThenAcceptsIt() async throws {
-        let fixture = try await AdmissionFixture.makeChildProofFixture()
+        var fixture = try await AdmissionFixture.makeChildProofFixture()
         let header = try BlockHeader(node: fixture.candidate)
 
-        let missingProof = try await fixture.childLevel.admit(header, fetcher: fixture.fetcher)
+        let missingProof = try await fixture.childChain.admit(header, fetcher: fixture.fetcher)
         XCTAssertEqual(
-            missingProof.crossChainEvidenceRequirement,
-            .childProof(
+            missingProof.failure,
+            .crossChainEvidenceRequired(.childProof(
                 chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"],
                 childCID: header.rawCID
-            )
+            ))
         )
-        XCTAssertNil(missingProof.sameChainPredecessor)
+        XCTAssertFalse(fixture.childChain.contains(blockHash: header.rawCID))
 
-        let admitted = try await fixture.childLevel.admit(
+        let admitted = try await fixture.childChain.admit(
             header,
             fetcher: fixture.fetcher,
-            childPackage: fixture.package
+            child: fixture.package
         )
-        if case .rejected(let failure, _) = admitted {
+        if let failure = admitted.failure {
             return XCTFail("expected child admission, got \(failure)")
         }
-        XCTAssertNotNil(admitted.materializedPostState)
-        let childChain = await fixture.childLevel.chain
-        let containsCandidate = await childChain.contains(blockHash: header.rawCID)
-        XCTAssertTrue(containsCandidate)
+        XCTAssertEqual(admitted.update?.excluded, false)
+        XCTAssertNotNil(admitted.update?.materializedPostState)
+        XCTAssertTrue(fixture.childChain.contains(blockHash: header.rawCID))
+        XCTAssertTrue(fixture.childChain.isExecuted(blockHash: header.rawCID))
     }
 
     func testChildProofRequiresItsRootInTheProof() async throws {
-        let fixture = try await AdmissionFixture.makeChildProofFixture()
+        var fixture = try await AdmissionFixture.makeChildProofFixture()
         let originalProof = fixture.package.proof
         let proofWithoutRoot = ChildBlockProof(
             rootCID: originalProof.rootCID,
             directoryPath: originalProof.directoryPath,
             entries: originalProof.entries.filter { $0.cid != originalProof.rootCID }
         )
-        let package = ChildValidationPackage(proof: proofWithoutRoot)
+        let package = TestChildPackage(proof: proofWithoutRoot)
 
-        let result = try await fixture.childLevel.admit(
+        let result = try await fixture.childChain.admit(
             fixture.candidate,
             fetcher: fixture.fetcher,
-            childPackage: package
+            child: package
         )
 
-        XCTAssertEqual(result.failure, .providerMalformedEvidence)
+        XCTAssertEqual(result.failure, .proofOfWorkInvalid)
     }
 
     func testChildProofAcceptsAnyRootThatCommitsToTheChild() async throws {
-        let fixture = try await AdmissionFixture.makeChildProofFixture()
+        var fixture = try await AdmissionFixture.makeChildProofFixture()
         let alternateCarrier = try await buildAndStoreGenesis(
             spec: chainLocalSpec(),
             children: ["Child": fixture.candidate],
@@ -74,19 +78,19 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fixture.fetcher
         )
-        let package = ChildValidationPackage(proof: alternateProof)
+        let package = TestChildPackage(proof: alternateProof)
 
-        let result = try await fixture.childLevel.admit(
+        let result = try await fixture.childChain.admit(
             fixture.candidate,
             fetcher: fixture.fetcher,
-            childPackage: package
+            child: package
         )
 
         XCTAssertNil(result.failure)
     }
 
     func testChildProofRejectsConflictingPathEntries() async throws {
-        let fixture = try await AdmissionFixture.makeChildProofFixture()
+        var fixture = try await AdmissionFixture.makeChildProofFixture()
         let proof = fixture.package.proof
         let first = try XCTUnwrap(proof.entries.first)
         let conflictingProof = ChildBlockProof(
@@ -94,19 +98,19 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             directoryPath: proof.directoryPath,
             entries: proof.entries + [(first.cid, first.data + Data([0]))]
         )
-        let package = ChildValidationPackage(proof: conflictingProof)
+        let package = TestChildPackage(proof: conflictingProof)
 
-        let result = try await fixture.childLevel.admit(
+        let result = try await fixture.childChain.admit(
             fixture.candidate,
             fetcher: fixture.fetcher,
-            childPackage: package
+            child: package
         )
 
-        XCTAssertEqual(result.failure, .providerMalformedEvidence)
+        XCTAssertEqual(result.failure, .proofOfWorkInvalid)
     }
 
     func testChildProofRejectsDuplicatePathEntries() async throws {
-        let fixture = try await AdmissionFixture.makeChildProofFixture()
+        var fixture = try await AdmissionFixture.makeChildProofFixture()
         let proof = fixture.package.proof
         let first = try XCTUnwrap(proof.entries.first)
         let duplicateProof = ChildBlockProof(
@@ -114,19 +118,19 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             directoryPath: proof.directoryPath,
             entries: proof.entries + [first]
         )
-        let package = ChildValidationPackage(proof: duplicateProof)
+        let package = TestChildPackage(proof: duplicateProof)
 
-        let result = try await fixture.childLevel.admit(
+        let result = try await fixture.childChain.admit(
             fixture.candidate,
             fetcher: fixture.fetcher,
-            childPackage: package
+            child: package
         )
 
-        XCTAssertEqual(result.failure, .providerMalformedEvidence)
+        XCTAssertEqual(result.failure, .proofOfWorkInvalid)
     }
 
     func testChildProofRejectsUnrelatedPathEntries() async throws {
-        let fixture = try await AdmissionFixture.makeChildProofFixture()
+        var fixture = try await AdmissionFixture.makeChildProofFixture()
         let proof = fixture.package.proof
         let paddedProof = ChildBlockProof(
             rootCID: proof.rootCID,
@@ -134,13 +138,13 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             entries: proof.entries + [("unused", Data([0]))]
         )
 
-        let result = try await fixture.childLevel.admit(
+        let result = try await fixture.childChain.admit(
             fixture.candidate,
             fetcher: fixture.fetcher,
-            childPackage: ChildValidationPackage(proof: paddedProof)
+            child: TestChildPackage(proof: paddedProof)
         )
 
-        XCTAssertEqual(result.failure, .providerMalformedEvidence)
+        XCTAssertEqual(result.failure, .proofOfWorkInvalid)
     }
 
     func testChildWorkProofDoesNotRequireParentCarrierFact() async throws {
@@ -167,53 +171,41 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let childLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        var childChain = try ChainTree.fromGenesis(
+            block: childGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: chainLocalSpec()
         )
         let paddedProof = ChildBlockProof(
             rootCID: proof.rootCID,
             directoryPath: proof.directoryPath,
             entries: proof.entries + [("unused", Data([0]))]
         )
-        let malformedBeforeAcquisition = try await childLevel.admit(
+        let malformedBeforeAcquisition = try await childChain.admit(
             candidate,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: paddedProof)
+            child: TestChildPackage(proof: paddedProof)
         )
         XCTAssertEqual(
             malformedBeforeAcquisition.failure,
-            .providerMalformedEvidence
+            .proofOfWorkInvalid
         )
 
-        let surplusBeforeAcquisition = try await childLevel.admit(
+        let missing = try await childChain.admit(
             candidate,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(
-                proof: proof,
-                parentStateContinuityLink: ParentStateContinuityLink(
-                    parentPath: [DEFAULT_ROOT_DIRECTORY],
-                    fromStateCID: LatticeState.emptyHeader.rawCID,
-                    toStateCID: testCID("surplus-parent-state")
-                )
-            )
+            child: TestChildPackage(proof: proof)
         )
-        XCTAssertEqual(surplusBeforeAcquisition.failure, .providerMalformedEvidence)
-
-        let missing = try await childLevel.admit(
-            candidate,
-            fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: proof)
-        )
-        guard case .accepted = missing else {
-            return XCTFail("proof-derived work should admit without a carrier fact")
+        guard let update = missing.update, !update.excluded else {
+            return XCTFail("proof-derived work should admit without a carrier fact, got \(missing)")
         }
-        XCTAssertNil(missing.sameChainPredecessor)
+        XCTAssertTrue(childChain.isExecuted(blockHash: try BlockHeader(node: candidate).rawCID))
     }
 
-    func testSecondChildRootPinsItsMaterializedVolumes() async throws {
+    /// A second child root weighs by its carrier proof and executes like any
+    /// child block, producing its materialized post-state.
+    func testSecondChildRootExecutesToItsMaterializedPostState() async throws {
         let fetcher = StorableFetcher()
-        let durable = RecordingAdmissionStorer()
         let firstRoot = try await AdmissionFixture.makeGenesis(
             fetcher: fetcher,
             timestamp: 1_000,
@@ -229,40 +221,39 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             nonce: 2,
             transactions: [transaction]
         )
-        let childLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: firstRoot),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        var childChain = try ChainTree.fromGenesis(
+            block: firstRoot,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: chainLocalSpec()
         )
         let secondHeader = try BlockHeader(node: secondRoot)
         let package = try await carriedGenesisPackage(secondRoot, nonce: 3, fetcher: fetcher)
+        let evidence = try package.proof.verifySecuringWork(
+            child: secondRoot, chainPath: [DEFAULT_ROOT_DIRECTORY, "Child"]
+        ).get()
 
-        let result = try await childLevel.admit(
-            secondHeader,
-            fetcher: fetcher,
-            storer: durable,
-            childPackage: package
+        let weighed = childChain.insertGenesis(
+            secondRoot, spec: chainLocalSpec(), childIndex: testChildIndex(secondRoot), evidence: evidence
+        )
+        XCTAssertNotNil(weighed.update, "second child root weighs: \(weighed)")
+        let job = try XCTUnwrap(childChain.connectJob(for: secondHeader.rawCID))
+        let result = childChain.applyConnect(
+            await ChainTree.connect(job, fetcher: fetcher, parentFacts: package.parentFacts)
         )
 
-        let diff: StateDiff
-        switch result {
-        case .accepted(let acceptance):
-            diff = try XCTUnwrap(acceptance.stateDiff)
-        case .duplicate:
-            return XCTFail("second root must not be a duplicate")
-        case .rejected(let failure, _):
-            return XCTFail("expected second child root admission, got \(failure)")
+        guard let update = result.update else {
+            return XCTFail("expected second child root execution, got \(result)")
         }
-        XCTAssertNotNil(result.materializedPostState)
+        XCTAssertFalse(update.excluded)
+        let diff = try XCTUnwrap(update.batches.flatMap(\.facts).lazy.compactMap { fact -> StateDiff? in
+            if case .block(let block) = fact { return block.stateDiff }
+            return nil
+        }.first)
+        let materialized = try XCTUnwrap(update.materializedPostState)
+        XCTAssertEqual(try LatticeStateHeader(node: materialized).rawCID, secondRoot.postState.rawCID)
         XCTAssertFalse(diff.created.isEmpty)
-        let roots = await durable.volumeRoots()
-        XCTAssertTrue(roots.contains(secondRoot.postState.rawCID))
-        for (cid, createdCount) in diff.created
-        where createdCount > diff.replaced[cid, default: 0] {
-            XCTAssertTrue(roots.contains(cid), "materialized Volume \(cid) was not pinned")
-        }
-        let childChain = await childLevel.chain
-        let containsSecondRoot = await childChain.contains(blockHash: secondHeader.rawCID)
-        XCTAssertTrue(containsSecondRoot)
+        XCTAssertTrue(childChain.contains(blockHash: secondHeader.rawCID))
+        XCTAssertTrue(childChain.isExecuted(blockHash: secondHeader.rawCID))
     }
 
     /// A child genesis is deployed by being carried: a real parent block
@@ -271,7 +262,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
     func testACarriedChildGenesisBootstrapsFromItsProofAlone() async throws {
         let fetcher = StorableFetcher()
         let parentGenesis = try await testAnchorParentGenesis(fetcher: fetcher)
-        let parentLevel = AdmissionFixture.makeLevel(genesis: parentGenesis)
+        var parentChain = try AdmissionFixture.makeChain(genesis: parentGenesis)
         let childGenesis = try await BlockBuilder.buildChildGenesis(
             spec: chainLocalSpec(),
             parentState: parentGenesis.postState,
@@ -294,8 +285,8 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             nonce: 2,
             fetcher: fetcher
         )
-        let admission = try await parentLevel.admit(try BlockHeader(node: carrier), fetcher: fetcher)
-        if case .rejected(let failure, _) = admission {
+        let admission = try await parentChain.admit(try BlockHeader(node: carrier), fetcher: fetcher)
+        if let failure = admission.failure {
             return XCTFail("the carrier should admit on the parent: \(failure)")
         }
         let proof = try await ChildBlockProof.generate(
@@ -309,20 +300,18 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             fromStateCID: LatticeState.emptyHeader.rawCID,
             toStateCID: parentState
         )
-        let childBootstrapResult = try await ChainLevel.bootstrap(
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
-            genesisHeader: childHeader,
+        let childPath = [DEFAULT_ROOT_DIRECTORY, "Child"]
+        let childBootstrapResult = await ChainTree.bootstrap(
+            genesis: childHeader,
+            evidence: try proof.verifySecuringWork(child: childGenesis, chainPath: childPath).get(),
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: proof, parentStateContinuityLink: link),
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: testAdmissionStage
+            context: testChainContext(path: childPath),
+            parentFacts: TestChildPackage(proof: proof, parentStateContinuityLink: link).parentFacts
         )
-        guard case .accepted(let childBootstrap) = childBootstrapResult else {
+        guard case .success(let childBootstrap) = childBootstrapResult else {
             return XCTFail("a carried genesis must bootstrap the child: \(childBootstrapResult)")
         }
-        let childTip = await childBootstrap.level.chain.canonicalTip
-        XCTAssertEqual(childTip, childHeader.rawCID)
+        XCTAssertEqual(childBootstrap.tree.canonicalTip, childHeader.rawCID)
     }
 
     func testMultiHopProofRequiresTheExactFullPath() async throws {
@@ -363,37 +352,36 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             fetcher: fetcher
         )
         let proof = rootHop.composing(hop: leafHop)
-        let package = try await childValidationPackage(
-            proof: proof,
-            fetcher: fetcher
-        )
+        let package = TestChildPackage(proof: proof)
         let candidateHeader = try BlockHeader(node: candidate)
-        let wrongPath = ChainLevel(
-            chain: ChainState.fromGenesis(block: leafGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Other"])
+        var wrongPath = try ChainTree.fromGenesis(
+            block: leafGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Other"]),
+            spec: chainLocalSpec()
         )
 
         let rejected = try await wrongPath.admit(
             candidateHeader,
             fetcher: fetcher,
-            childPackage: package
+            child: package
         )
-        XCTAssertEqual(rejected.failure, .providerMalformedEvidence)
+        XCTAssertEqual(rejected.failure, .proofOfWorkInvalid)
 
-        let exactPath = ChainLevel(
-            chain: ChainState.fromGenesis(block: leafGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"])
+        var exactPath = try ChainTree.fromGenesis(
+            block: leafGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Middle", "Leaf"]),
+            spec: chainLocalSpec()
         )
         let proofOnly = try await exactPath.admit(
             candidateHeader,
             fetcher: fetcher,
-            childPackage: ChildValidationPackage(proof: proof)
+            child: TestChildPackage(proof: proof)
         )
-        guard case .accepted = proofOnly else {
-            return XCTFail("the exact proof path should need no carrier fact")
+        guard let update = proofOnly.update, !update.excluded else {
+            return XCTFail("the exact proof path should need no carrier fact, got \(proofOnly)")
         }
 
-        let surplusEvidence = ChildValidationPackage(
+        let surplusEvidence = TestChildPackage(
             proof: proof,
             parentStateContinuityLink: ParentStateContinuityLink(
                 parentPath: [DEFAULT_ROOT_DIRECTORY, "Middle"],
@@ -404,7 +392,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
         let duplicateWithSurplusEvidence = try await exactPath.admit(
             candidateHeader,
             fetcher: fetcher,
-            childPackage: surplusEvidence
+            child: surplusEvidence
         )
         guard case .duplicate = duplicateWithSurplusEvidence else {
             return XCTFail("known blocks must not re-request parent facts")
@@ -413,13 +401,12 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
         let accepted = try await exactPath.admit(
             candidateHeader,
             fetcher: fetcher,
-            childPackage: package
+            child: package
         )
-        if case .rejected(let failure, _) = accepted {
+        if let failure = accepted.failure {
             return XCTFail("the complete path should verify: \(failure)")
         }
-        let containsCandidate = await exactPath.chain.contains(blockHash: candidateHeader.rawCID)
-        XCTAssertTrue(containsCandidate)
+        XCTAssertTrue(exactPath.contains(blockHash: candidateHeader.rawCID))
     }
 
     func testProofBindsEvidenceToTheSuppliedChild() async throws {
@@ -506,13 +493,14 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let package = try await childValidationPackage(proof: proof, fetcher: fetcher)
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        let package = TestChildPackage(proof: proof)
+        var level = try ChainTree.fromGenesis(
+            block: childGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: chainLocalSpec()
         )
 
-        let result = try await level.admit(mined, fetcher: fetcher, childPackage: package)
+        let result = try await level.admit(mined, fetcher: fetcher, child: package)
 
         XCTAssertEqual(result.failure, .protocolInvalid)
     }

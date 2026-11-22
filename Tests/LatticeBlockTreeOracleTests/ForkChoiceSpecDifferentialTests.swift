@@ -564,20 +564,12 @@ struct SpecDifferential {
     /// The step's live outcome: whether it threw, and the run derivation's
     /// raised count.
     static func apply(
-        _ batch: OracleBatch, to side: OracleSide, reserved: Bool, in world: inout OracleWorld<LiveSubject>
+        _ batch: OracleBatch, to side: OracleSide, in world: inout OracleWorld<LiveSubject>
     ) -> (threw: Bool, weighed: [String]) {
         let staged = LiveSubject.batch(batch)
         do {
-            let result: SubmissionResult?
-            if side == .parent {
-                if reserved { precondition(world.parent.tree.reserveImportRevision()) }
-                result = reserved
-                    ? try world.parent.tree.applyReservedStaged(staged) : try world.parent.tree.apply(staged)
-            } else {
-                if reserved { precondition(world.child.tree.reserveImportRevision()) }
-                result = reserved
-                    ? try world.child.tree.applyReservedStaged(staged) : try world.child.tree.apply(staged)
-            }
+            let result = side == .parent
+                ? try world.parent.tree.apply(staged) : try world.child.tree.apply(staged)
             return (false, result?.weighed ?? [])
         } catch {
             return (true, [])
@@ -621,7 +613,7 @@ struct SpecDifferential {
             var applied: OracleOutcome?
             var restored = false
             switch action {
-            case .apply(let side, let batch, let reserved):
+            case .apply(let side, let batch):
                 // A block at a height its parent cannot have is dropped by
                 // header admission (§9.9) and never reaches this reducer.
                 if let block = batch.blockFact, let hash = SpecChain.standard(block.hash),
@@ -630,7 +622,7 @@ struct SpecDifferential {
                 }
                 var chain = model[side]!
                 let verdict = chain.apply(batch)
-                let live = Self.apply(batch, to: side, reserved: reserved, in: &world)
+                let live = Self.apply(batch, to: side, in: &world)
                 let refused: Bool
                 if case .refused = verdict { refused = true } else { refused = false }
                 if live.threw != refused {
@@ -839,7 +831,7 @@ struct SpecDifferential {
                 while !pending.isEmpty {
                     var deferred: [OracleBatch] = []
                     for batch in pending {
-                        let live = Self.apply(batch, to: side, reserved: false, in: &replayed)
+                        let live = Self.apply(batch, to: side, in: &replayed)
                         if live.threw {
                             deferred.append(batch)
                         } else {

@@ -388,7 +388,7 @@ struct ForkChoiceGolden: Codable, Equatable {
     let runs: [RunRecord]
 
     static func capture(
-        _ chain: ChainState,
+        _ chain: ChainTree,
         graph: ForkChoiceGoldenGraph
     ) async throws -> ForkChoiceGolden {
         let names = graph.nameByHash
@@ -396,15 +396,15 @@ struct ForkChoiceGolden: Codable, Equatable {
 
         var records: [BlockRecord] = []
         for block in graph.blocks {
-            let metaValue = await chain.getConsensusBlock(hash: block.hash)
+            let metaValue = chain.getConsensusBlock(hash: block.hash)
             let meta = try XCTUnwrap(metaValue, "\(block.name) missing")
-            let subtreeValue = await chain.subtreeWeight(forHash: block.hash)
+            let subtreeValue = chain.subtreeWeight(forHash: block.hash)
             let subtree = try XCTUnwrap(subtreeValue)
-            let cumulativeValue = await chain.getCumulativeWork(forHash: block.hash)
+            let cumulativeValue = chain.getCumulativeWork(forHash: block.hash)
             let cumulative = try XCTUnwrap(cumulativeValue)
-            let canonical = await chain.isCanonical(hash: block.hash)
-            let executed = await chain.hasExecutedAncestry(blockHash: block.hash)
-            let anchor = await chain.difficultyAnchor(forBlockHash: block.hash)
+            let canonical = chain.isCanonical(hash: block.hash)
+            let executed = chain.hasExecutedAncestry(blockHash: block.hash)
+            let anchor = chain.difficultyAnchor(forBlockHash: block.hash)
             records.append(BlockRecord(
                 name: block.name,
                 hash: block.hash,
@@ -419,10 +419,10 @@ struct ForkChoiceGolden: Codable, Equatable {
             ))
         }
 
-        let tipHeight = await chain.getHighestBlockHeight()
+        let tipHeight = chain.getHighestBlockHeight()
         var canonical: [String] = []
         for height in 0...tipHeight {
-            let hash = await chain.canonicalBlockHash(atHeight: height)
+            let hash = chain.canonicalBlockHash(atHeight: height)
             canonical.append(try XCTUnwrap(
                 hash.map(name), "canonical index has a hole at \(height)"
             ))
@@ -431,13 +431,13 @@ struct ForkChoiceGolden: Codable, Equatable {
         var runs: [RunRecord] = []
         let directory = ForkChoiceGoldenGraph.directory
         for block in graph.blocks where block.commitsChild {
-            let runValue = await chain.runWork(of: block.hash, directory: directory)
+            let runValue = chain.runWork(of: block.hash, directory: directory)
             let runWork = try XCTUnwrap(runValue, "\(block.name) commits into \(directory) but keeps no run")
-            let metaValue = await chain.getConsensusBlock(hash: block.hash)
+            let metaValue = chain.getConsensusBlock(hash: block.hash)
             let meta = try XCTUnwrap(metaValue)
-            let ownValue = await chain.grindWork(of: block.hash)
+            let ownValue = chain.grindWork(of: block.hash)
             let ownWork = try XCTUnwrap(ownValue)
-            let commitments = await chain.recordedChildCommitments(of: block.hash)
+            let commitments = chain.recordedChildCommitments(of: block.hash)
             runs.append(RunRecord(
                 committer: block.name,
                 childBlock: try XCTUnwrap(commitments?[directory]),
@@ -447,8 +447,8 @@ struct ForkChoiceGolden: Codable, Equatable {
             ))
         }
 
-        let tip = await chain.canonicalTip
-        let excluded = await chain.excludedRootsForTesting
+        let tip = chain.canonicalTip
+        let excluded = chain.excludedRootsForTesting
         return ForkChoiceGolden(
             seed: graph.seed,
             eventCount: graph.events.count,
@@ -592,11 +592,11 @@ final class ForkChoiceReplayGoldenTests: XCTestCase {
     /// the chain and the order's trace.
     private func admitLive(
         _ order: [ForkChoiceGoldenEvent]
-    ) async throws -> (chain: ChainState, trace: ForkChoiceTraceGolden.OrderTrace) {
+    ) async throws -> (chain: ChainTree, trace: ForkChoiceTraceGolden.OrderTrace) {
         let names = graph.nameByHash
         func name(_ hash: String) -> String { names[hash] ?? hash }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [order[0].batch])
-        await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
+        var chain = try ChainTree.restoreWithoutContext(replaying: [order[0].batch])
+        chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
         var reorgCommits = 0
         var reorgCommitsAfterDecisiveExclusion: [Int] = []
         var decisiveExclusions = 0
@@ -604,7 +604,7 @@ final class ForkChoiceReplayGoldenTests: XCTestCase {
         for (position, event) in order.enumerated().dropFirst() {
             let commit: ChainCommit?
             do {
-                commit = try await chain.replay(event.batch)
+                commit = try chain.replay(event.batch)
             } catch {
                 XCTFail("position \(position), event \(event.index) (\(event.kind.rawValue) \(event.subject)) threw \(error)")
                 throw error
@@ -618,8 +618,8 @@ final class ForkChoiceReplayGoldenTests: XCTestCase {
             }
             if !removed.isEmpty { reorgCommits += 1 }
             if position % 25 == 0 || event.kind == .exclusion {
-                let tip = await chain.canonicalTip
-                let tipHeight = await chain.getHighestBlockHeight()
+                let tip = chain.canonicalTip
+                let tipHeight = chain.getHighestBlockHeight()
                 checkpoints.append(ForkChoiceTraceGolden.Checkpoint(
                     event: event.index,
                     kind: event.kind.rawValue,
@@ -630,7 +630,7 @@ final class ForkChoiceReplayGoldenTests: XCTestCase {
                 ))
             }
         }
-        let unresolved = await chain.unresolvedSameChainPredecessors()
+        let unresolved = chain.unresolvedSameChainPredecessors()
         XCTAssertTrue(unresolved.isEmpty, "every block must connect once all have arrived")
         return (chain, ForkChoiceTraceGolden.OrderTrace(
             reorgCommits: reorgCommits,
@@ -666,8 +666,8 @@ final class ForkChoiceReplayGoldenTests: XCTestCase {
         random.shuffle(&batches)
         XCTAssertNotEqual(batches, graph.events.map(\.batch), "the shuffle must move something")
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: batches)
-        await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
+        var chain = try ChainTree.restoreWithoutContext(replaying: batches)
+        chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
 
         let golden = try await ForkChoiceGolden.capture(chain, graph: graph)
         try GoldenFile.assert(golden, matches: Self.goldenName, diff: ForkChoiceGolden.diff)

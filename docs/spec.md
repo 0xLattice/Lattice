@@ -404,7 +404,7 @@ sibling.
 
 ### 5.3 Child Chain Block Validation
 
-A child candidate `B` is imported with a `ChildValidationPackage` containing:
+A child candidate `B` is imported with:
 
 - a `ChildBlockProof` for the exact sparse directory path from the mined root to
   `B`;
@@ -1352,7 +1352,7 @@ Lattice's graph and fork-choice reducer. The node does not reconstruct weights,
 ancestry, or canonical choice itself.
 
 Lattice exposes staged-fact replay as its recovery authority. A serialized
-`ChainState` projection is neither a public recovery input nor protocol truth;
+`ChainTree` projection is neither a public recovery input nor protocol truth;
 diagnostic projections, if retained by tests or tooling, cannot replace replay.
 
 Restoration rejects malformed facts, reconstructs exact measures, and

@@ -15,53 +15,27 @@ public struct TransactionPreflightResult: Sendable, Equatable {
     public let disposition: TransactionPreflightDisposition
 }
 
-public extension ChainLevel {
-    /// Classify one transaction as the next block on `tipCID` would carry it.
-    ///
-    /// `tipCID` names the block to build on; nil means the canonical tip. The
-    /// block must be on this chain's executed-from-genesis frontier, so its
-    /// post-state is one this node reproduced; otherwise the result is
-    /// `.unavailable`. A node that admits transactions and builds templates on
-    /// its deepest executed canonical block passes that block here, so
+public enum TransactionPreflight {
+    /// Classify one transaction as the next block on `tipCID` would carry
+    /// it, from its basis alone: the block to build on and its snapshot, as
+    /// `ChainTree.transactionPreflightTip` reads them (a nil snapshot is
+    /// `.unavailable`), and the chain's path. The block must be on the
+    /// chain's executed-from-genesis frontier, so its post-state is one this
+    /// node reproduced. A node that admits transactions and builds templates
+    /// on its deepest executed canonical block passes that block, so
     /// preflight and admission agree while the weighed canonical tip is ahead
-    /// of execution. The result's `tipCID` is the block classified against.
+    /// of execution.
     ///
-    /// `parentState` is needed only for a child-chain withdrawal; it must be the
-    /// entering parent state of the carrier the caller is considering.
-    /// A transaction with negative miner surplus (it creates value) is
-    /// `.invalid`. Block-wide conservation, count, and aggregate-growth checks
-    /// remain the block builder's responsibility.
+    /// `parentState` is needed only for a child-chain withdrawal; it must be
+    /// the entering parent state of the carrier the caller is considering. A
+    /// transaction with negative miner surplus (it creates value) is
+    /// `.invalid`. Block-wide conservation, count, and aggregate-growth
+    /// checks remain the block builder's responsibility.
     ///
     /// The chain's policies run after the checks that can refuse a
-    /// transaction cheaply (signatures, nonce, withdrawals, state), and before
-    /// any verdict that keeps it: nothing they refuse is `.ready`, `.future`,
-    /// or `.unavailable` for want of its parent's state.
-    func preflightTransaction(
-        _ transaction: Transaction,
-        at tipCID: String? = nil,
-        parentState: LatticeStateHeader? = nil,
-        fetcher: any Fetcher,
-        validationContext: ValidationContext = .current
-    ) async -> TransactionPreflightResult {
-        let tip = await chain.transactionPreflightTip(at: tipCID)
-        return await TransactionPreflight.classify(
-            transaction,
-            tipCID: tip.cid,
-            snapshot: tip.snapshot,
-            chainPath: context.path,
-            parentState: parentState,
-            fetcher: fetcher,
-            validationContext: validationContext
-        )
-    }
-}
-
-public enum TransactionPreflight {
-    /// `ChainLevel.preflightTransaction` from its basis alone: the block to
-    /// build on and its snapshot, as `ChainTree.transactionPreflightTip`
-    /// reads them (a nil snapshot is `.unavailable`), and the chain's path.
-    /// A host job that holds only these classifies exactly as the level
-    /// would, without holding the chain's tree.
+    /// transaction cheaply (signatures, nonce, withdrawals, state), and
+    /// before any verdict that keeps it: nothing they refuse is `.ready`,
+    /// `.future`, or `.unavailable` for want of its parent's state.
     ///
     /// `checksPolicies: false` leaves the chain's policies out: a host
     /// re-checking a transaction they already accepted on an earlier tip

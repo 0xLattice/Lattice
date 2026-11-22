@@ -10,20 +10,8 @@ import Foundation
 import UInt256
 import cashew
 
-private actor StagingContextRecorder {
-    private var contexts: [BlockImportStagingContext] = []
-
-    func append(_ context: BlockImportStagingContext) {
-        contexts.append(context)
-    }
-
-    func snapshot() -> [BlockImportStagingContext] {
-        contexts
-    }
-}
-
 final class AdmissionStagingContextTests: XCTestCase {
-    func testRootBootstrapStagesItsHierarchyIssuance() async throws {
+    func testRootBootstrapBatchRecordsItsExecution() async throws {
         let fetcher = StorableFetcher()
         let spec = ChainSpec.test()
         let genesis = try await buildAndStoreGenesis(
@@ -32,27 +20,19 @@ final class AdmissionStagingContextTests: XCTestCase {
             target: UInt256.max,
             fetcher: fetcher
         )
-        let recorder = StagingContextRecorder()
 
-        _ = try await ChainLevel.bootstrap(
-            context: testChainContext(genesisCID: (try BlockHeader(node: genesis)).rawCID),
-            genesisHeader: try BlockHeader(node: genesis),
+        let bootstrapped = try await ChainTree.bootstrap(
+            genesis: try BlockHeader(node: genesis),
             fetcher: fetcher,
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: { context in
-                await recorder.append(context)
-            }
-        )
+            context: testChainContext(genesis: genesis)
+        ).get()
 
-        let contexts = await recorder.snapshot()
-        let context = try XCTUnwrap(contexts.first)
-        XCTAssertEqual(contexts.count, 1)
-        // block + work + validation: the eager tier weighs and validates in
-        // one gate, so it records execution alongside possession.
-        XCTAssertEqual(context.batch.facts.count, 3)
-        guard context.batch.facts.count == 3, case .validation = context.batch.facts[2] else {
-            return XCTFail("eager admission must record that it executed the block")
+        // block + work + validation: bootstrap weighs and executes the
+        // genesis in one batch, so it records execution alongside possession.
+        let facts = bootstrapped.facts.facts
+        XCTAssertEqual(facts.count, 3)
+        guard facts.count == 3, case .validation = facts[2] else {
+            return XCTFail("bootstrap must record that it executed the genesis")
         }
     }
 }

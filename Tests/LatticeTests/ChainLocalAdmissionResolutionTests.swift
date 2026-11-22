@@ -57,15 +57,14 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
                 expectedFailure: .unavailableEvidence
             )
         ]
-        let header = try BlockHeader(node: candidate)
+        // Only the CID: the block itself is what must resolve.
+        let header = BlockHeader(rawCID: try BlockHeader(node: candidate).rawCID)
 
         for testCase in cases {
-            let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(
-                header,
-                fetcher: testCase.fetcher,
-                storer: NoopStorer()
-            )
+            var tree = try AdmissionFixture.makeChain(genesis: genesis)
+            let result = try await tree.admit(header, fetcher: testCase.fetcher)
             XCTAssertEqual(result.failure, testCase.expectedFailure, testCase.name)
+            XCTAssertFalse(tree.contains(blockHash: header.rawCID), testCase.name)
         }
     }
 
@@ -91,21 +90,22 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
             encryptionInfo: nil
         )
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(forged, fetcher: fetcher)
+        var tree = try AdmissionFixture.makeChain(genesis: genesis)
+        let result = try await tree.admit(forged, fetcher: fetcher)
 
         XCTAssertEqual(result.failure, .providerMalformedEvidence)
     }
 
-    /// An ancestor the difficulty schedule depends on being unreachable is
-    /// UNAVAILABLE evidence, never a verdict of invalid: the block may be
-    /// perfectly good and the content merely not here yet, so it has to stay
-    /// retriable rather than be discarded.
+    /// A difficulty anchor not in hand is UNAVAILABLE evidence, never a
+    /// verdict of invalid: the block may be perfectly good and its ancestry
+    /// merely not here yet, so it has to stay retriable rather than be
+    /// discarded.
     ///
-    /// The ancestor that matters is the chain's height-1 block — the schedule's
-    /// anchor — not genesis, which the schedule never reads. So this hides block
-    /// 1 and builds deep enough that reaching it is a real fetch: the anchor for
-    /// a height-2 block is its own parent, already in hand, and nothing is
-    /// fetched at all.
+    /// The anchor that matters is the chain's height-1 block — the schedule's
+    /// anchor — not genesis, which the schedule never reads. So block 1 is
+    /// missing from the tree, which holds block 2 restored as an orphan: the
+    /// candidate's parent is held, its anchor is not, and nothing fetched
+    /// can supply it.
     func testMissingAnchorAncestorIsUnavailableEvidence() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
@@ -122,17 +122,23 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
             backing: fetcher,
             denied: [try BlockHeader(node: blockOne).rawCID]
         )
-
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(
-            candidate,
-            fetcher: missingAnchor,
-            storer: fetcher
+        var tree = try ChainTree.restore(
+            replaying: [try testAdmissionBatch(for: genesis), try testAdmissionBatch(for: blockTwo)],
+            context: testChainContext(genesis: genesis),
+            specs: [chainLocalSpec()]
         )
+        XCTAssertNil(tree.difficultyAnchor(forBlockHash: try BlockHeader(node: blockTwo).rawCID))
+
+        let result = try await tree.admit(candidate, fetcher: missingAnchor)
 
         XCTAssertEqual(result.failure, .unavailableEvidence)
+        XCTAssertFalse(tree.contains(blockHash: try BlockHeader(node: candidate).rawCID))
     }
 
-    func testMissingImmediatePredecessorReturnsExactBackfillRequirement() async throws {
+    /// A header over a parent the tree does not hold is held, never a
+    /// verdict: retried once the predecessor is admitted. Which predecessor
+    /// to acquire is the node's to derive from the block's own `parent`.
+    func testMissingImmediatePredecessorIsHeldUntilItConnects() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
         let parent = try await AdmissionFixture.makeChild(
@@ -153,15 +159,18 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
             backing: fetcher,
             denied: [parentCID]
         )
+        var tree = try AdmissionFixture.makeChain(genesis: genesis)
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis)
-            .admit(candidate, fetcher: missingParent, storer: fetcher)
+        let result = try await tree.admit(candidate, fetcher: missingParent)
 
         XCTAssertEqual(result.failure, .unavailableEvidence)
-        XCTAssertEqual(result.sameChainPredecessor, SameChainPredecessorRequirement(
-            descendantCID: candidateCID,
-            predecessorCID: parentCID
-        ))
+        XCTAssertEqual(candidate.parent?.rawCID, parentCID)
+        XCTAssertFalse(tree.contains(blockHash: candidateCID))
+
+        let parentAdmitted = try await tree.admit(parent, fetcher: fetcher)
+        XCTAssertNotNil(parentAdmitted.update, "\(parentAdmitted)")
+        let retried = try await tree.admit(candidate, mode: .header, fetcher: missingParent)
+        XCTAssertNotNil(retried.update, "\(retried)")
     }
 
     func testMissingPolicyModuleIsUnavailableEvidence() async throws {
@@ -189,14 +198,14 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
             backing: fetcher,
             denied: [policy.moduleCID]
         )
+        let candidateHash = try BlockHeader(node: candidate).rawCID
+        var tree = try AdmissionFixture.makeChain(genesis: genesis, spec: spec)
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(
-            candidate,
-            fetcher: missingModule,
-            storer: fetcher
-        )
+        let result = try await tree.admit(candidate, fetcher: missingModule)
 
         XCTAssertEqual(result.failure, .unavailableEvidence)
+        XCTAssertFalse(tree.isExcludedRoot(candidateHash), "availability excludes nothing")
+        XCTAssertFalse(tree.isExecuted(blockHash: candidateHash))
     }
 
     func testProtocolInvalidCandidateIsRejected() async throws {
@@ -221,7 +230,8 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
         )
         try await storeBuiltBlock(invalid, in: fetcher)
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(invalid, fetcher: fetcher)
+        var tree = try AdmissionFixture.makeChain(genesis: genesis)
+        let result = try await tree.admit(invalid, fetcher: fetcher)
 
         XCTAssertEqual(result.failure, .protocolInvalid)
     }
@@ -231,29 +241,26 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
         // when the parent is disconnected. Nothing may size a walk or a
         // reservation by it (`Int(UInt64.max)` traps); the schedule saturates.
         let fetcher = StorableFetcher()
+        let spec = ChainSpec.test(halfLife: UInt64.max)
         let genesis = try await buildAndStoreGenesis(
-            spec: ChainSpec.test(halfLife: UInt64.max),
+            spec: spec,
             timestamp: 1_000,
             target: AdmissionFixture.easy,
             fetcher: fetcher
         )
         let first = try await AdmissionFixture.makeChild(of: genesis, fetcher: fetcher, timestamp: 2_000, nonce: 1)
         let second = try await AdmissionFixture.makeChild(of: first, fetcher: fetcher, timestamp: 3_000, nonce: 2)
-        let level = AdmissionFixture.makeLevel(genesis: genesis)
+        var tree = try AdmissionFixture.makeChain(genesis: genesis, spec: spec)
 
-        let eager = try await level.admit(first, fetcher: fetcher)
-        guard case .accepted = eager else {
-            return XCTFail("eager admission must accept, got \(eager)")
-        }
-        let weighed = try await level.admit(second, mode: .header, fetcher: fetcher)
-        guard case .accepted = weighed else {
-            return XCTFail("weighed admission must accept, got \(weighed)")
-        }
+        let full = try await tree.admit(first, fetcher: fetcher)
+        XCTAssertNotNil(full.update, "full admission must apply, got \(full)")
+        let weighed = try await tree.admit(second, mode: .header, fetcher: fetcher)
+        XCTAssertNotNil(weighed.update, "weighed admission must apply, got \(weighed)")
     }
 
     func testSideCandidateAdmitsWithoutAncestorFetches() async throws {
         // Every frontier leaf and losing fork has an off-main-chain parent. A
-        // side candidate validates from the held graph alone, so no candidate
+        // side candidate is weighed from the held graph alone, so no candidate
         // pays a sequential fetcher walk for ancestors the node already holds.
         let full = StorableFetcher()
         let genesis = try await AdmissionFixture.makeGenesis(fetcher: full, timestamp: 1_000)
@@ -264,30 +271,19 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
         let genesisHash = try BlockHeader(node: genesis).rawCID
         let sideOneHash = try BlockHeader(node: sideOne).rawCID
 
-        let level = AdmissionFixture.makeLevel(genesis: genesis)
+        var tree = try AdmissionFixture.makeChain(genesis: genesis)
         for block in [mainOne, mainTwo, sideOne] {
-            let result = try await level.admit(block, fetcher: full)
-            guard case .accepted = result else {
-                return XCTFail("fixture block must be accepted, got \(result)")
-            }
+            let result = try await tree.admit(block, fetcher: full)
+            XCTAssertNotNil(result.update, "fixture block must apply, got \(result)")
         }
-        let tip = await level.chain.canonicalTip
-        XCTAssertEqual(tip, try BlockHeader(node: mainTwo).rawCID)
-        let sideOnMain = await level.chain.canonicalBlockHash(atHeight: 1)
-        XCTAssertNotEqual(sideOnMain, sideOneHash)
+        XCTAssertEqual(tree.canonicalTip, try BlockHeader(node: mainTwo).rawCID)
+        XCTAssertNotEqual(tree.canonicalBlockHash(atHeight: 1), sideOneHash)
 
         // A fetcher that cannot serve any ancestor beyond the parent still
-        // validates the side candidate: the window came from the held graph.
+        // weighs the side candidate: linkage reads the held graph.
         let noAncestors = DenyingFetcher(backing: full, denied: [genesisHash])
-        let result = try await level.admit(
-            sideTwo,
-            mode: .header,
-            fetcher: noAncestors,
-            storer: full
-        )
-        guard case .accepted = result else {
-            return XCTFail("side candidate must validate from the held graph, got \(result)")
-        }
+        let result = try await tree.admit(sideTwo, mode: .header, fetcher: noAncestors)
+        XCTAssertNotNil(result.update, "side candidate must weigh from the held graph, got \(result)")
     }
 
     func testNotYetAdmissibleCandidateIsDeferredByTypedOutcome() async throws {
@@ -301,7 +297,8 @@ final class ChainLocalAdmissionResolutionTests: XCTestCase {
             nonce: 1
         )
 
-        let result = try await AdmissionFixture.makeLevel(genesis: genesis).admit(future, fetcher: fetcher)
+        var tree = try AdmissionFixture.makeChain(genesis: genesis)
+        let result = try await tree.admit(future, fetcher: fetcher)
 
         XCTAssertEqual(result.failure, .notYetValid)
     }

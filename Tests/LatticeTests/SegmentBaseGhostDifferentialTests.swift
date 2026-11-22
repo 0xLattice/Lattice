@@ -22,22 +22,22 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             ))
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: blocks[0]),
         ])
         for block in blocks.dropFirst() {
-            _ = try await chain.applyStaged(admission(for: block))
+            _ = try chain.applyStaged(admission(for: block))
         }
 
-        let projections = await chain.fullCanonicalProjectionCount
+        let projections = chain.fullCanonicalProjectionCount
         let firstSibling = PlannedDifferentialBlock(
             index: depth,
             hash: testCID("incremental-split-first-sibling"),
             parentHash: blocks[0].hash,
             height: 1
         )
-        _ = try await chain.applyStaged(admission(for: firstSibling))
-        var projectionsAfter = await chain.fullCanonicalProjectionCount
+        _ = try chain.applyStaged(admission(for: firstSibling))
+        var projectionsAfter = chain.fullCanonicalProjectionCount
         XCTAssertEqual(projectionsAfter, projections)
         await assertMatchesReference(
             chain,
@@ -52,8 +52,8 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 parentHash: blocks[0].hash,
                 height: 1
             )
-            _ = try await chain.applyStaged(admission(for: sibling))
-            projectionsAfter = await chain.fullCanonicalProjectionCount
+            _ = try chain.applyStaged(admission(for: sibling))
+            projectionsAfter = chain.fullCanonicalProjectionCount
             XCTAssertEqual(
                 projectionsAfter,
                 projections,
@@ -73,8 +73,8 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 parentHash: blocks[parentIndex].hash,
                 height: UInt64(parentIndex + 1)
             )
-            _ = try await chain.applyStaged(admission(for: sibling))
-            projectionsAfter = await chain.fullCanonicalProjectionCount
+            _ = try chain.applyStaged(admission(for: sibling))
+            projectionsAfter = chain.fullCanonicalProjectionCount
             XCTAssertEqual(
                 projectionsAfter,
                 projections,
@@ -99,11 +99,11 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             )
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: main[0]),
         ])
         for block in main.dropFirst() {
-            _ = try await chain.applyStaged(admission(for: block))
+            _ = try chain.applyStaged(admission(for: block))
         }
 
         let lowerFork = PlannedDifferentialBlock(
@@ -112,7 +112,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             parentHash: main[2].hash,
             height: 3
         )
-        _ = try await chain.applyStaged(admission(for: lowerFork))
+        _ = try chain.applyStaged(admission(for: lowerFork))
         await assertMatchesReference(chain, seed: 0, event: "lower split")
 
         let upperFork = PlannedDifferentialBlock(
@@ -121,16 +121,16 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             parentHash: main[1].hash,
             height: 2
         )
-        _ = try await chain.applyStaged(admission(for: upperFork))
+        _ = try chain.applyStaged(admission(for: upperFork))
         await assertMatchesReference(chain, seed: 0, event: "upper split")
 
         let sharedGrind = testCID("nested-split-shared-work")
-        _ = try await chain.applyStaged(workAdmission(
+        _ = try chain.applyStaged(workAdmission(
             blockHash: main[4].hash,
             id: sharedGrind,
             work: 7
         ))
-        _ = await chain.addWorkContribution(
+        _ = chain.addWorkContribution(
             VerifiedWorkContribution(id: sharedGrind, work: UInt256(11)),
             to: main[4].hash
         )
@@ -160,14 +160,14 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             parentHash: parent.hash,
             height: 2
         )
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(for: root)])
-        _ = try await chain.applyStaged(admission(for: child))
-        let grafts = await chain.segmentGraftCount
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(for: root)])
+        _ = try chain.applyStaged(admission(for: child))
+        let grafts = chain.segmentGraftCount
 
-        _ = try await chain.applyStaged(admission(for: parent))
+        _ = try chain.applyStaged(admission(for: parent))
 
-        let graftsAfter = await chain.segmentGraftCount
-        let visited = await chain.segmentGraftBlockVisitCount
+        let graftsAfter = chain.segmentGraftCount
+        let visited = chain.segmentGraftBlockVisitCount
         XCTAssertEqual(graftsAfter, grafts + 1)
         XCTAssertEqual(visited, 2)
         await assertMatchesReference(chain, seed: 0, event: "late orphan attachment")
@@ -185,38 +185,38 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             ))
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: blocks[0]),
         ])
-        let initialProjections = await chain.fullCanonicalProjectionCount
+        let initialProjections = chain.fullCanonicalProjectionCount
 
         for index in stride(from: depth - 1, through: 2, by: -1) {
-            _ = try await chain.applyStaged(admission(for: blocks[index]))
+            _ = try chain.applyStaged(admission(for: blocks[index]))
         }
         let sharedGrind = testCID("reverse-orphan-shared-work")
-        _ = try await chain.applyStaged(workAdmission(
+        _ = try chain.applyStaged(workAdmission(
             blockHash: blocks.last!.hash,
             id: sharedGrind,
             work: 7
         ))
-        _ = await chain.addWorkContribution(
+        _ = chain.addWorkContribution(
             VerifiedWorkContribution(id: sharedGrind, work: UInt256(11)),
             to: blocks.last!.hash
         )
 
-        let orphanProjections = await chain.fullCanonicalProjectionCount
-        let orphanGrafts = await chain.segmentGraftCount
-        let orphanVisits = await chain.segmentGraftBlockVisitCount
+        let orphanProjections = chain.fullCanonicalProjectionCount
+        let orphanGrafts = chain.segmentGraftCount
+        let orphanVisits = chain.segmentGraftBlockVisitCount
         XCTAssertEqual(orphanProjections, initialProjections)
         XCTAssertEqual(orphanGrafts, 0)
         XCTAssertEqual(orphanVisits, 0)
-        let cellsBefore = await chain.segmentWorkUpdateCellCount
+        let cellsBefore = chain.segmentWorkUpdateCellCount
 
-        _ = try await chain.applyStaged(admission(for: blocks[1]))
+        _ = try chain.applyStaged(admission(for: blocks[1]))
 
-        let grafts = await chain.segmentGraftCount
-        let visits = await chain.segmentGraftBlockVisitCount
-        let cellsAfter = await chain.segmentWorkUpdateCellCount
+        let grafts = chain.segmentGraftCount
+        let visits = chain.segmentGraftBlockVisitCount
+        let cellsAfter = chain.segmentWorkUpdateCellCount
         XCTAssertEqual(grafts, 1)
         XCTAssertEqual(
             visits,
@@ -244,7 +244,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             expected = expected + UInt256(UInt64(block.index % 3 + 1))
         }
         expected = expected + UInt256(11)
-        let rootChoiceValue = await chain.forkChoiceSnapshot(
+        let rootChoiceValue = chain.forkChoiceSnapshot(
             startingAt: blocks[0].hash
         )
         let rootChoice = try XCTUnwrap(rootChoiceValue)
@@ -264,11 +264,11 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             ))
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: history[0]),
         ])
         for block in history.dropFirst() {
-            _ = try await chain.applyStaged(admission(for: block))
+            _ = try chain.applyStaged(admission(for: block))
         }
 
         let attachmentCount = 32
@@ -290,20 +290,20 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: connector.height + 1
             ))
         }
-        let projections = await chain.fullCanonicalProjectionCount
+        let projections = chain.fullCanonicalProjectionCount
         for leaf in leaves {
-            _ = try await chain.applyStaged(admission(for: leaf))
+            _ = try chain.applyStaged(admission(for: leaf))
         }
-        let orphanVisits = await chain.segmentGraftBlockVisitCount
+        let orphanVisits = chain.segmentGraftBlockVisitCount
         XCTAssertEqual(orphanVisits, 0)
 
         for connector in connectors {
-            _ = try await chain.applyStaged(admission(for: connector))
+            _ = try chain.applyStaged(admission(for: connector))
         }
 
-        let projectionsAfter = await chain.fullCanonicalProjectionCount
-        let graftsAfter = await chain.segmentGraftCount
-        let visitsAfter = await chain.segmentGraftBlockVisitCount
+        let projectionsAfter = chain.fullCanonicalProjectionCount
+        let graftsAfter = chain.segmentGraftCount
+        let visitsAfter = chain.segmentGraftBlockVisitCount
         XCTAssertEqual(projectionsAfter, projections)
         XCTAssertEqual(graftsAfter, UInt64(attachmentCount))
         XCTAssertEqual(
@@ -326,7 +326,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             var random = DifferentialRandom(seed: seed)
             let blocks = plannedBlocks(seed: seed, random: &random)
             var staged = [admission(for: blocks[0])]
-            let chain = try await ChainState.restoreWithoutContext(replaying: staged)
+            var chain = try ChainTree.restoreWithoutContext(replaying: staged)
             var delivered = [blocks[0].hash]
             var strengthByGrind: [String: UInt64] = [:]
             var locationByGrind: [String: String] = [:]
@@ -339,7 +339,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             // Deliver a descendant before both its parent and grandparent.
             for index in [4, 3] {
                 let batch = admission(for: blocks[index])
-                let result = try await chain.applyStaged(batch)
+                let result = try chain.applyStaged(batch)
                 staged.append(batch)
                 XCTAssertEqual(result?.addedBlock, true, "seed \(seed), block \(index)")
                 delivered.append(blocks[index].hash)
@@ -353,7 +353,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 id: localGrind,
                 work: localWork
             )
-            let localResult = try await chain.applyStaged(initialWork)
+            let localResult = try chain.applyStaged(initialWork)
             staged.append(initialWork)
             XCTAssertEqual(localResult?.addedContribution, true, "seed \(seed), initial local work")
             strengthByGrind[localGrind] = localWork
@@ -365,7 +365,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 id: localGrind,
                 work: 4
             )
-            let strongerResult = try await chain.applyStaged(strongerWork)
+            let strongerResult = try chain.applyStaged(strongerWork)
             staged.append(strongerWork)
             XCTAssertEqual(strongerResult?.addedContribution, true, "seed \(seed), stronger work")
             strengthByGrind[localGrind] = 4
@@ -376,7 +376,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             // Attach the orphaned path, then turn its old unary suffix into a fork.
             for index in [1, 2] {
                 let batch = admission(for: blocks[index])
-                let result = try await chain.applyStaged(batch)
+                let result = try chain.applyStaged(batch)
                 staged.append(batch)
                 XCTAssertEqual(result?.addedBlock, true, "seed \(seed), block \(index)")
                 delivered.append(blocks[index].hash)
@@ -384,7 +384,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             }
 
             let lateForkBatch = admission(for: blocks[5])
-            let lateFork = try await chain.applyStaged(lateForkBatch)
+            let lateFork = try chain.applyStaged(lateForkBatch)
             staged.append(lateForkBatch)
             XCTAssertEqual(lateFork?.addedBlock, true, "seed \(seed), late fork")
             delivered.append(blocks[5].hash)
@@ -393,7 +393,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 id: futureGrind,
                 work: 2
             )
-            _ = try await chain.applyStaged(futureWork)
+            _ = try chain.applyStaged(futureWork)
             staged.append(futureWork)
             strengthByGrind[futureGrind] = 2
             locationByGrind[futureGrind] = blocks[5].hash
@@ -408,7 +408,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 if deliverBlock {
                     let index = remaining.removeFirst()
                     let batch = admission(for: blocks[index])
-                    let result = try await chain.applyStaged(batch)
+                    let result = try chain.applyStaged(batch)
                     staged.append(batch)
                     XCTAssertEqual(result?.addedBlock, true, "seed \(seed), block \(index)")
                     delivered.append(blocks[index].hash)
@@ -430,14 +430,14 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                     id: grind,
                     work: work
                 )
-                let result = try await chain.applyStaged(batch)
+                let result = try chain.applyStaged(batch)
                 staged.append(batch)
                 XCTAssertEqual(result?.addedContribution, true, "seed \(seed), work update")
                 strengthByGrind[grind] = work
                 await assertMatchesReference(chain, seed: seed, event: "work update \(updateCount)")
             }
 
-            let restored = try await ChainState.restoreWithoutContext(replaying: staged)
+            let restored = try ChainTree.restoreWithoutContext(replaying: staged)
             await assertMatchesReference(restored, seed: seed, event: "fact replay")
         }
     }
@@ -459,11 +459,11 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             ))
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: main[0]),
         ])
         for block in main.dropFirst() {
-            _ = try await chain.applyStaged(admission(for: block))
+            _ = try chain.applyStaged(admission(for: block))
         }
         await assertMatchesReference(chain, seed: 0, event: "spine")
 
@@ -478,7 +478,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             )
             siblings.append(sibling)
-            _ = try await chain.applyStaged(admission(for: sibling))
+            _ = try chain.applyStaged(admission(for: sibling))
             await assertMatchesReference(chain, seed: 0, event: "sibling \(index)")
         }
 
@@ -489,7 +489,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
         var previousPath = await referencePath(chain)
         for round in 0..<24 {
             let target = siblings[random.nextInt(siblings.count)]
-            let result = try await chain.applyStaged(workAdmission(
+            let result = try chain.applyStaged(workAdmission(
                 blockHash: target.hash,
                 id: testCID("delta-reorg-grind-\(target.index)"),
                 work: UInt64(round + 1) * 8
@@ -524,7 +524,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             parentHash: graftParent.hash,
             height: 8
         )
-        let heldResult = try await chain.applyStaged(admission(for: graftChild))
+        let heldResult = try chain.applyStaged(admission(for: graftChild))
         await assertMatchesReference(chain, seed: 0, event: "orphan held")
         var graftPath = await referencePath(chain)
         assertCommitDelta(
@@ -535,7 +535,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
         )
         previousPath = graftPath
 
-        let graftResult = try await chain.applyStaged(admission(for: graftParent))
+        let graftResult = try chain.applyStaged(admission(for: graftParent))
         await assertMatchesReference(chain, seed: 0, event: "orphan grafted")
         graftPath = await referencePath(chain)
         assertCommitDelta(
@@ -547,7 +547,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
 
         // A canonical exclusion forces a full projection; the delta must not
         // outlive it.
-        _ = try? await chain.applyStaged(exclusionBatch(for: siblings[0]))
+        _ = try? chain.applyStaged(exclusionBatch(for: siblings[0]))
         await assertMatchesReferenceWithExclusions(
             chain,
             seed: 0,
@@ -575,7 +575,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 height: UInt64(index)
             ))
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: main[0]),
         ])
         await assertMatchesReference(chain, seed: 0, event: "genesis")
@@ -587,21 +587,21 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                 parentHash: main[index - 1].hash,
                 height: UInt64(index)
             )
-            _ = try await chain.applyStaged(admission(for: sibling))
+            _ = try chain.applyStaged(admission(for: sibling))
             await assertMatchesReference(chain, seed: 0, event: "sibling at \(index)")
             await assertTruncationEquivalent(chain, "sibling at \(index)")
-            _ = try await chain.applyStaged(admission(for: main[index]))
+            _ = try chain.applyStaged(admission(for: main[index]))
             await assertMatchesReference(chain, seed: 0, event: "canonical at \(index)")
             await assertTruncationEquivalent(chain, "canonical at \(index)")
         }
 
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(
             tip,
             main[depth - 1].hash,
             "the heavier branch must win at every height"
         )
-        let truncations = await chain.truncatedCanonicalProjectionCount
+        let truncations = chain.truncatedCanonicalProjectionCount
         XCTAssertGreaterThan(
             truncations,
             0,
@@ -628,7 +628,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             parentHash: nil,
             height: 0
         )
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             admission(for: genesis),
         ])
 
@@ -660,16 +660,16 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
 
         // Children first, so the whole component sits unrouted as orphans.
         for block in [leftChild, left, right] {
-            _ = try await chain.applyStaged(admission(for: block))
+            _ = try chain.applyStaged(admission(for: block))
         }
         await assertMatchesReference(chain, seed: 0, event: "forest held")
 
         // Then the root arrives and grafts all of it at once: `inner` is two
         // complete tours side by side, which balances only to empty.
-        _ = try await chain.applyStaged(admission(for: second))
+        _ = try chain.applyStaged(admission(for: second))
         await assertMatchesReference(chain, seed: 0, event: "forest grafted")
 
-        let choice = await chain.forkChoiceSnapshot(startingAt: second.hash)
+        let choice = chain.forkChoiceSnapshot(startingAt: second.hash)
         let snapshot = try XCTUnwrap(choice, "the grafted root must be routed")
         var expected = WorkSum.zero
         for block in [second, left, leftChild, right] {
@@ -693,7 +693,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
         for seed in UInt64(0)..<24 {
             var random = DifferentialRandom(seed: seed &* 2_654_435_761 &+ 1)
             let blocks = plannedBlocks(seed: seed, random: &random)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [
+            var chain = try ChainTree.restoreWithoutContext(replaying: [
                 admission(for: blocks[0]),
             ])
 
@@ -709,11 +709,11 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
                    let target = present.first(where: {
                        $0.parentHash != nil && !excluded.contains($0.hash)
                    }) {
-                    _ = try? await chain.applyStaged(exclusionBatch(for: target))
+                    _ = try? chain.applyStaged(exclusionBatch(for: target))
                     excluded.insert(target.hash)
                 } else {
                     let next = pendingInsert.removeFirst()
-                    _ = try await chain.applyStaged(admission(for: next))
+                    _ = try chain.applyStaged(admission(for: next))
                     present.append(next)
                 }
                 await assertMatchesReferenceWithExclusions(
@@ -725,7 +725,7 @@ final class SegmentBaseGhostDifferentialTests: XCTestCase {
             for candidate in present where candidate.parentHash != nil {
                 if excluded.contains(candidate.hash) { continue }
                 if random.nextInt(2) == 0 { continue }
-                _ = try? await chain.applyStaged(exclusionBatch(for: candidate))
+                _ = try? chain.applyStaged(exclusionBatch(for: candidate))
                 excluded.insert(candidate.hash)
                 await assertMatchesReferenceWithExclusions(
                     chain, seed: seed, event: "final exclusion"
@@ -813,8 +813,8 @@ private func workAdmission(
 
 /// The reference walk's own canonical path, used as the oracle for the
 /// emitted commit delta.
-private func referencePath(_ chain: ChainState) async -> Set<String> {
-    let blocks = await chain.hashToBlock
+private func referencePath(_ chain: ChainTree) async -> Set<String> {
+    let blocks = chain.hashToBlock
     return ForkChoiceOracle(blocks: blocks, excluded: []).view().canonicalProjection()
         .map { Set($0.path) } ?? []
 }
@@ -848,14 +848,14 @@ private func assertCommitDelta(
 }
 
 private func assertMatchesReference(
-    _ chain: ChainState,
+    _ chain: ChainTree,
     seed: UInt64,
     event: String,
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {
     await assertRoutedClosedUnderChildren(chain, "seed \(seed), \(event)", file: file, line: line)
-    let blocks = await chain.hashToBlock
+    let blocks = chain.hashToBlock
     guard let expected = ForkChoiceOracle(blocks: blocks, excluded: [])
         .view().canonicalProjection()
     else {
@@ -863,8 +863,8 @@ private func assertMatchesReference(
         return
     }
     let expectedPath = Set(expected.path)
-    let liveTip = await chain.canonicalTip
-    let livePath = await chain.canonicalHashes
+    let liveTip = chain.canonicalTip
+    let livePath = chain.canonicalHashes
     XCTAssertEqual(liveTip, expected.tip, "seed \(seed), \(event): tip", file: file, line: line)
     XCTAssertEqual(livePath, expectedPath, "seed \(seed), \(event): path", file: file, line: line)
     await assertMainChainIndexMatchesPath(
@@ -889,14 +889,14 @@ private func assertMatchesReference(
 /// every differential test cost 5.5x the suite runtime (836s against 151s) to
 /// tell us which half of a failure to look at first.
 private func assertTruncationEquivalent(
-    _ chain: ChainState,
+    _ chain: ChainTree,
     _ message: String,
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {
-    guard let full = await chain.debugFullCanonicalProjection() else { return }
-    let liveTip = await chain.canonicalTip
-    let livePath = await chain.canonicalHashes
+    guard let full = chain.debugFullCanonicalProjection() else { return }
+    let liveTip = chain.canonicalTip
+    let livePath = chain.canonicalHashes
     XCTAssertEqual(
         liveTip, full.canonicalTip,
         "\(message): truncated tip vs whole-chain tip over the same index",
@@ -918,17 +918,17 @@ private func exclusionBatch(
 }
 
 private func assertMatchesReferenceWithExclusions(
-    _ chain: ChainState,
+    _ chain: ChainTree,
     seed: UInt64,
     event: String,
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {
     await assertRoutedClosedUnderChildren(chain, "seed \(seed), \(event)", file: file, line: line)
-    let blocks = await chain.hashToBlock
-    let closure = await chain.excludedRootsForTesting
-    let liveTip = await chain.canonicalTip
-    let livePath = await chain.canonicalHashes
+    let blocks = chain.hashToBlock
+    let closure = chain.excludedRootsForTesting
+    let liveTip = chain.canonicalTip
+    let livePath = chain.canonicalHashes
     guard let expected = ForkChoiceOracle(blocks: blocks, excluded: closure)
         .view().canonicalProjection()
     else {

@@ -7,7 +7,7 @@ import UInt256
 // Quantifies the economic security of no-finality consensus as a function of the
 // attacker hashrate fraction `f`. Every scenario derives its block races from a
 // seeded PRNG (no wall-clock, no system randomness) and drives the REAL
-// `ChainState` fork choice via `runDiscreteEventScenario` / `simChain` — fork
+// `ChainTree` fork choice via `runDiscreteEventScenario` / `simChain` — fork
 // choice is never reimplemented here; we only build topologies, release blocks
 // into the real chain, and measure the resulting reorg/revenue/stall outcomes.
 //
@@ -203,7 +203,7 @@ extension LatticeConsensusSimulator {
     /// We do NOT hand-roll a per-segment revenue table (a discrete withholding sim cannot
     /// reproduce R to spec without re-encoding the paper's reward transitions); instead the
     /// canonical closed form supplies the revenue and we GROUND its single behavioural
-    /// input — γ — in the REAL `ChainState` fork choice. The matched-tie ("0′") race is the
+    /// input — γ — in the REAL `ChainTree` fork choice. The matched-tie ("0′") race is the
     /// only state where γ matters: the attacker has published a private block at the SAME
     /// height as the honest tip, and γ is the probability the network adopts the attacker's
     /// block. We build that exact equal-height race and drive it through the REAL fork choice
@@ -393,7 +393,7 @@ extension LatticeConsensusSimulator {
         out += "Economic security of no-finality consensus as a function of the attacker's "
         out += "share `f` of this chain's imported root-grind contributions. Exact path proofs, "
         out += "the setup-wide root-work floor, and per-chain target classification happen before "
-        out += "these scenarios. All scenarios drive the real chain-local `ChainState` fork choice: "
+        out += "these scenarios. All scenarios drive the real chain-local `ChainTree` fork choice: "
         out += "true cumulative work first, then the lexicographically smaller canonical CID of the "
         out += "competing child blocks (spec §9.4). Parent canonicity and sibling state are not inputs.\n\n"
 

@@ -74,7 +74,7 @@ enum OracleSide: String {
 }
 
 enum OracleAction {
-    case apply(OracleSide, OracleBatch, reserved: Bool)
+    case apply(OracleSide, OracleBatch)
     case reevaluate(OracleSide)
     case serve(String)
     case deriveAllRuns
@@ -295,16 +295,16 @@ final class OracleRun {
         for case .block(let block) in batch.facts {
             plan.sentBlocks.insert(block.hash)
         }
-        return .apply(side, batch, reserved: chance(5))
+        return .apply(side, batch)
     }
 
     /// A block naming a non-standard link: refused at the tree's entry, so
-    /// never booked. Applied unreserved: the reference adapter refuses it
-    /// for the 50.0.1 tree, which has no such rule.
+    /// never booked. The reference adapter refuses it for the 50.0.1 tree,
+    /// which has no such rule.
     func malformed(_ side: OracleSide, _ block: OracleBlockFact, amount: UInt256) -> OracleAction {
         .apply(side, OracleBatch(facts: [
             .block(block), .work(blockHash: block.hash, grindID: freshCID("grind"), work: amount),
-        ]), reserved: false)
+        ]))
     }
 
     func deliverWithheld(_ side: OracleSide) -> OracleAction? {
@@ -466,7 +466,7 @@ final class OracleRun {
                 block.hash = "not-a-cid-\(counter)"
                 return .apply(side, OracleBatch(facts: [
                     .block(block), .work(blockHash: block.hash, grindID: freshCID("grind"), work: work()),
-                ]), reserved: false)
+                ]))
             }
             if chance(50) {
                 let block = makeBlock(side, under: parent)
@@ -509,12 +509,12 @@ final class OracleRun {
         switch action {
         case .idle:
             return ([], nil, false)
-        case .apply(let side, let batch, let reserved):
+        case .apply(let side, let batch):
             let outcome: OracleOutcome
             if side == .parent {
-                outcome = world.parent.apply(batch, reserved: reserved)
+                outcome = world.parent.apply(batch)
             } else {
-                outcome = world.child.apply(batch, reserved: reserved)
+                outcome = world.child.apply(batch)
             }
             var lines = ["apply \(outcome.rendered)"]
             if !outcome.threw {
@@ -590,8 +590,8 @@ final class OracleRun {
         }
         switch action {
         case .idle: return "idle"
-        case .apply(let side, let batch, let reserved):
-            return "\(side.rawValue)\(reserved ? " reserved" : "") [\(batch.facts.map(fact).joined(separator: ", "))]"
+        case .apply(let side, let batch):
+            return "\(side.rawValue) [\(batch.facts.map(fact).joined(separator: ", "))]"
         case .reevaluate(let side): return "reevaluate \(side.rawValue)"
         case .serve(let directory): return "serve \(directory)"
         case .deriveAllRuns: return "derive all runs"
@@ -724,7 +724,7 @@ final class OracleRun {
     /// Track what the live world accepted, for later restarts.
     func book(_ action: OracleAction, applied: OracleOutcome?, restored: Bool) {
         switch action {
-        case .apply(let side, let batch, _):
+        case .apply(let side, let batch):
             if let applied, !applied.threw {
                 plan(side).log.append(batch)
             }

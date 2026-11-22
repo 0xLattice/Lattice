@@ -73,19 +73,10 @@ struct LiveSubject: OracleSubject {
         }
     }
 
-    mutating func apply(_ batch: OracleBatch, reserved: Bool) -> OracleOutcome {
+    mutating func apply(_ batch: OracleBatch) -> OracleOutcome {
         let staged = Self.batch(batch)
         do {
-            let result: SubmissionResult?
-            if reserved {
-                guard tree.reserveImportRevision() else {
-                    return OracleOutcome(rendered: "noReservation")
-                }
-                result = try tree.applyReservedStaged(staged)
-            } else {
-                result = try tree.apply(staged)
-            }
-            guard let result else { return OracleOutcome(rendered: "nil") }
+            guard let result = try tree.apply(staged) else { return OracleOutcome(rendered: "nil") }
             let weighed = result.weighed.sorted()
             return OracleOutcome(
                 rendered: "block=\(result.addedBlock) contribution=\(result.addedContribution)"

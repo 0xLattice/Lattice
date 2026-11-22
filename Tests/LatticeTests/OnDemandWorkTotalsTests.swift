@@ -53,9 +53,9 @@ final class OnDemandWorkTotalsTests: XCTestCase {
         let rootHash = hashes[0]
         let tipHash = hashes[5]
 
-        let rootWeight = await chain.subtreeWeight(forHash: rootHash)
+        let rootWeight = chain.subtreeWeight(forHash: rootHash)
         XCTAssertEqual(rootWeight, WorkSum(UInt256(21)))
-        let tipWork = await chain.getCumulativeWork(forHash: tipHash)
+        let tipWork = chain.getCumulativeWork(forHash: tipHash)
         XCTAssertEqual(tipWork, WorkSum(UInt256(21)))
     }
 
@@ -64,17 +64,17 @@ final class OnDemandWorkTotalsTests: XCTestCase {
         let rootHash = hashes[0]
         let tipHash = hashes[5]
 
-        let restored = try await ChainState.restoreWithoutContext(replaying: hashes.indices.map {
+        let restored = try ChainTree.restoreWithoutContext(replaying: hashes.indices.map {
             lazyCacheAdmission(
                 index: $0,
                 hash: hashes[$0],
                 parentHash: $0 == 0 ? nil : hashes[$0 - 1]
             )
         })
-        let restoredTip = await restored.canonicalTip
-        let restoredRootWork = await restored.subtreeWeight(forHash: rootHash)
-        let restoredTipWork = await restored.getCumulativeWork(forHash: tipHash)
-        let liveRootWork = await chain.subtreeWeight(forHash: rootHash)
+        let restoredTip = restored.canonicalTip
+        let restoredRootWork = restored.subtreeWeight(forHash: rootHash)
+        let restoredTipWork = restored.getCumulativeWork(forHash: tipHash)
+        let liveRootWork = chain.subtreeWeight(forHash: rootHash)
         XCTAssertEqual(restoredTip, tipHash)
         XCTAssertEqual(restoredRootWork, WorkSum(UInt256(21)))
         XCTAssertEqual(restoredTipWork, WorkSum(UInt256(21)))
@@ -85,7 +85,7 @@ final class OnDemandWorkTotalsTests: XCTestCase {
     /// credited, moves fork choice exactly as a rebuild from the facts does —
     /// through an equal-work tie.
     func testCreditingGrindsMatchesAFullRebuildWithoutRebuildingLocalTotals() async throws {
-        let fork = try await lazyCacheFork(branchLength: 12)
+        var fork = try await lazyCacheFork(branchLength: 12)
         var facts = fork.facts
         // Left leads, right overtakes, left draws level: the last is a tie.
         let credits: [(branch: [String], depth: Int, work: UInt64)] = [
@@ -95,39 +95,39 @@ final class OnDemandWorkTotalsTests: XCTestCase {
         for (index, credit) in credits.enumerated() {
             let block = credit.branch[credit.depth]
             let id = testCID("lazy-local-cache-credit-\(index)")
-            let held = await fork.chain.workContribution(id: id, at: block)
+            let held = fork.chain.workContribution(id: id, at: block)
             XCTAssertNil(held)
             let batch = lazyCacheWork(blockHash: block, id: id, work: credit.work)
-            _ = try await fork.chain.applyStaged(batch)
+            _ = try fork.chain.applyStaged(batch)
             facts.append(batch)
-            let credited = await fork.chain.workContribution(id: id, at: block)
+            let credited = fork.chain.workContribution(id: id, at: block)
             XCTAssertEqual(credited?.work, UInt256(credit.work))
 
-            let rebuilt = try await ChainState.restoreWithoutContext(replaying: facts)
-            let snapshot = await fork.chain.forkChoiceSnapshot(startingAt: fork.root)
-            let rebuiltSnapshot = await rebuilt.forkChoiceSnapshot(startingAt: fork.root)
+            let rebuilt = try ChainTree.restoreWithoutContext(replaying: facts)
+            let snapshot = fork.chain.forkChoiceSnapshot(startingAt: fork.root)
+            let rebuiltSnapshot = rebuilt.forkChoiceSnapshot(startingAt: fork.root)
             XCTAssertNotNil(snapshot)
             XCTAssertEqual(snapshot, rebuiltSnapshot)
-            let tip = await fork.chain.canonicalTip
-            let rebuiltTip = await rebuilt.canonicalTip
+            let tip = fork.chain.canonicalTip
+            let rebuiltTip = rebuilt.canonicalTip
             XCTAssertEqual(tip, rebuiltTip)
         }
         // The tie: equal work under the two siblings, the smaller CID wins.
-        let leftWeight = await fork.chain.forkChoiceWeight(of: fork.left[0])
-        let rightWeight = await fork.chain.forkChoiceWeight(of: fork.right[0])
+        let leftWeight = fork.chain.forkChoiceWeight(of: fork.left[0])
+        let rightWeight = fork.chain.forkChoiceWeight(of: fork.right[0])
         XCTAssertEqual(leftWeight, rightWeight)
         let winner = forkChoicePrefersBlock(fork.left[0], over: fork.right[0]) ? fork.left : fork.right
-        let tip = await fork.chain.canonicalTip
+        let tip = fork.chain.canonicalTip
         XCTAssertEqual(tip, winner.last)
 
         // Fork choice's weights are the full recompute's, block by block.
         for hash in [fork.root] + fork.left + fork.right {
-            let weight = await fork.chain.forkChoiceWeight(of: hash)
-            let recomputed = await fork.chain.subtreeWeight(forHash: hash)
+            let weight = fork.chain.forkChoiceWeight(of: hash)
+            let recomputed = fork.chain.subtreeWeight(forHash: hash)
             XCTAssertEqual(weight, recomputed)
             // The public read is the snapshot's weight, without the descent.
-            let read = await fork.chain.forkChoiceWeight(of: hash)
-            let snapshot = await fork.chain.forkChoiceSnapshot(startingAt: hash)
+            let read = fork.chain.forkChoiceWeight(of: hash)
+            let snapshot = fork.chain.forkChoiceSnapshot(startingAt: hash)
             XCTAssertEqual(read, snapshot?.subtreeWork)
             XCTAssertEqual(read, weight)
         }
@@ -136,15 +136,15 @@ final class OnDemandWorkTotalsTests: XCTestCase {
         // grind or block.
         let ids = credits.indices.map { testCID("lazy-local-cache-credit-\($0)") } + [testCID("lazy-local-cache-unknown")]
         for hash in [fork.root] + fork.left + fork.right + [testCID("lazy-local-cache-no-block")] {
-            let view = await fork.chain.getConsensusBlock(hash: hash)
+            let view = fork.chain.getConsensusBlock(hash: hash)
             if view == nil {
-                let read = await fork.chain.forkChoiceWeight(of: hash)
-                let snapshot = await fork.chain.forkChoiceSnapshot(startingAt: hash)
+                let read = fork.chain.forkChoiceWeight(of: hash)
+                let snapshot = fork.chain.forkChoiceSnapshot(startingAt: hash)
                 XCTAssertNil(read)
                 XCTAssertNil(snapshot)
             }
             for id in ids {
-                let direct = await fork.chain.workContribution(id: id, at: hash)
+                let direct = fork.chain.workContribution(id: id, at: hash)
                 XCTAssertEqual(direct != nil, view?.workContributions[id] != nil, "\(id) at \(hash)")
             }
         }
@@ -153,18 +153,18 @@ final class OnDemandWorkTotalsTests: XCTestCase {
     func testCreditingAGrindDoesNotScaleWithTheTree() async throws {
         var cells: [UInt64] = []
         for branchLength in [16, 256] {
-            let fork = try await lazyCacheFork(branchLength: branchLength)
-            let cellsBefore = await fork.chain.segmentWorkUpdateCellCount
+            var fork = try await lazyCacheFork(branchLength: branchLength)
+            let cellsBefore = fork.chain.segmentWorkUpdateCellCount
             for index in 0..<8 {
                 let block = (index.isMultiple(of: 2) ? fork.left : fork.right)[index]
                 let id = testCID("lazy-local-cache-credit-\(index)")
-                let held = await fork.chain.workContribution(id: id, at: block)
+                let held = fork.chain.workContribution(id: id, at: block)
                 XCTAssertNil(held)
-                _ = try await fork.chain.applyStaged(
+                _ = try fork.chain.applyStaged(
                     lazyCacheWork(blockHash: block, id: id, work: UInt64(index + 1))
                 )
             }
-            let cellsAfter = await fork.chain.segmentWorkUpdateCellCount
+            let cellsAfter = fork.chain.segmentWorkUpdateCellCount
             cells.append(cellsAfter - cellsBefore)
         }
         // Sixteen times the blocks, and the weight update grows by a few tree
@@ -178,7 +178,7 @@ final class OnDemandWorkTotalsTests: XCTestCase {
 /// per block, so the branches weigh the same until something is credited.
 private func lazyCacheFork(
     branchLength: Int
-) async throws -> (chain: ChainState, facts: [BlockImportBatch], root: String, left: [String], right: [String]) {
+) async throws -> (chain: ChainTree, facts: [BlockImportBatch], root: String, left: [String], right: [String]) {
     let root = testCID("lazy-local-cache-fork-root")
     func block(_ hash: String, parent: String?, height: Int) -> BlockImportBatch {
         BlockImportBatch(facts: [
@@ -201,7 +201,7 @@ private func lazyCacheFork(
         ])
     }
     var facts = [block(root, parent: nil, height: 0)]
-    let chain = try await ChainState.restoreWithoutContext(replaying: facts)
+    var chain = try ChainTree.restoreWithoutContext(replaying: facts)
     var branches: [[String]] = []
     for side in ["left", "right"] {
         var parent = root
@@ -209,7 +209,7 @@ private func lazyCacheFork(
         for depth in 0..<branchLength {
             let hash = testCID("lazy-local-cache-fork-\(side)-\(depth)")
             let batch = block(hash, parent: parent, height: depth + 1)
-            _ = try await chain.applyStaged(batch)
+            _ = try chain.applyStaged(batch)
             facts.append(batch)
             hashes.append(hash)
             parent = hash
@@ -230,14 +230,14 @@ private func lazyCacheWork(blockHash: String, id: String, work: UInt64) -> Block
 
 private func lazyCacheLinearChain(
     count: Int
-) async throws -> (ChainState, [String]) {
+) async throws -> (ChainTree, [String]) {
     precondition(count > 0)
     let hashes = (0..<count).map { testCID("lazy-local-cache-\($0)") }
-    let chain = try await ChainState.restoreWithoutContext(replaying: [
+    var chain = try ChainTree.restoreWithoutContext(replaying: [
         lazyCacheAdmission(index: 0, hash: hashes[0], parentHash: nil),
     ])
     for index in 1..<count {
-        _ = try await chain.applyStaged(lazyCacheAdmission(
+        _ = try chain.applyStaged(lazyCacheAdmission(
             index: index,
             hash: hashes[index],
             parentHash: hashes[index - 1]

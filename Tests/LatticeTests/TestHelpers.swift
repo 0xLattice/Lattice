@@ -494,14 +494,8 @@ func testChainContext(genesis: Block) -> ChainRuntimeContext {
     testChainContext(genesisCID: try! BlockHeader(node: genesis).rawCID)
 }
 
-extension ChainLevel {
-    init(testChain chain: ChainState) {
-        self.init(chain: chain, context: testChainContext())
-    }
-}
-
-extension ChainState {
-    func submitTestBlock(
+extension ChainTree {
+    mutating func submitTestBlock(
         blockHeader: BlockHeader,
         block: Block,
         contribution: VerifiedWorkContribution? = nil
@@ -516,8 +510,6 @@ extension ChainState {
         )
     }
 }
-
-func testAdmissionStage(_ context: BlockImportStagingContext) async throws {}
 
 func testAdmissionBatch(
     for block: Block,
@@ -586,8 +578,8 @@ func testWorkBatch(
 func childValidationPackage(
     proof: ChildBlockProof,
     fetcher _: any Fetcher
-) async throws -> ChildValidationPackage {
-    ChildValidationPackage(proof: proof)
+) async throws -> TestChildPackage {
+    TestChildPackage(proof: proof)
 }
 
 @discardableResult
@@ -652,14 +644,14 @@ func storeWasmPolicy(
 /// The by-height canonical index is derived state that a delta projection can
 /// desync without changing the membership set, so parity checks compare it too.
 func assertMainChainIndexMatchesPath(
-    _ chain: ChainState,
+    _ chain: ChainTree,
     expectedPath: Set<String>,
     _ message: String = "",
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {
-    let blocks = await chain.hashToBlock
-    let index = await chain.canonicalHashByHeight
+    let blocks = chain.hashToBlock
+    let index = chain.canonicalHashByHeight
     var expected: [UInt64: String] = [:]
     for hash in expectedPath {
         guard let height = blocks[hash]?.blockHeight else { continue }
@@ -829,7 +821,7 @@ func carriedGenesisPackage(
     nonce: UInt64 = 0,
     target: UInt256 = UInt256.max,
     fetcher: StorableFetcher
-) async throws -> ChildValidationPackage {
+) async throws -> TestChildPackage {
     let anchor = try await testAnchorParentGenesis(fetcher: fetcher)
     let carrier = try await buildAndStoreBlock(
         previous: anchor,
@@ -844,7 +836,7 @@ func carriedGenesisPackage(
         childDirectory: directory,
         fetcher: fetcher
     )
-    return ChildValidationPackage(
+    return TestChildPackage(
         proof: proof,
         parentStateContinuityLink: ParentStateContinuityLink(
             parentPath: [DEFAULT_ROOT_DIRECTORY],

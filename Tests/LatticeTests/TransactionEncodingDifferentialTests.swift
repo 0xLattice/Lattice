@@ -469,9 +469,9 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
         let rawData = try XCTUnwrap(raw.toData())
         let decoded = Transaction(data: rawData)
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-        let preflight = await level.preflightTransaction(constructed, fetcher: fetcher)
-        let tip = await level.chain.transactionPreflightTip(at: nil)
+        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
+        let preflight = await chain.preflightTransaction(constructed, fetcher: fetcher)
+        let tip = chain.transactionPreflightTip(at: nil)
         let unpoliced = await TransactionPreflight.classify(
             constructed,
             tipCID: tip.cid,

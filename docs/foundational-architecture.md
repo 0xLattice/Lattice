@@ -52,15 +52,10 @@ genesis carried by a valid proof is a competing root; the child process chooses
 among them with its own fork choice. Only the root chain pins one genesis: its
 configured CID, carried by its `ChainRuntimeContext`.
 
-Each process owns:
+Each process owns one `ChainTree`: its `ChainRuntimeContext` (absolute chain
+path), its accepted same-chain forest, and its canonical projection.
 
-```text
-ChainLevel
-|- ChainRuntimeContext  absolute chain path
-`- ChainState           accepted same-chain forest + canonical projection
-```
-
-`ChainLevel` contains no child runtimes. Lattice has no cross-chain
+A `ChainTree` contains no child runtimes. Lattice has no cross-chain
 reorganization call and no multi-chain fork-choice loop.
 
 ## Evidence Boundary

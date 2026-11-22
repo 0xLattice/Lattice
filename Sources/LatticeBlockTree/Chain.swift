@@ -175,7 +175,7 @@ public struct ChainCommit: Sendable, Equatable {
     }
 }
 
-// MARK: - ChainState
+// MARK: - Tip snapshots
 
 public struct TipBlockSnapshot: Sendable, Equatable {
     public let postStateCID: String
@@ -375,8 +375,7 @@ private struct TrustedImportBatch {
 /// parent run attribution (RunAttribution.swift), in arrays sharing one
 /// handle space.
 ///
-/// Every consensus mutation of a chain is a method on this value; the
-/// `ChainState` actor only wraps one, so there is one implementation. The
+/// Every consensus mutation of a chain is a method on this value. The
 /// four fact kinds are its durable form: `replay` rebuilds it from them, and
 /// the admission operations (`insertHeader`, `addWork`, `applyConnect`) emit
 /// exactly the facts they apply.
@@ -387,8 +386,8 @@ private struct TrustedImportBatch {
 public struct ChainTree: Sendable {
     /// The chain this tree is, fixed when the tree is made: its path decides
     /// whether work is a root grind or a child proof and which parent facts
-    /// its blocks need. Nil for a tree made without one (the actor path,
-    /// which carries its context on `ChainLevel`).
+    /// its blocks need. Nil for a tree made without one (tests and replay
+    /// benchmarks).
     public private(set) var context: ChainRuntimeContext?
     /// The specs of this chain's genesis roots, keyed by spec CID: each bound
     /// by CID to the genesis that names it when that genesis is inserted.
@@ -408,10 +407,6 @@ public struct ChainTree: Sendable {
 #endif
     /// Advances for every successful consensus mutation.
     var mutationGeneration: UInt64
-    /// Capacity held across the node's asynchronous stage boundary. These
-    /// reservations are fungible and disappear on restart; staged facts replay
-    /// against the same pre-stage revision floor.
-    var reservedImportRevisions: UInt64
 
     /// The block tree (BlockGraph.swift), to read.
     var graph: BlockGraph { storage }
@@ -517,7 +512,6 @@ public struct ChainTree: Sendable {
         }
         self.context = nil
         self.mutationGeneration = mutationGeneration
-        self.reservedImportRevisions = 0
         let graph = BlockGraph()
         // Height order, so handles follow the tree; children link to their
         // parent whichever arrives first.
@@ -780,8 +774,8 @@ public struct ChainTree: Sendable {
         return batches
     }
 
-    /// A tree with no chain context — tests and the superseded actor path's
-    /// internals only; it pins nothing.
+    /// A tree with no chain context — tests and replay benchmarks only; it
+    /// pins nothing.
     package static func restoreWithoutContext(
         replaying batches: [BlockImportBatch],
         revisionFloor: UInt64 = 0,
@@ -1147,7 +1141,7 @@ public struct ChainTree: Sendable {
             return addWorkContribution(contribution, to: held)
         }
 
-        guard hasUnreservedMutationCapacity else { return .discarded() }
+        guard hasMutationCapacity(for: 1) else { return .discarded() }
         let graftsExistingComponent = connectsExistingSubtree(input, id: id)
 
         guard let (block, result) = insertBlock(
@@ -1320,7 +1314,7 @@ public struct ChainTree: Sendable {
         if let existing, existing >= work {
             return .discarded()
         }
-        guard hasUnreservedMutationCapacity else { return .discarded() }
+        guard hasMutationCapacity(for: 1) else { return .discarded() }
         // A stronger observation on an excluded block weighs like any other: it
         // raises every ancestor, and the descent still never steps into the
         // excluded root, so no invalid block is resurrected by piling on work.
@@ -1429,7 +1423,7 @@ public struct ChainTree: Sendable {
                     applyValidations()
                     return nil
                 }
-                guard hasUnreservedMutationCapacity else {
+                guard hasMutationCapacity(for: 1) else {
                     throw ChainStateRestoreError.corruptConsensusGraph
                 }
                 hydrateMetadata(from: input)
@@ -1498,7 +1492,7 @@ public struct ChainTree: Sendable {
         guard !graph.isValidated(block) else {
             throw ChainStateRestoreError.executedVerdictContradiction
         }
-        guard hasUnreservedMutationCapacity else {
+        guard hasMutationCapacity(for: 1) else {
             throw ChainStateRestoreError.corruptConsensusGraph
         }
         // A chain whose every root is proven invalid has no history to stand
@@ -1542,38 +1536,9 @@ public struct ChainTree: Sendable {
         try applyStaged(batch)?.commit
     }
 
-    /// Reserve one distinct U64 commit revision before the node stages a batch.
-    /// Other actor mutations must leave this capacity available until the batch
-    /// either fails staging or consumes the reservation synchronously.
-    package mutating func reserveImportRevision() -> Bool {
-        guard hasUnreservedMutationCapacity else { return false }
-        reservedImportRevisions += 1
-        return true
-    }
-
-    package mutating func releaseImportRevision() {
-        precondition(reservedImportRevisions > 0)
-        reservedImportRevisions -= 1
-    }
-
-    package mutating func applyReservedStaged(
-        _ batch: BlockImportBatch
-    ) throws -> SubmissionResult? {
-        guard reservedImportRevisions > 0 else {
-            throw ChainStateRestoreError.corruptConsensusGraph
-        }
-        reservedImportRevisions -= 1
-        return try applyStaged(batch)
-    }
-
-    var hasUnreservedMutationCapacity: Bool {
-        hasMutationCapacity(for: 1)
-    }
-
     /// Whether `count` more consensus mutations fit before revisions run out.
     package func hasMutationCapacity(for count: UInt64) -> Bool {
-        let (needed, overflow) = reservedImportRevisions.addingReportingOverflow(count)
-        return !overflow && needed <= UInt64.max - mutationGeneration
+        count <= UInt64.max - mutationGeneration
     }
 
     /// Commitments are not compared: the block CID binds them, and a fact

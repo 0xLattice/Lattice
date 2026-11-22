@@ -17,9 +17,6 @@ let package = Package(
         .library(name: "LatticeBlockTree", targets: ["LatticeBlockTree"]),
         .library(name: "LatticeImport", targets: ["LatticeImport"]),
         .executable(
-            name: "LatticeDemo",
-            targets: ["LatticeDemo"]),
-        .executable(
             name: "lattice-determinism-check",
             targets: ["DeterminismCheck"]),
         .executable(
@@ -117,9 +114,6 @@ let package = Package(
                 "LatticeBlockTree",
                 "LatticeImport",
             ]),
-        .executableTarget(
-            name: "LatticeDemo",
-            dependencies: ["Lattice"]),
         // — shared golden-vector source of truth, imported by
         // both the XCTest suite (macOS) and the determinism executable (Linux).
         .target(
