@@ -578,14 +578,14 @@ public struct ChildBlockProof: Sendable {
 
 // MARK: - Internal helpers
 
-public final class _CollectingStorer: Storer, @unchecked Sendable {
+final class _CollectingStorer: Storer, @unchecked Sendable {
     private let lock = NSLock()
     private var storedEntries: [String: Data] = [:]
-    public init() {}
-    public func store(entries: [String: Data]) async {
+    init() {}
+    func store(entries: [String: Data]) async {
         lock.withLock { storedEntries.merge(entries) { _, new in new } }
     }
-    public var entries: [(cid: String, data: Data)] {
+    var entries: [(cid: String, data: Data)] {
         lock.withLock {
             storedEntries.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
         }

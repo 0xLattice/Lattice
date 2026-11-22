@@ -144,7 +144,9 @@ final class BlockGraph: @unchecked Sendable {
     var canonicalTip = BlockGraph.none
     /// The canonical path from its root, in height order.
     var canonical: [UInt32] = []
-    var projectedGeneration: UInt64?
+    /// Whether a projection has run: until one has, there is no canonical
+    /// path to truncate against.
+    var isProjected = false
 
     // MARK: Run attribution
 
@@ -191,7 +193,7 @@ final class BlockGraph: @unchecked Sendable {
         copy.weights = weights
         copy.canonicalTip = canonicalTip
         copy.canonical = canonical
-        copy.projectedGeneration = projectedGeneration
+        copy.isProjected = isProjected
         copy.served = served
         copy.nearestCarrier = nearestCarrier
         copy.runWork = runWork

@@ -3,16 +3,6 @@ import cashew
 import LatticePrimitives
 import LatticePoW
 
-public struct SameChainPredecessorRequirement: Sendable, Equatable {
-    public let descendantCID: String
-    public let predecessorCID: String
-
-    public init(descendantCID: String, predecessorCID: String) {
-        self.descendantCID = descendantCID
-        self.predecessorCID = predecessorCID
-    }
-}
-
 public struct ChainBlockFact: Codable, Sendable, Equatable {
     public let blockHash: String
     public let parentBlockHash: String?
@@ -26,14 +16,13 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
     public let target: String
     public let nextTarget: String
     public let timestamp: Int64
-    public let stateDiff: StateDiff
     /// Directory → child block CID this block commits, from its PoW-bound
     /// `children` index (§9.10). Absent means it commits nothing.
     public let childCommitments: [String: String]?
 
     /// Explicit so `childCommitments` can default to nil: a defaulted `let`
     /// would drop it from the synthesized memberwise init entirely, and the
-    /// one real construction site (`PreparedImport.facts`) must set it.
+    /// one real construction site (`BlockImport.admissionFacts`) must set it.
     public init(
         blockHash: String,
         parentBlockHash: String?,
@@ -45,7 +34,6 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
         target: String,
         nextTarget: String,
         timestamp: Int64,
-        stateDiff: StateDiff,
         childCommitments: [String: String]? = nil
     ) {
         self.blockHash = blockHash
@@ -58,7 +46,6 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
         self.target = target
         self.nextTarget = nextTarget
         self.timestamp = timestamp
-        self.stateDiff = stateDiff
         self.childCommitments = childCommitments
     }
 }

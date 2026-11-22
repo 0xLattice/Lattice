@@ -46,8 +46,7 @@ final class ReplayProjectionDeferralTests: XCTestCase {
                 specCID: testCID("replay-defer:spec:\(n.name)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(n.height),
-                stateDiff: .empty
+                timestamp: Int64(n.height)
             )),
             .work(ChainWorkFact(
                 blockHash: n.hash,
@@ -99,9 +98,9 @@ final class ReplayProjectionDeferralTests: XCTestCase {
 
         // Incremental reference: genesis restore, then every batch applied live
         // with per-event projection (the pre-existing behavior for live sync).
-        let incremental = try await ChainState.restoreWithoutContext(replaying: [batches[0]])
+        var incremental = try ChainTree.restoreWithoutContext(replaying: [batches[0]])
         for batch in batches.dropFirst() {
-            _ = try await incremental.applyStaged(batch)
+            _ = try incremental.applyStaged(batch)
         }
 
         // Replayed: the full batch set through restore, projection deferred.
@@ -111,50 +110,43 @@ final class ReplayProjectionDeferralTests: XCTestCase {
         // reference above covers the natural order. (Deliberately not
         // shuffled(): a random permutation would turn any order-dependence
         // bug into an unreproducible flake.)
-        let restored = try await ChainState.restoreWithoutContext(
+        let restored = try ChainTree.restoreWithoutContext(
             replaying: Array(batches.reversed())
         )
 
         // Consensus state must be identical — tip, membership, and the whole
         // by-height index.
-        let incrementalTip = await incremental.canonicalTip
-        let restoredTip = await restored.canonicalTip
+        let incrementalTip = incremental.canonicalTip
+        let restoredTip = restored.canonicalTip
         XCTAssertEqual(restoredTip, incrementalTip)
-        let incrementalMain = await incremental.canonicalHashes
-        let restoredMain = await restored.canonicalHashes
+        let incrementalMain = incremental.canonicalHashes
+        let restoredMain = restored.canonicalHashes
         XCTAssertEqual(restoredMain, incrementalMain)
-        let height = await restored.getHighestBlockHeight()
+        let height = restored.getHighestBlockHeight()
         XCTAssertEqual(height, 30)
         XCTAssertNotEqual(root.hash, restoredTip)
         for h in 0...30 {
-            let a = await incremental.canonicalBlockHash(atHeight: UInt64(h))
-            let b = await restored.canonicalBlockHash(atHeight: UInt64(h))
+            let a = incremental.canonicalBlockHash(atHeight: UInt64(h))
+            let b = restored.canonicalBlockHash(atHeight: UInt64(h))
             XCTAssertNotNil(a, "height \(h) must be indexed")
             XCTAssertEqual(a, b, "height \(h) diverged between replay and incremental")
         }
 
         // The cost contract: replay computed the full projection exactly once,
         // regardless of graph bushiness or batch count.
-        let projections = await restored.fullCanonicalProjectionCount
+        let projections = restored.fullCanonicalProjectionCount
         XCTAssertEqual(projections, 1, "restore-replay must project exactly once")
     }
 
-    func testReevaluationIsFreeWhenNoFactChangedAndStillPromotesAfterMutation() async throws {
+    func testWeightMutationAfterRestorePromotes() async throws {
         let (batches, _) = Self.bushyBatches()
-        let chain = try await ChainState.restoreWithoutContext(replaying: batches)
+        var chain = try ChainTree.restoreWithoutContext(replaying: batches)
 
-        // A duplicate delivery that added nothing must not pay a projection.
-        await chain.resetFullCanonicalProjectionCount()
-        let unchanged = await chain.reevaluateForkChoice()
-        XCTAssertNil(unchanged, "no mutation since last projection ⇒ no promotion possible")
-        let free = await chain.fullCanonicalProjectionCount
-        XCTAssertEqual(free, 0, "provably-current re-evaluation must not project")
-
-        // A real weight mutation must still re-evaluate and be able to promote:
-        // outweigh the height-30 canonical tip via the height-30 side fork's
-        // ancestor at height 27 (side-27 exists; give it decisive work).
+        // A weight mutation after restore must still promote: outweigh the
+        // height-30 canonical tip via the height-30 side fork's ancestor at
+        // height 27 (side-27 exists; give it decisive work).
         let sideTip = testCID("replay-defer:side-27")
-        _ = try await chain.applyStaged(BlockImportBatch(facts: [
+        _ = try chain.applyStaged(BlockImportBatch(facts: [
             .work(ChainWorkFact(
                 blockHash: sideTip,
                 contribution: VerifiedWorkContribution(
@@ -163,13 +155,7 @@ final class ReplayProjectionDeferralTests: XCTestCase {
                 )
             )),
         ]))
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, sideTip, "a decisive weight mutation must still promote")
-        // And immediately after that projection, re-evaluation is free again.
-        await chain.resetFullCanonicalProjectionCount()
-        let settled = await chain.reevaluateForkChoice()
-        XCTAssertNil(settled)
-        let settledCount = await chain.fullCanonicalProjectionCount
-        XCTAssertEqual(settledCount, 0)
     }
 }

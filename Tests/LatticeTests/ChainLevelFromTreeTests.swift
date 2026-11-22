@@ -5,8 +5,8 @@ import UInt256
 @testable import LatticeBlockTree
 @testable import LatticeImport
 
-/// `ChainLevel(tree:)` hands a host job its own level: independent of the
-/// source, and at a cost that does not grow with the chain's history.
+/// A tree a host holds as a value: serving a directory it already serves
+/// leaves the tree untouched.
 final class ChainLevelFromTreeTests: XCTestCase {
     private static func batch(_ height: UInt64, tag: String = "") -> BlockImportBatch {
         let name = "\(tag)\(height)"
@@ -22,8 +22,7 @@ final class ChainLevelFromTreeTests: XCTestCase {
                 specCID: testCID("level-copy:spec"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: hash,
@@ -41,19 +40,6 @@ final class ChainLevelFromTreeTests: XCTestCase {
         )
     }
 
-    /// A level takes over the tree it is given: the caller hands its one
-    /// reference over, and the level mutates it in place. (A tree still held
-    /// elsewhere must not be mutated — the runtime owns one live tree — which
-    /// traps in DEBUG.)
-    func testALevelMutatesTheTreeItWasHanded() async throws {
-        let level = try XCTUnwrap(ChainLevel(tree: try Self.tree(blocks: 10)))
-
-        _ = try await level.chain.applyStaged(Self.batch(10))
-
-        let height = await level.chain.getHighestBlockHeight()
-        XCTAssertEqual(height, 10)
-    }
-
     /// Serving a directory already served is a no-op and writes nothing:
     /// with a second holder of the tree, a write would trap in DEBUG.
     func testServingAServedDirectoryAgainWritesNothing() throws {
@@ -62,29 +48,5 @@ final class ChainLevelFromTreeTests: XCTestCase {
         let held = tree
         tree.serveRuns(for: "kid")
         XCTAssertEqual(held.canonicalTip, tree.canonicalTip)
-    }
-
-    func testATreeWithoutContextHasNoLevel() throws {
-        XCTAssertNil(ChainLevel(tree: try ChainTree.restoreWithoutContext(
-            replaying: [Self.batch(0)]
-        )))
-    }
-
-    /// Ratio, not stopwatch: 100x the history must not cost ~100x per copy.
-    func testCopyCostDoesNotGrowWithHistory() async throws {
-        let small = try Self.tree(blocks: 20)
-        let large = try Self.tree(blocks: 2_000)
-        func cost(_ tree: ChainTree) async -> Double {
-            let start = DispatchTime.now().uptimeNanoseconds
-            for _ in 0..<2_000 {
-                let level = ChainLevel(tree: tree)!
-                _ = await level.chain.canonicalTip
-            }
-            return Double(DispatchTime.now().uptimeNanoseconds - start)
-        }
-        _ = await cost(small)
-        let smallCost = await cost(small)
-        let largeCost = await cost(large)
-        XCTAssertLessThan(largeCost / smallCost, 10, "copy cost grew with history")
     }
 }

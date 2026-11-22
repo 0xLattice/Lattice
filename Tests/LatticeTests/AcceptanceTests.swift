@@ -26,7 +26,7 @@ final class FullPipelineAcceptanceTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: 1_000_000, target: UInt256.max, fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let block1 = try await buildAndStoreBlock(
             previous: genesis, timestamp: 2_000_000,
@@ -36,12 +36,12 @@ final class FullPipelineAcceptanceTests: XCTestCase {
         XCTAssertNotNil(mined)
 
         let header = try! VolumeImpl<Block>(node: mined!)
-        let result = await chain.submitTestBlock(
+        let result = chain.submitTestBlock(
             blockHeader: header, block: mined!
         )
         XCTAssertTrue(result.extendsCanonical)
 
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, header.rawCID)
     }
 

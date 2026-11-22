@@ -404,7 +404,7 @@ sibling.
 
 ### 5.3 Child Chain Block Validation
 
-A child candidate `B` is imported with a `ChildValidationPackage` containing:
+A child candidate `B` is imported with:
 
 - a `ChildBlockProof` for the exact sparse directory path from the mined root to
   `B`;
@@ -931,13 +931,13 @@ timestamp and the present. Rules that a miner must not be able to shift, such
 as expiry, SHOULD key on height.
 
 A policy verdict therefore depends on the carrying block, not only on the
-transaction. Transaction preflight, which has no carrying block, evaluates
-policies against the block that would extend the current tip: height
-`tip + 1`, timestamp `max(tip.timestamp + 1, now)`. That verdict is advisory:
+transaction. A node's transaction preflight (mempool policy, not consensus),
+which has no carrying block, evaluates policies against the block that would
+extend the current tip: height `tip + 1`, timestamp `max(tip.timestamp + 1, now)`. That verdict is advisory:
 a block builder MUST re-evaluate policies at the exact height and timestamp of
 the block it assembles and omit transactions that fail, or it builds an invalid
-block. Preflight rejects a transaction that fails its policies (it is not held
-for later), so a transaction valid only from some height or time on, including
+block. A preflight that rejects a transaction failing its policies (not holding it
+for later) means a transaction valid only from some height or time on, including
 one returned to the pool by a reorg, must be resubmitted once it is valid.
 
 A policy SHOULD let height and timestamp only make a transaction valid, never
@@ -1224,19 +1224,19 @@ A current-level target miss is a proof-of-work failure at this level: it is
 not executed, inserted, or retained for this chain, and it returns no relay
 result — its grind reaches a descendant only inside the descendant's
 `ChildBlockProof`. A node may explicitly retain an exact child-link path as
-availability policy; Lattice does not enumerate an attacker-sized child index. Unresolved same-chain
-predecessors (absent or accepted-but-unconnected) are derived from the accepted
-graph, including after recovery, and must enter this same import boundary. A
-target miss never triggers predecessor backfill because connectivity cannot make
-that grind satisfy the current chain's target. A target-hit accepted, duplicate,
-or rejected candidate may expose the exact typed predecessor requirement so the
-node can complete ordinary chain import and issuer promotion. This does not
-claim a predecessor body is unavailable. Missing cross-chain input instead
+availability policy; Lattice does not enumerate an attacker-sized child index. A
+held block whose ancestry is not connected names its parent
+(`parentHash(of:)`, `hasConnectedAncestry`); which predecessors to fetch, and
+when, is the node's. A target miss never makes a predecessor worth fetching:
+connectivity cannot make that grind satisfy the current chain's target.
+Missing cross-chain input instead
 identifies the child proof or immediate-parent state-continuity fact that the
-node must obtain from an authenticated source. For a non-genesis candidate with predecessor `P`, continuity is
-reflexive when `P.parentState == B.parentState`; otherwise the immediate
-parent's connected accepted graph must contain a transitive same-chain state
-path from `P.parentState` to `B.parentState`. Parent canonicity is irrelevant.
+node must obtain from an authenticated source. For a non-genesis candidate with predecessor `P`, the immediate
+parent's executed set must have produced `B.parentState` at or below a block
+that produced `P.parentState` (§5.3 step 6). `P.parentState == B.parentState`
+is no exemption: the link must still show that the executed set produced
+`B.parentState`, since equality is never evidence. Parent canonicity is
+irrelevant.
 `parentState` is a state CID, not a parent-block lookup key. Consensus derives
 no relationship by inversion. A target-hit candidate can likewise be rejected
 by its local import rules while still proving real work for a descendant;
@@ -1344,15 +1344,14 @@ projections, archival, and garbage collection.
 
 ### 9.8 Persistence
 
-The node durably preserves every accepted block's consensus fields, every
-distinct location fact and strengthening observation, and a monotone mutation
-order. A crash may occur after durable staging and before in-memory mutation;
+The node durably preserves every accepted block's consensus fields and every
+distinct location fact and strengthening observation. A crash may occur after durable staging and before in-memory mutation;
 recovery therefore replays those already-authenticated facts idempotently through
 Lattice's graph and fork-choice reducer. The node does not reconstruct weights,
 ancestry, or canonical choice itself.
 
 Lattice exposes staged-fact replay as its recovery authority. A serialized
-`ChainState` projection is neither a public recovery input nor protocol truth;
+`ChainTree` projection is neither a public recovery input nor protocol truth;
 diagnostic projections, if retained by tests or tooling, cannot replace replay.
 
 Restoration rejects malformed facts, reconstructs exact measures, and
@@ -1656,12 +1655,12 @@ state); withdrawals return it.
 6. Equal-work same-chain child blocks prefer the lexicographically smaller
    canonical block CID; `nextTarget` is not a comparator
 7. Parent canonicity alone cannot change child validity, weight, or fork choice
-8. A non-genesis child keeps the same parent-state reference or moves
-   transitively forward through the immediate parent's connected accepted graph
+8. A non-genesis child's `parentState` was produced by the immediate parent's
+   executed set at or below a block that produced its predecessor's
+   `parentState` (§5.3 step 6); keeping the same reference is no exemption
 9. Lattice never prunes accepted graph or verified local-work facts
 10. There is no finality threshold; a strictly heavier effective subtree may reorg at any depth
-11. Every successful consensus mutation has a monotonically increasing revision
-12. One explicit validation-time context governs one import attempt
+11. One explicit validation-time context governs one import attempt
 
 ## 13. Constants
 

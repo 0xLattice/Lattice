@@ -149,7 +149,6 @@ final class StandardHeaderCIDTests: XCTestCase {
                     target: fact.target,
                     nextTarget: fact.nextTarget,
                     timestamp: fact.timestamp,
-                    stateDiff: fact.stateDiff,
                     childCommitments: children ?? fact.childCommitments
                 ))
             })
@@ -164,11 +163,11 @@ final class StandardHeaderCIDTests: XCTestCase {
         for batch in malformed {
             var tree = try ChainTree.restoreWithoutContext(replaying: [genesisBatch])
             XCTAssertThrowsError(try tree.apply(batch)) {
-                XCTAssertEqual($0 as? ChainStateRestoreError, .nonStandardLink)
+                XCTAssertEqual($0 as? ChainTreeRestoreError, .nonStandardLink)
             }
             XCTAssertFalse(tree.contains(blockHash: try BlockHeader(node: block).rawCID))
             XCTAssertThrowsError(try ChainTree.restoreWithoutContext(replaying: [genesisBatch, batch])) {
-                XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+                XCTAssertEqual($0 as? ChainTreeRestoreError, .corruptConsensusGraph)
             }
         }
         var tree = try ChainTree.restoreWithoutContext(replaying: [genesisBatch])

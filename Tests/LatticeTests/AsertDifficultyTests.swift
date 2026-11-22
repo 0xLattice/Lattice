@@ -462,7 +462,7 @@ final class AsertDifficultyTests: XCTestCase {
             spec: chainSpec, timestamp: 1_000,
             target: UInt256(1) << 240, fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         // A chain deep enough that a full descent is unmistakable.
         var previous = genesis
@@ -480,13 +480,13 @@ final class AsertDifficultyTests: XCTestCase {
         // -- exactly the shape sync produces.
         for block in blocks.dropLast(2) {
             let header = try VolumeImpl<Block>(node: block)
-            _ = await chain.submitTestBlock(blockHeader: header, block: block)
+            _ = chain.submitTestBlock(blockHeader: header, block: block)
         }
 
         let tip = blocks[blocks.count - 1]
         await fetcher.resetCount()
         let linked = try await tip.validateHeaderLinkage(
-            fetcher: fetcher, chain: chain, validationContext: .current
+            fetcher: fetcher, chain: TreeAnchors(tree: chain), validationContext: .current
         )
         let fetches = await fetcher.count()
 
@@ -568,7 +568,7 @@ final class AsertDifficultyTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: chainSpec, timestamp: 1_000, target: UInt256(1) << 240, fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var blocks: [Block] = []
         var previous = genesis
@@ -583,12 +583,12 @@ final class AsertDifficultyTests: XCTestCase {
 
         for block in blocks {
             let header = try VolumeImpl<Block>(node: block)
-            _ = await chain.submitTestBlock(blockHeader: header, block: block)
+            _ = chain.submitTestBlock(blockHeader: header, block: block)
         }
 
         for block in blocks {
             let hash = try VolumeImpl<Block>(node: block).rawCID
-            let carried = await chain.difficultyAnchor(forBlockHash: hash)
+            let carried = chain.difficultyAnchor(forBlockHash: hash)
             let walked = try await BlockBuilder.resolveDifficultyAnchor(
                 from: block, fetcher: fetcher
             )
@@ -611,7 +611,7 @@ final class AsertDifficultyTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: chainSpec, timestamp: 1_000, target: UInt256(1) << 240, fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
         var blocks: [Block] = []
         var previous = genesis
         for (i, gap) in [1_000, 300, 7_000, 1_000, 40].enumerated() {
@@ -623,10 +623,10 @@ final class AsertDifficultyTests: XCTestCase {
             previous = block
         }
         for block in blocks.reversed() {
-            _ = await chain.submitTestBlock(blockHeader: try VolumeImpl<Block>(node: block), block: block)
+            _ = chain.submitTestBlock(blockHeader: try VolumeImpl<Block>(node: block), block: block)
         }
 
-        let tree = await chain.tree
+        let tree = chain
         let shared = tree
         for block in blocks {
             let hash = try VolumeImpl<Block>(node: block).rawCID
@@ -692,7 +692,7 @@ final class UnlinkedAnchorTests: XCTestCase {
                 blockHash: blockCID(name), parentBlockHash: parent.map(blockCID), blockHeight: height,
                 postStateCID: testCID("unlinked:post:\(name)"), prevStateCID: testCID("unlinked:prev:\(name)"),
                 specCID: testCID("unlinked:spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(height), stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: blockCID(name),
@@ -725,5 +725,14 @@ final class UnlinkedAnchorTests: XCTestCase {
             XCTAssertEqual(tree.difficultyAnchor(forBlockHash: blockCID(name)), expected, name)
         }
         XCTAssertTrue(tree.graph[try XCTUnwrap(tree.graph.handle(blockCID("X")))].flags.contains(.unlinked))
+    }
+}
+
+/// A tree's difficulty anchors, as validation asks for them.
+private struct TreeAnchors: DifficultyAnchorSource {
+    let tree: ChainTree
+
+    func difficultyAnchor(forBlockHash hash: String) async -> DifficultyAnchor? {
+        tree.difficultyAnchor(forBlockHash: hash)
     }
 }

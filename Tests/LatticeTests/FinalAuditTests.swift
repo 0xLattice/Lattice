@@ -283,7 +283,7 @@ final class SelfishMiningTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         // Honest miner publishes 3 blocks immediately
         var honestPrev = genesis
@@ -294,13 +294,13 @@ final class SelfishMiningTests: XCTestCase {
                 target: UInt256(1000), nonce: UInt64(i), fetcher: fetcher
             )
             if honestBase == nil { honestBase = b }
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             honestPrev = b
         }
 
-        let honestTip = await chain.canonicalTip
+        let honestTip = chain.canonicalTip
         XCTAssertEqual(honestTip, try! VolumeImpl<Block>(node: honestPrev).rawCID)
 
         // Selfish miner withholds 3 blocks (same length), publishes all at once
@@ -317,7 +317,7 @@ final class SelfishMiningTests: XCTestCase {
 
         // Submit all withheld blocks
         for b in selfishBlocks {
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
         }
@@ -329,7 +329,7 @@ final class SelfishMiningTests: XCTestCase {
             selfishBaseHash,
             over: honestBaseHash
         )
-        let finalTip = await chain.canonicalTip
+        let finalTip = chain.canonicalTip
         XCTAssertEqual(finalTip, selfishWins ? selfishTip : honestTip)
     }
 
@@ -340,7 +340,7 @@ final class SelfishMiningTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         // Honest: 3 blocks
         var honestPrev = genesis
@@ -349,7 +349,7 @@ final class SelfishMiningTests: XCTestCase {
                 previous: honestPrev, timestamp: base + Int64(i) * 1000,
                 target: UInt256(1000), nonce: UInt64(i), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             honestPrev = b
@@ -362,13 +362,13 @@ final class SelfishMiningTests: XCTestCase {
                 previous: selfishPrev, timestamp: base + Int64(i) * 500,
                 target: UInt256(1000), nonce: UInt64(i + 300), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             selfishPrev = b
         }
 
-        let finalTip = await chain.canonicalTip
+        let finalTip = chain.canonicalTip
         XCTAssertEqual(finalTip, try! VolumeImpl<Block>(node: selfishPrev).rawCID, "Longer chain wins regardless of timing")
     }
 }

@@ -35,8 +35,6 @@
         true
       ],
       "name" : "valid",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreicy3mlwxyl5v7iolumzl76hvd2gjdprulovvpnd6l5ywqfltgrnkq valid diff",
       "rawCID" : "bafyreibdklvqpkmbjvbw4gcuuyn653uvhwv5b2hcmzr2fa2o6z7ewisnwa",
       "verifies" : [
@@ -78,8 +76,6 @@
         true
       ],
       "name" : "valid-two-signers",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreib6u7frqvvbuqb57kxx7jwxpm5ybkwj4stznhnpwgxbxcpdxhw43u throws cashew.CashewDecodingError",
       "rawCID" : "bafyreiem6tfrwn3hd7puoeaynmcqwhhzecs4iusrj5zbge5mjww7o7lglm",
       "verifies" : [
@@ -135,8 +131,6 @@
         true
       ],
       "name" : "valid-two-signers-unsorted",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreigcxcygsqwdeoxfthblbxl7vistrtt7vu7zwfuhql346irvy3zupi valid diff",
       "rawCID" : "bafyreifrejmzo564ikntwserk4vdds7knyqjmid7sjq7irimkbse4vurge",
       "verifies" : [
@@ -178,8 +172,6 @@
         true
       ],
       "name" : "signature-bit-flipped",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreihgreyancymdodboeo5e7aviqmfhbllwecttxskdco7beodskoeva invalid -",
       "rawCID" : "bafyreigtvgfehzj2jbexhlqkfgepe4nkngbtgfwlh34otsgavyzx45yw5y",
       "verifies" : [
@@ -211,8 +203,6 @@
         true
       ],
       "name" : "signature-uppercase",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreig7rl4owetyhepcv74mfir3f6mtr5tc5ufrqs426n4ctoncyhfsam throws cashew.CashewDecodingError",
       "rawCID" : "bafyreifhdvidqq7hc42tkokhf2yo7zsah63c7nk6w2j6pfk4jagyf43ibe",
       "verifies" : [
@@ -244,8 +234,6 @@
         true
       ],
       "name" : "signature-0x",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreieijfqyvbzx54r3y643ydxjjbvxcth57r7remqadg5uh2c37auo3i throws cashew.CashewDecodingError",
       "rawCID" : "bafyreidrzbtfqlqhegbopv6hjheix2m6f3t2yp27yl7eukozirkbe6thuy",
       "verifies" : [
@@ -286,8 +274,6 @@
         true
       ],
       "name" : "signature-0X",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreicgawtep6khldcepnjufncayjbby5vecg75w253k754os6tsm6y34 invalid -",
       "rawCID" : "bafyreieizbiabnp4xyctbnenj5lhizoo5bunr37raowmnf2jr4xahcdaqe",
       "verifies" : [
@@ -319,8 +305,6 @@
         true
       ],
       "name" : "signature-0x-uppercase",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreibs74jgojzupn26avha6dg5xrf777npsxiy4ap7p4iwwreo3b5nja throws cashew.CashewDecodingError",
       "rawCID" : "bafyreiabcip37pikcix452b2cobysadifpgnmivt6uuahl5z646ap7icea",
       "verifies" : [
@@ -352,8 +336,6 @@
         true
       ],
       "name" : "signature-plus-sign",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreiggwfoeq6mshg7z4xkimem5hvda275t54ythcv3aybgmdy3echdju throws cashew.CashewDecodingError",
       "rawCID" : "bafyreieu2m22litpmq2yyj5iagxjprk74xu6fe27jjoocppqqqk3rjrana",
       "verifies" : [
@@ -385,8 +367,6 @@
         true
       ],
       "name" : "signature-minus-zero",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreihluosbzhmizoze363i2en7q4umwkdwlrrcnfepexgm4nwq7iq5bu throws cashew.CashewDecodingError",
       "rawCID" : "bafyreietwga57oqu2ihbql6ihsbgwwi4f47qsaiwyjiayhp6soakqdqfku",
       "verifies" : [
@@ -427,8 +407,6 @@
         true
       ],
       "name" : "signature-odd-length",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreieuhxra2sc2dr4fz645wkrizhwsolmnxjjkjhqvsl36ov5pifqst4 invalid -",
       "rawCID" : "bafyreig7z23frit63ozhrwkqixnes4l3cpriqvmrjtpmspxtlsv43ygiuu",
       "verifies" : [
@@ -469,8 +447,6 @@
         true
       ],
       "name" : "signature-63-bytes",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreigivjprtw5yix52qeqliiupvdgr4kreuedznk3oo72h5zwia265le invalid -",
       "rawCID" : "bafyreiebcdt45kdr6ba4gsrmnwb77yri2td3ohocpwc4bv6ytzgzvab7xe",
       "verifies" : [
@@ -511,8 +487,6 @@
         true
       ],
       "name" : "signature-65-bytes",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreidap3mbmgric4zgsf73qqngswdbra7idfcbtsl4ex4rowkazp6fue invalid -",
       "rawCID" : "bafyreicwlbc73ufaqhbznekq26boisxefmbd5af42qr4762xvi7ssmok2y",
       "verifies" : [
@@ -553,8 +527,6 @@
         true
       ],
       "name" : "signature-empty",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreictt6xk6etghkpmukqfdi73o5pz6iuirvtx73ymkn57a3in4iccce invalid -",
       "rawCID" : "bafyreifeg2it32obbslpqfcsfv3t4digfzrwxrbx4g6qi4npedqpuksg2q",
       "verifies" : [
@@ -595,8 +567,6 @@
         true
       ],
       "name" : "signature-space",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreido6zuyczacggguue7tntep3g2m76yhyswty5uiomxygmi77xprqy invalid -",
       "rawCID" : "bafyreid5atctnmamkkicebkorbnkmvq2drojk2peats2h7vn7sypdkze7e",
       "verifies" : [
@@ -637,8 +607,6 @@
         true
       ],
       "name" : "signature-non-ascii",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreigfljhr7wiosy7h5z5u4wwyxrc2af4mly2qa4mlf7elm3a5ae34nm invalid -",
       "rawCID" : "bafyreih5akxqtddpi53splvwv2ryzbuqfrr2qvq24qxslkhrx755hhes7u",
       "verifies" : [
@@ -679,8 +647,6 @@
         true
       ],
       "name" : "signature-fullwidth-digit",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreihwzshqrctb6si2r2u4bvmwoodzeiwrdnztjexju25cyqzsre556i invalid -",
       "rawCID" : "bafyreibgbqgci2h5xstrdhui64zwn4lwqyxuocpyd2iuy2ltyyromflhha",
       "verifies" : [
@@ -721,8 +687,6 @@
         true
       ],
       "name" : "signature-crlf",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreictkytkjuy5icjdje4okeinojfwrvksw22qtmyepwixfv6ucftk7m invalid -",
       "rawCID" : "bafyreiajxucaw63hmchutzcmk25mg6vm6xabhuw6djkkmmz73qphwzgr6e",
       "verifies" : [
@@ -763,8 +727,6 @@
         true
       ],
       "name" : "signature-combining-mark",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreihfw7mhihg7amo2jakloj7qduhze6itsf2nmy3funz47hbkfcocbi invalid -",
       "rawCID" : "bafyreicngddzsqpvpk6tc64qmjqc7o4pjg6xuwooceoyivblxulhkthq7y",
       "verifies" : [
@@ -796,8 +758,6 @@
         true
       ],
       "name" : "key-uppercase",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreiclhqbd36ckbrf2grtb5wetbfoopin4ubbi7lvkwz3fdjq62tg5si throws cashew.CashewDecodingError",
       "rawCID" : "bafyreiedxstykqatpaqc2hfntpp6ccbykutfmmfehd7dqsspvl7w4ftdbe",
       "verifies" : [
@@ -829,8 +789,6 @@
         true
       ],
       "name" : "key-0x",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreighmlqwx64wwheuhdezarz5dozhnp2qjrs36tgkytfmhi2jvqetna throws cashew.CashewDecodingError",
       "rawCID" : "bafyreihlj32t2wrirtqzapkqznmakmigmyav36p3ofunt2t6elwvqck7oa",
       "verifies" : [
@@ -871,8 +829,6 @@
         true
       ],
       "name" : "key-0X",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreidtwwv34n25glo3vs5butwsonloyjvjkey32sztnredr3mrkz2mqu invalid -",
       "rawCID" : "bafyreihbui7mm2cuahpfixk7s25aho2uu6qsmt5lzkeirjdsd7qxsqjxl4",
       "verifies" : [
@@ -904,8 +860,6 @@
         true
       ],
       "name" : "key-non-minimal-varint",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreigiy4gd3newjsmrpve3h4un2havuj6w7zmtmom3vwwwkdmdc6gxza throws cashew.CashewDecodingError",
       "rawCID" : "bafyreif6elb5e57rsnp3hxog4pqmr6teygv7cc3nofdvauizccspofbc3y",
       "verifies" : [
@@ -946,8 +900,6 @@
         true
       ],
       "name" : "key-secp256k1-code",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreifa6n2qzopvu5jyjrr45snkyi4wgt4w63rntj6rvll2g5tundnjxy invalid -",
       "rawCID" : "bafyreidp4h34rtqyf76jchf5nxvmugkiv5pgifczpgwb27i5q5doindrci",
       "verifies" : [
@@ -988,8 +940,6 @@
         true
       ],
       "name" : "key-unregistered-code",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreicre4j2obaw54eyqpdia57xt3sb2sdh5kl7uu5ur5dh2phxwg7d7y invalid -",
       "rawCID" : "bafyreifemi5n7xbnxjfd5vmvbp5rbkj25fvxf2k3wozbpye5imar7v2ly4",
       "verifies" : [
@@ -1030,8 +980,6 @@
         true
       ],
       "name" : "key-bare-32-bytes",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreicmlk7i54imjnljoowhyqcpmwmkyfvh5sk3jmiknj3rn5bwifh2l4 invalid -",
       "rawCID" : "bafyreibbekm4wk24c2d2d5zgjmpug5hd6aryop2cleai3cknq7mhd6tfuu",
       "verifies" : [
@@ -1072,8 +1020,6 @@
         true
       ],
       "name" : "key-truncated",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreid5pjwmvqpqx4hpacsu2ozqmyjcv56m62s7wnjqedrqsefxsyzwja invalid -",
       "rawCID" : "bafyreigujed2fxwpudxibor2n3awm5zkczcovcchzev4ks24x6l6mt4puy",
       "verifies" : [
@@ -1114,8 +1060,6 @@
         true
       ],
       "name" : "key-extended",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreide3pfug4k2uxwtg53l3gvacdbb4aizpzkyetoqtdw4ritqbqgsvi invalid -",
       "rawCID" : "bafyreienv7v7vcddc5svy74dpg6tx35ibtks6rsqi33sdh5rs5x7tdr6em",
       "verifies" : [
@@ -1156,8 +1100,6 @@
         true
       ],
       "name" : "key-odd-length",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreibmwagofs7vf2bf453znctzk4kba5fpjvvwvfolarm3bdakrcdxji invalid -",
       "rawCID" : "bafyreideyd7smrscxddjofosxhh4fdu3i6shrfnlteek6lgmrmllujbhs4",
       "verifies" : [
@@ -1198,8 +1140,6 @@
         true
       ],
       "name" : "key-empty",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreihbbcjiorvkaqrqnyfp6myxygtglkd2x336mjlbnrd7u5ep4pg4xm invalid -",
       "rawCID" : "bafyreie4gdftyz6jixey7xhapnvrlopnhy4o2zapet7bd6eyrb4eein5xe",
       "verifies" : [
@@ -1240,8 +1180,6 @@
         true
       ],
       "name" : "key-non-hex",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreiaxa5vsiykpquve4vs7uzqpnvdulgsz4o7th5vi3z2tmrfbdrdpym invalid -",
       "rawCID" : "bafyreiafozbrhyu6vedpbkctw6sb4magn5ei6cuyqb5ecdglvqutzkvmma",
       "verifies" : [
@@ -1282,8 +1220,6 @@
         true
       ],
       "name" : "key-non-ascii",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreic2wtj2atfwsc3x2xf6z27rk6sjfypgda5ikoc44ef3jx4iwsednu invalid -",
       "rawCID" : "bafyreihz7ioqbnuirs55sudpvlws6flplsjzp5sgnp2brov7r4yhwwjgkq",
       "verifies" : [
@@ -1325,8 +1261,6 @@
         true
       ],
       "name" : "duplicate-key-spellings",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreiebmnaca322u5pttgpumcifq6zehmgqkr63ljedptwlst32vlowum throws cashew.CashewDecodingError",
       "rawCID" : "bafyreicbfsjygr33gmovtmaneyeigvyp4nkyawkx45obixhqld5m6puiv4",
       "verifies" : [
@@ -1365,8 +1299,6 @@
         true
       ],
       "name" : "duplicate-entry",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreidezd5kddbswti576hwyvbpujbgyw6klxrt3a6dhspmj2t7z3rdi4 throws cashew.CashewDecodingError",
       "rawCID" : "bafyreig2ccttypfq7f7q7phjcx36mdoww3nwepxejpygeqeio2m7cwotxy",
       "verifies" : [
@@ -1408,8 +1340,6 @@
         true
       ],
       "name" : "signed-by-the-wrong-key",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreicbj3wzi5mm4igj3xu6ou7cg5zwk37wveuquvhowfvgrno5zehcpy invalid -",
       "rawCID" : "bafyreicn2z2re2jyp5yakitb2zkmtyfrutcmo4pfb4peiew7yesz5ry6v4",
       "verifies" : [
@@ -1450,8 +1380,6 @@
         true
       ],
       "name" : "missing-a-declared-signer",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreigmsjjj7seffodoqp3vuvc4n3p6fbsqjqbkycxzgguei4jcfso4ta invalid -",
       "rawCID" : "bafyreielnv6pxwh73alhb3ov3ga3ntsqh6cmayeiys2vmpmwfzavsiw5ue",
       "verifies" : [
@@ -1493,8 +1421,6 @@
         true
       ],
       "name" : "an-undeclared-signer",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreicm44hdzmdwn3h5ru3gav7pq6oexrr7nhs3lmnokj5u5aqq6noqyu throws cashew.CashewDecodingError",
       "rawCID" : "bafyreiasucpzehneow4sr2zspz66jyjrfnmoid4ttm3siaj4uqvfyrnm2u",
       "verifies" : [
@@ -1527,8 +1453,6 @@
 
       ],
       "name" : "no-signatures",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreiea4zcbzhsfzieg2c5p4qrhguz7ty4mxgbmhdcvlnshenwiwfusv4 invalid -",
       "rawCID" : "bafyreicig7cs37dbrxmh4cx24dugfmj6pse5gyvffre2boyozsgq2ri7yq",
       "verifies" : [
@@ -1569,8 +1493,6 @@
         true
       ],
       "name" : "signature-over-another-body",
-      "preflight" : "invalid",
-      "preflightWithoutPolicies" : "invalid",
       "rawBlock" : "bafyreicmiwascop3ylip67l4db2cvw7utee5nv63nsimtr6iqvcu7yxmoq invalid -",
       "rawCID" : "bafyreicxaddvdacsmyjrd2xpwnsmq4t45fbmfawasrdz323izawlp6mfla",
       "verifies" : [
@@ -1602,8 +1524,6 @@
         true
       ],
       "name" : "key-plus-sign",
-      "preflight" : "ready",
-      "preflightWithoutPolicies" : "ready",
       "rawBlock" : "bafyreidtzo4vrpftwpykg4pjn5573b3e6jwgmq23wp5ud45z5aqtvyl5ii throws cashew.CashewDecodingError",
       "rawCID" : "bafyreifu2akaj5tq4yznhmp2ltngyndmxxhoeqrkc3arrlixtcwh5tnxda",
       "verifies" : [

@@ -277,78 +277,6 @@ final class BlockContentResolverTests: XCTestCase {
         XCTAssertNil(try prevState.node?.accountState.node?.get(key: "alice"))
     }
 
-    func testStoreBlockContentStoresWhatTheBlockCarriesAndReadsNoState() async throws {
-        let source = StorableFetcher()
-        let genesisResult = try await BlockBuilder.buildGenesisWithTransition(
-            spec: testSpec(directory: "Nexus"),
-            timestamp: 1,
-            target: UInt256.max,
-            fetcher: source
-        )
-        let genesis = try await storeBuiltBlock(genesisResult, in: source)
-        let body = TransactionBody(
-            accountActions: [],
-            actions: [],
-            depositActions: [],
-            receiptActions: [],
-            withdrawalActions: [],
-            signers: ["alice"],
-            nonce: 0,
-            chainPath: ["Nexus"]
-        )
-        let transaction = Transaction(
-            signatures: ["alice": "sig"],
-            body: try HeaderImpl(node: body)
-        )
-        let child = try await buildAndStoreGenesis(
-            spec: testSpec(directory: "Child"),
-            timestamp: 1,
-            target: UInt256.max,
-            fetcher: source
-        )
-        let block = try await buildAndStoreBlock(
-            previous: genesis,
-            transactions: [transaction],
-            children: ["Child": child],
-            timestamp: 2,
-            target: UInt256.max,
-            nonce: 0,
-            fetcher: source
-        )
-        let header = try VolumeImpl<Block>(node: block)
-        try await header.storeBlock(fetcher: source, storer: source)
-        let content = StorableFetcher()
-        let read = RecordingFetcher(source)
-
-        try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: read, storer: content)
-
-        let roots = content.volumeRoots()
-        XCTAssertTrue(roots.contains(header.rawCID))
-        XCTAssertTrue(roots.contains(block.spec.rawCID))
-        XCTAssertTrue(roots.contains(try VolumeImpl<Transaction>(node: transaction).rawCID))
-        XCTAssertTrue(content.contains(rawCid: block.children.rawCID))
-        XCTAssertFalse(content.contains(rawCid: block.prevState.rawCID))
-        XCTAssertFalse(content.contains(rawCid: block.postState.rawCID))
-        XCTAssertFalse(content.contains(rawCid: try XCTUnwrap(block.parent).rawCID))
-        XCTAssertFalse(roots.contains(try VolumeImpl<Block>(node: child).rawCID))
-        // Everything it read, it stored: no state root is among them.
-        XCTAssertTrue(read.requested.isSubset(of: Set(content.entries.keys)))
-        for state in [block.prevState.rawCID, block.parentState.rawCID, block.postState.rawCID] {
-            XCTAssertFalse(read.requested.contains(state))
-        }
-        // The same walk over that alone stores the same, where `storeBlock`
-        // asks for the pre-state, which it lacks.
-        let copy = StorableFetcher()
-        try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlockContent(fetcher: content, storer: copy)
-        XCTAssertEqual(copy.entries, content.entries)
-        let validating = RecordingFetcher(content)
-        do {
-            try await VolumeImpl<Block>(rawCID: header.rawCID).storeBlock(fetcher: validating, storer: StorableFetcher())
-            XCTFail("storeBlock read no pre-state")
-        } catch {}
-        XCTAssertTrue(validating.requested.contains(block.prevState.rawCID))
-    }
-
     func testStoreBlockIncludesPrevStateRootWithoutTransactions() async throws {
         let source = StorableFetcher()
         let destination = StorableFetcher()
@@ -588,11 +516,11 @@ final class BlockContentResolverTests: XCTestCase {
             } catch {
                 XCTAssertEqual(error as? BlockContentSizeError, thrown)
             }
-            XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(
-                ChainLevel.classifyValidationFailureForTesting(thrown)
+            XCTAssertFalse(BlockImport.isDeterministicInvalidity(
+                classifyValidationFailure(thrown)
             ))
-            XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(
-                ChainLevel.classifyResolutionFailureForTesting(thrown)
+            XCTAssertFalse(BlockImport.isDeterministicInvalidity(
+                classifyResolutionFailure(thrown)
             ))
         }
     }
@@ -685,20 +613,4 @@ private func stateContentTransaction(payloadBytes: Int) -> Transaction {
         chainPath: ["Nexus"]
     )
     return Transaction(signatures: [:], body: try! HeaderImpl(node: body))
-}
-
-/// Answers from `fetcher`, remembering every CID asked of it.
-private final class RecordingFetcher: Fetcher, @unchecked Sendable {
-    private let fetcher: any Fetcher
-    private let lock = NSLock()
-    private var asked: Set<String> = []
-
-    init(_ fetcher: any Fetcher) { self.fetcher = fetcher }
-
-    var requested: Set<String> { lock.withLock { asked } }
-
-    func fetch(rawCid: String) async throws -> Data {
-        lock.withLock { _ = asked.insert(rawCid) }
-        return try await fetcher.fetch(rawCid: rawCid)
-    }
 }

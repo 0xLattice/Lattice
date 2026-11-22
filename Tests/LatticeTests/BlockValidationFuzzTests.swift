@@ -200,14 +200,14 @@ final class ForkChoiceFuzzTests: XCTestCase {
             let mainHashes = Set((1..<chainLength).map { blockCID("main_\($0)") } + [blockCID("G")])
             let chain = makeChain(blocks: blocks, canonicalHashes: mainHashes)
 
-            let canonicalTip = await chain.canonicalTip
-            let tipOnMain = await chain.isCanonical(hash: canonicalTip)
+            let canonicalTip = chain.canonicalTip
+            let tipOnMain = chain.isCanonical(hash: canonicalTip)
             XCTAssertTrue(tipOnMain, "Chain tip must be on main chain")
 
-            let tipBlock = await chain.getConsensusBlock(hash: canonicalTip)
+            let tipBlock = chain.getConsensusBlock(hash: canonicalTip)
             XCTAssertNotNil(tipBlock, "Chain tip must exist in block map")
 
-            let genesisOnMain = await chain.isCanonical(hash: blockCID("G"))
+            let genesisOnMain = chain.isCanonical(hash: blockCID("G"))
             XCTAssertTrue(genesisOnMain, "Genesis must always be on main chain")
         }
     }
@@ -237,20 +237,20 @@ final class ForkChoiceFuzzTests: XCTestCase {
             }
 
             let mainHashes = Set([blockCID("G")] + (1...mainLen).map { blockCID("M\($0)") })
-            let chain = makeChain(blocks: blocks, canonicalHashes: mainHashes)
+            var chain = makeChain(blocks: blocks, canonicalHashes: mainHashes)
             let forkTipHash = blockCID("F\(forkLen)")
 
-            let reorg = await chain.reevaluateForkChoice()
+            let reorg = chain.projectCanonicalChain()
 
             XCTAssertNotNil(reorg, "Longer fork should trigger reorg")
 
-            let newTip = await chain.canonicalTip
+            let newTip = chain.canonicalTip
             XCTAssertEqual(newTip, forkTipHash)
 
             var current = newTip
             var depth = 0
             while current != blockCID("G") {
-                let block = await chain.getConsensusBlock(hash: current)
+                let block = chain.getConsensusBlock(hash: current)
                 XCTAssertNotNil(block, "Block \(current) missing from chain")
                 guard let prevHash = block?.parentBlockHash else {
                     XCTFail("Block \(current) has no previous hash but is not genesis")

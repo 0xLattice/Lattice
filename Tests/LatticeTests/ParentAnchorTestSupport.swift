@@ -108,7 +108,7 @@ struct AnchorModel {
             blockHash: block.hash, parentBlockHash: block.parent, blockHeight: block.height,
             postStateCID: block.post, prevStateCID: block.prev, specCID: AnchorCIDPool.spec,
             target: UInt256.max.toHexString(), nextTarget: UInt256.max.toHexString(),
-            timestamp: Int64(block.height), stateDiff: .empty
+            timestamp: Int64(block.height)
         )
     }
 

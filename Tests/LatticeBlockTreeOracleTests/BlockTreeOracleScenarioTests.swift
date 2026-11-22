@@ -79,7 +79,7 @@ final class BlockTreeOracleScenarioTests: XCTestCase {
                 edit(&block, shape)
                 let outcome = live.apply(OracleBatch(facts: [
                     .block(block), .work(blockHash: block.hash, grindID: oracleCID("grind-\(block.hash)"), work: 5),
-                ]), reserved: false)
+                ]))
                 XCTAssertEqual(outcome.rendered, "throw:nonStandardLink", "\(field) \(shape)")
             }
         }
@@ -101,14 +101,14 @@ final class BlockTreeOracleScenarioTests: XCTestCase {
             block.hash = oracleCID(digest: oracleDigest(canonicalHash), codec: codec)
             let outcome = live.apply(OracleBatch(facts: [
                 .block(block), .work(blockHash: block.hash, grindID: grind, work: 5),
-            ]), reserved: false)
+            ]))
             XCTAssertTrue(outcome.threw, "block hash \(block.hash): \(outcome.rendered)")
         }
         block.hash = canonicalHash
         let twinGrind = oracleCID(digest: oracleDigest(grind), codec: 0x55)
         let outcome = live.apply(OracleBatch(facts: [
             .block(block), .work(blockHash: block.hash, grindID: twinGrind, work: 5),
-        ]), reserved: false)
+        ]))
         XCTAssertTrue(outcome.threw, "grind \(twinGrind): \(outcome.rendered)")
         XCTAssertEqual(live.observeTip()["tip"], genesis.hash)
     }
@@ -354,8 +354,8 @@ private struct Script {
         for (index, step) in steps.enumerated() {
             switch step {
             case .apply(let batch):
-                let outcome = live.apply(batch, reserved: false)
-                let expected = reference.apply(batch, reserved: false)
+                let outcome = live.apply(batch)
+                let expected = reference.apply(batch)
                 guard outcome == expected else {
                     return XCTFail("\(name) step \(index): \(outcome.rendered) vs \(expected.rendered)", file: file, line: line)
                 }

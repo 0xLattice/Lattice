@@ -45,7 +45,6 @@ struct AdmissionDecisionGolden: Codable, Equatable {
         let excluded: Bool
         let materializedPostState: Bool
         let commitTip: String?
-        let commitRevision: UInt64?
         let commitAdded: [String]
         let commitRemoved: [String]
         /// The applied batches, in order.
@@ -81,7 +80,6 @@ struct AdmissionDecisionGolden: Codable, Equatable {
                 ("excluded", "\(step.excluded)", "\(other.excluded)"),
                 ("materializedPostState", "\(step.materializedPostState)", "\(other.materializedPostState)"),
                 ("commitTip", step.commitTip ?? "nil", other.commitTip ?? "nil"),
-                ("commitRevision", step.commitRevision.map(String.init) ?? "nil", other.commitRevision.map(String.init) ?? "nil"),
                 ("commitAdded", "\(step.commitAdded)", "\(other.commitAdded)"),
                 ("commitRemoved", "\(step.commitRemoved)", "\(other.commitRemoved)"),
                 ("batches", "\(step.batches)", "\(other.batches)"),
@@ -140,7 +138,7 @@ private struct AdmissionFixtures {
     let bodyless = StorableFetcher()
     private(set) var names: [String: String] = [:]
     private(set) var blocks: [String: Block] = [:]
-    private(set) var packages: [String: ChildValidationPackage] = [:]
+    private(set) var packages: [String: TestChildPackage] = [:]
 
     static func fixedKey(_ seed: Data) throws -> (privateKey: String, publicKey: String, address: String) {
         let key = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
@@ -263,7 +261,7 @@ private struct AdmissionFixtures {
             childDirectory: childDirectory,
             fetcher: fixtures.fetcher
         )
-        fixtures.packages["childCandidate"] = ChildValidationPackage(proof: proof)
+        fixtures.packages["childCandidate"] = TestChildPackage(proof: proof)
 
         // Roots of the child chain, each weighed by a carrier's proof: the
         // genesis, a rival genesis, and one block under the rival.
@@ -294,7 +292,7 @@ private struct AdmissionFixtures {
                     spec: spec, children: [childDirectory: block],
                     timestamp: 3_000, target: easy, nonce: 20 + UInt64(index), fetcher: fixtures.fetcher
                 ))
-            fixtures.packages[name] = ChildValidationPackage(proof: try await ChildBlockProof.generate(
+            fixtures.packages[name] = TestChildPackage(proof: try await ChildBlockProof.generate(
                 rootHeader: try BlockHeader(node: rootCarrier),
                 childDirectory: childDirectory,
                 fetcher: fixtures.fetcher
@@ -319,7 +317,7 @@ private struct AdmissionFixtures {
         guard missCarrier.proofOfWorkHash() > hardTarget else {
             throw AdmissionFixtureError.carrierHitsTheHardTarget
         }
-        fixtures.packages["missedChild"] = ChildValidationPackage(proof: try await ChildBlockProof.generate(
+        fixtures.packages["missedChild"] = TestChildPackage(proof: try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: missCarrier),
             childDirectory: childDirectory,
             fetcher: fixtures.fetcher
@@ -383,7 +381,6 @@ private struct AdmissionFixtures {
         case .localVerificationFailure: return ("localVerificationFailure", nil, nil)
         case .notYetValid: return ("notYetAdmissible", nil, nil)
         case .notAcceptedAtCurrentChain: return ("notAcceptedAtCurrentChain", nil, nil)
-        case .revisionExhausted: return ("revisionExhausted", nil, nil)
         case .executedVerdictContradiction: return ("executedVerdictContradiction", nil, nil)
         case .proofOfWorkInvalid: return ("proofOfWorkInvalid", nil, nil)
         case .crossChainEvidenceRequired(let requirement):
@@ -584,7 +581,6 @@ final class AdmissionDecisionGoldenTests: XCTestCase {
                 excluded: result.update?.excluded ?? false,
                 materializedPostState: result.update?.materializedPostState != nil,
                 commitTip: commit.map { fixtures.name($0.tipHash) },
-                commitRevision: commit?.revision,
                 commitAdded: commit.map { $0.canonicalBlocksAdded.keys.map(fixtures.name).sorted() } ?? [],
                 commitRemoved: commit.map { $0.canonicalBlocksRemoved.map(fixtures.name).sorted() } ?? [],
                 batches: (result.update?.batches ?? []).map { $0.facts.map { fact($0, fixtures) } },

@@ -745,7 +745,7 @@ final class ReorgBalanceTests: XCTestCase {
         let premine = spec.premineAmount()
 
         let genesis = try await premineGenesis(spec: spec, owner: alice, fetcher: fetcher, time: base)
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         // Main chain: alice sends 100 to bob
         let mainBody = TransactionBody(
@@ -763,11 +763,11 @@ final class ReorgBalanceTests: XCTestCase {
         )
         let mainValid = try await mainBlock1.validateNexus(fetcher: fetcher).0
         XCTAssertTrue(mainValid)
-        let _ = await chain.submitTestBlock(
+        let _ = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: mainBlock1), block: mainBlock1
         )
 
-        let mainTip = await chain.canonicalTip
+        let mainTip = chain.canonicalTip
         XCTAssertEqual(mainTip, try! VolumeImpl<Block>(node: mainBlock1).rawCID)
 
         // Fork: 3 empty blocks from genesis (longer chain, triggers reorg)
@@ -777,20 +777,20 @@ final class ReorgBalanceTests: XCTestCase {
                 previous: forkPrev, timestamp: base + Int64(i) * 1000,
                 target: UInt256(1000), nonce: UInt64(i + 100), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             forkPrev = b
         }
 
-        let newTip = await chain.canonicalTip
+        let newTip = chain.canonicalTip
         XCTAssertEqual(newTip, try! VolumeImpl<Block>(node: forkPrev).rawCID)
         XCTAssertNotEqual(newTip, mainTip, "Reorg should have switched main chain")
 
         // After reorg: the transfer block is no longer on main chain
         // The fork has empty blocks — no account actions
         // State on main chain should reflect only genesis + empty blocks
-        let height = await chain.getHighestBlockHeight()
+        let height = chain.getHighestBlockHeight()
         XCTAssertEqual(height, 3)
     }
 }
@@ -1100,20 +1100,22 @@ final class StateGrowthAttackTests: XCTestCase {
 }
 
 // ============================================================================
-// MARK: - MEDIUM: Concurrent Block Processing
+// MARK: - MEDIUM: Competing Block Processing
 // ============================================================================
 
 @MainActor
-final class ConcurrentBlockTests: XCTestCase {
+final class CompetingBlockTests: XCTestCase {
 
-    func testConcurrentBlockSubmission() async throws {
+    /// Ten competing siblings of genesis, in shuffled arrival order: the tree
+    /// settles on exactly one tip at height 1.
+    func testCompetingBlockSubmission() async throws {
         let fetcher = f()
         let base = now() - 100_000
         let spec = s(premine: 0)
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         // Build 10 competing blocks from genesis
         var blocks: [Block] = []
@@ -1125,22 +1127,21 @@ final class ConcurrentBlockTests: XCTestCase {
             blocks.append(b)
         }
 
-        // Submit all concurrently
-        await withTaskGroup(of: Void.self) { group in
-            for block in blocks {
-                group.addTask {
-                    let _ = await chain.submitTestBlock(
-                        blockHeader: try! VolumeImpl<Block>(node: block), block: block
-                    )
-                }
-            }
+        var rng = SeededRNG(seed: 0xC0C0)
+        for block in blocks.shuffled(using: &rng) {
+            let _ = chain.submitTestBlock(
+                blockHeader: try! VolumeImpl<Block>(node: block), block: block
+            )
         }
 
         // Chain should be consistent: exactly one tip at height 1
-        let height = await chain.getHighestBlockHeight()
+        let height = chain.getHighestBlockHeight()
         XCTAssertEqual(height, 1)
-        let tip = await chain.canonicalTip
-        XCTAssertNotNil(tip)
+        let tip = chain.canonicalTip
+        XCTAssertTrue(
+            try blocks.map { try VolumeImpl<Block>(node: $0).rawCID }.contains(tip),
+            "the tip is one of the competing siblings"
+        )
     }
 }
 

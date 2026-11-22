@@ -137,24 +137,16 @@ final class ParentStateAttestationTierTests: XCTestCase {
         let forged = forgedSibling(of: honest, declaring: forgedState, nonce: 7)
         _ = try await storeBuiltBlock(forged, in: fetcher)
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-        let admitted = try await level.importBlock(
-            try BlockHeader(node: forged),
-            fetcher: fetcher,
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            mode: .header,
-            stage: testAdmissionStage
-        )
-        guard case .accepted = admitted else {
+        var chain = try AdmissionFixture.makeChain(genesis: genesis)
+        let admitted = try await chain.admit(forged, mode: .header, fetcher: fetcher)
+        guard let update = admitted.update, !update.excluded else {
             return XCTFail("weighed admission accepts a declared post-state; got \(admitted)")
         }
 
         // The anchor a child chain would hold: the honest sibling's prevState.
         let anchor = honest.prevState.rawCID
-        let chain = await level.chain
 
-        let attested = await chain.hasStateContinuity(
+        let attested = chain.executedSetAdvanced(
             from: anchor,
             to: forgedState.rawCID
         )
@@ -203,18 +195,13 @@ final class ParentStateAttestationTierTests: XCTestCase {
             "the block must change state or continuity short-circuits"
         )
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-        let header = try BlockHeader(node: block)
+        var chain = try AdmissionFixture.makeChain(genesis: genesis)
 
-        let weighed = try await level.importBlock(
-            header, fetcher: fetcher,
-            validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-            mode: .header, stage: testAdmissionStage
-        )
-        guard case .accepted = weighed else {
+        let weighed = try await chain.admit(block, mode: .header, fetcher: fetcher)
+        guard let update = weighed.update, !update.excluded else {
             return XCTFail("weighed admission must accept, got \(weighed)")
         }
-        let beforeValidation = await level.chain.hasStateContinuity(
+        let beforeValidation = chain.executedSetAdvanced(
             from: block.prevState.rawCID, to: block.postState.rawCID
         )
         XCTAssertFalse(
@@ -223,15 +210,12 @@ final class ParentStateAttestationTierTests: XCTestCase {
         )
 
         // Executing it must promote the block, not throw.
-        let validated = try await level.importBlock(
-            header, fetcher: fetcher,
-            validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-            mode: .execution, stage: testAdmissionStage
-        )
-        if case .rejected(let failure, _) = validated {
+        let validated = try await chain.admit(block, mode: .execution, fetcher: fetcher)
+        if let failure = validated.failure {
             return XCTFail("validate tier must not reject an honest block: \(failure)")
         }
-        let afterValidation = await level.chain.hasStateContinuity(
+        XCTAssertEqual(validated.update?.excluded, false, "an honest block is not proven invalid")
+        let afterValidation = chain.executedSetAdvanced(
             from: block.prevState.rawCID, to: block.postState.rawCID
         )
         XCTAssertTrue(
@@ -257,7 +241,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("legacy-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: nonce, stateDiff: .empty
+                timestamp: nonce
             )),
             .work(ChainWorkFact(
                 blockHash: block,
@@ -280,23 +264,23 @@ final class ParentStateAttestationTierTests: XCTestCase {
         let genesis = testCID("legacy-genesis")
         let one = testCID("legacy-one")
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        let chain = try ChainTree.restoreWithoutContext(replaying: [
             legacyBatch(genesis, parent: nil, height: 0, from: empty, to: s1, nonce: 1),
             legacyBatch(one, parent: genesis, height: 1, from: s1, to: s2, nonce: 2),
         ])
-        let genesisAttestable = await chain.hasStateContinuity(from: empty, to: s1)
+        let genesisAttestable = chain.executedSetAdvanced(from: empty, to: s1)
         XCTAssertFalse(genesisAttestable, "an unexecuted root is not attestable")
-        let replayedBlockAttestable = await chain.hasStateContinuity(from: s1, to: s2)
+        let replayedBlockAttestable = chain.executedSetAdvanced(from: s1, to: s2)
         XCTAssertFalse(replayedBlockAttestable)
 
-        let validated = try await ChainState.restoreWithoutContext(replaying: [
+        let validated = try ChainTree.restoreWithoutContext(replaying: [
             legacyBatch(genesis, parent: nil, height: 0, from: empty, to: s1, nonce: 1),
             legacyBatch(one, parent: genesis, height: 1, from: s1, to: s2, nonce: 2),
             .validation(blockHash: genesis),
         ])
-        let executedGenesisAttestable = await validated.hasStateContinuity(from: empty, to: s1)
+        let executedGenesisAttestable = validated.executedSetAdvanced(from: empty, to: s1)
         XCTAssertTrue(executedGenesisAttestable, "its validation fact executes the root")
-        let stillUnverified = await validated.hasStateContinuity(from: s1, to: s2)
+        let stillUnverified = validated.executedSetAdvanced(from: s1, to: s2)
         XCTAssertFalse(stillUnverified)
     }
 
@@ -327,7 +311,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                     specCID: testCID("cascade-spec"),
                     target: UInt256.max.toHexString(),
                     nextTarget: UInt256.max.toHexString(),
-                    timestamp: n, stateDiff: .empty
+                    timestamp: n
                 )),
                 .work(ChainWorkFact(
                     blockHash: block,
@@ -344,13 +328,13 @@ final class ParentStateAttestationTierTests: XCTestCase {
 
         // Block 2 is executed on arrival; block 1 is possessed but NOT executed
         // yet, so block 2 cannot be anchored through it.
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             facts(g, parent: nil, height: 0, from: empty, to: sg, n: 1, executed: true),
             facts(one, parent: g, height: 1, from: sg, to: s1, n: 2, executed: false),
             facts(two, parent: one, height: 2, from: s1, to: s2, n: 3, executed: true),
         ])
 
-        let beforeAncestor = await chain.hasStateContinuity(from: empty, to: s2)
+        let beforeAncestor = chain.executedSetAdvanced(from: empty, to: s2)
         XCTAssertFalse(
             beforeAncestor,
             "a descendant must not anchor while an ancestor is still unexecuted"
@@ -358,11 +342,11 @@ final class ParentStateAttestationTierTests: XCTestCase {
 
         // Executing the missing ancestor must carry the frontier past it and
         // pick up the descendant that was executed earlier.
-        _ = try await chain.applyStaged(BlockImportBatch(facts: [
+        _ = try chain.applyStaged(BlockImportBatch(facts: [
             .validation(ChainValidationFact(blockHash: one)),
         ]))
 
-        let afterAncestor = await chain.hasStateContinuity(from: empty, to: s2)
+        let afterAncestor = chain.executedSetAdvanced(from: empty, to: s2)
         XCTAssertTrue(
             afterAncestor,
             """
@@ -384,7 +368,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("excl-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: n, stateDiff: .empty
+                timestamp: n
             )),
             .work(ChainWorkFact(
                 blockHash: block,
@@ -424,19 +408,19 @@ final class ParentStateAttestationTierTests: XCTestCase {
             .exclusion(ChainExclusionFact(blockHash: one)),
         ])
 
-        let live = try await ChainState.restoreWithoutContext(replaying: history)
-        _ = try await live.applyStaged(exclusion)
+        var live = try ChainTree.restoreWithoutContext(replaying: history)
+        _ = try live.applyStaged(exclusion)
         // Excluding block 1 keeps its executed descendant out of the frontier.
-        let liveOne = await live.hasStateContinuity(from: empty, to: s1)
-        let liveTwo = await live.hasStateContinuity(from: empty, to: s2)
+        let liveOne = live.executedSetAdvanced(from: empty, to: s1)
+        let liveTwo = live.executedSetAdvanced(from: empty, to: s2)
         XCTAssertFalse(liveOne, "a proven-invalid block's state must not be attestable")
         XCTAssertFalse(liveTwo, "a descendant of a proven-invalid block must not be attestable either")
 
         // The same log restored wholesale must agree: the frontier is built by
         // different code on that path.
-        let restored = try await ChainState.restoreWithoutContext(replaying: history + [exclusion])
-        let restoredOne = await restored.hasStateContinuity(from: empty, to: s1)
-        let restoredTwo = await restored.hasStateContinuity(from: empty, to: s2)
+        let restored = try ChainTree.restoreWithoutContext(replaying: history + [exclusion])
+        let restoredOne = restored.executedSetAdvanced(from: empty, to: s1)
+        let restoredTwo = restored.executedSetAdvanced(from: empty, to: s2)
         XCTAssertEqual(liveOne, restoredOne, "live and restored must agree")
         XCTAssertEqual(liveTwo, restoredTwo, "live and restored must agree")
 
@@ -445,11 +429,11 @@ final class ParentStateAttestationTierTests: XCTestCase {
             .exclusion(ChainExclusionFact(blockHash: two)),
         ])
         do {
-            _ = try await live.applyStaged(executedExclusion)
+            _ = try live.applyStaged(executedExclusion)
             XCTFail("an executed block cannot be excluded")
         } catch {}
         do {
-            _ = try await ChainState.restoreWithoutContext(replaying: history + [executedExclusion])
+            _ = try ChainTree.restoreWithoutContext(replaying: history + [executedExclusion])
             XCTFail("a durable contradiction does not restore")
         } catch {}
     }
@@ -472,7 +456,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("naming-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: 1, stateDiff: .empty
+                timestamp: 1
             )),
             .work(ChainWorkFact(
                 blockHash: g,
@@ -484,7 +468,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
         ])
 
         do {
-            _ = try await ChainState.restoreWithoutContext(replaying: [crossNamed])
+            _ = try ChainTree.restoreWithoutContext(replaying: [crossNamed])
             XCTFail("a validation naming another block must not be admitted")
         } catch {
             // Refused, as a malformed batch.
@@ -503,7 +487,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("reorg-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: n, stateDiff: .empty
+                timestamp: n
             )),
             .work(ChainWorkFact(
                 blockHash: block,
@@ -536,27 +520,27 @@ final class ParentStateAttestationTierTests: XCTestCase {
         let sc = testCID("reorg-state-c")
 
         // `a` is canonical and executed; a child anchors at the state it made.
-        let chain = try await ChainState.restoreWithoutContext(replaying: [
+        var chain = try ChainTree.restoreWithoutContext(replaying: [
             weightedBatch(g, parent: nil, height: 0, from: empty, to: sg, n: 1, work: 1),
             weightedBatch(a, parent: g, height: 1, from: sg, to: sa, n: 2, work: 1),
         ])
-        let beforeReorg = await chain.hasStateContinuity(from: empty, to: sa)
+        let beforeReorg = chain.executedSetAdvanced(from: empty, to: sa)
         XCTAssertTrue(beforeReorg, "the fixture must be attestable before the reorg")
-        let tipBefore = await chain.canonicalTip
+        let tipBefore = chain.canonicalTip
         XCTAssertEqual(tipBefore, a)
 
         // A heavier sibling branch takes the tip. `a` is now off-canonical —
         // but nothing about it was disproven.
-        _ = try await chain.applyStaged(
+        _ = try chain.applyStaged(
             weightedBatch(b, parent: g, height: 1, from: sg, to: sb, n: 3, work: 8)
         )
-        _ = try await chain.applyStaged(
+        _ = try chain.applyStaged(
             weightedBatch(c, parent: b, height: 2, from: sb, to: sc, n: 4, work: 8)
         )
-        let tipAfter = await chain.canonicalTip
+        let tipAfter = chain.canonicalTip
         XCTAssertEqual(tipAfter, c, "the heavier branch must take the tip")
 
-        let afterReorg = await chain.hasStateContinuity(from: empty, to: sa)
+        let afterReorg = chain.executedSetAdvanced(from: empty, to: sa)
         XCTAssertTrue(
             afterReorg,
             """
@@ -594,7 +578,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
 
         func carriedBlock(
             previous: Block, timestamp: Int64, nonce: UInt64
-        ) async throws -> (Block, ChildValidationPackage) {
+        ) async throws -> (Block, TestChildPackage) {
             let block = try await buildAndStoreBlock(
                 previous: previous, parentChainBlock: shell,
                 timestamp: timestamp, target: easy, nonce: nonce, fetcher: fetcher
@@ -609,28 +593,24 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 childDirectory: "Child",
                 fetcher: fetcher
             )
-            return (block, try await childValidationPackage(
-                proof: proof, fetcher: fetcher
-            ))
+            return (block, TestChildPackage(proof: proof))
         }
 
         let (blockOne, packageOne) = try await carriedBlock(
             previous: childGenesis, timestamp: 2_000, nonce: 4
         )
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        var level = try ChainTree.fromGenesis(
+            block: childGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: spec()
         )
 
         // Weighed admission does not run the parent-fact checks, so block 1's
         // forged `parentState` is possessed but unproven. That is by design.
-        let weighed = try await level.importBlock(
-            try BlockHeader(node: blockOne),
-            fetcher: fetcher, childPackage: packageOne,
-            validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-            mode: .header, stage: testAdmissionStage
+        let weighed = try await level.admit(
+            blockOne, mode: .header, fetcher: fetcher, child: packageOne
         )
-        guard case .accepted = weighed else {
+        guard let update = weighed.update, !update.excluded else {
             return XCTFail("weighed admission possesses without proving, got \(weighed)")
         }
 
@@ -644,13 +624,8 @@ final class ParentStateAttestationTierTests: XCTestCase {
             "the fixture must exercise the equality branch"
         )
 
-        let outcome = try await level.importBlock(
-            try BlockHeader(node: blockTwo),
-            fetcher: fetcher, childPackage: packageTwo,
-            validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-            mode: .execution, stage: testAdmissionStage
-        )
-        guard case .rejected(let failure, _) = outcome else {
+        let outcome = try await level.admit(blockTwo, fetcher: fetcher, child: packageTwo)
+        guard case .rejected(let failure) = outcome else {
             return XCTFail(
                 """
                 A block inherited its anchor from an UNVERIFIED predecessor. \
@@ -676,7 +651,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
     func testBlockOneAnchorsIndependentlyOfChainHeight() async throws {
         let empty = LatticeState.emptyHeader.rawCID
 
-        func chain(ofHeight height: Int) async throws -> (ChainState, String) {
+        func chain(ofHeight height: Int) throws -> (ChainTree, String) {
             var batches: [BlockImportBatch] = []
             var prev = empty
             var parent: String?
@@ -691,7 +666,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                         prevStateCID: prev, specCID: testCID("depth-spec"),
                         target: UInt256.max.toHexString(),
                         nextTarget: UInt256.max.toHexString(),
-                        timestamp: Int64(i + 1), stateDiff: .empty
+                        timestamp: Int64(i + 1)
                     )),
                     .work(ChainWorkFact(
                         blockHash: block,
@@ -703,27 +678,16 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 ]))
                 parent = block; prev = post; last = post
             }
-            return (try await ChainState.restoreWithoutContext(replaying: batches), last)
+            return (try ChainTree.restoreWithoutContext(replaying: batches), last)
         }
 
         for height in [8, 512] {
-            let (parentChain, tip) = try await chain(ofHeight: height)
-            let anchors = await parentChain.hasStateContinuity(from: empty, to: tip)
+            let (parentChain, tip) = try chain(ofHeight: height)
+            let anchors = parentChain.executedSetAdvanced(from: empty, to: tip)
             XCTAssertTrue(
                 anchors,
                 "a child must anchor block 1 against a parent of height \(height)"
             )
-#if DEBUG
-            // The direct proof that height cannot matter: answering from the
-            // frontier visits NO blocks, so the cost is the same at height 8 as
-            // at 8,000,000. Asserting this beats asserting a large height,
-            // which would only show the cost had not yet become intolerable.
-            let visits = await parentChain.stateContinuityBlockVisitCount
-            XCTAssertEqual(
-                visits, 0,
-                "anchoring block 1 must not walk the parent chain (height \(height))"
-            )
-#endif
         }
     }
 
@@ -747,7 +711,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                     prevStateCID: prev, specCID: testCID("mix-spec"),
                     target: UInt256.max.toHexString(),
                     nextTarget: UInt256.max.toHexString(),
-                    timestamp: Int64(i + 1), stateDiff: .empty
+                    timestamp: Int64(i + 1)
                 )),
                 .work(ChainWorkFact(
                     blockHash: block,
@@ -764,10 +728,10 @@ final class ParentStateAttestationTierTests: XCTestCase {
             batches.append(BlockImportBatch(facts: facts))
             parent = block; prev = post
         }
-        let parentChain = try await ChainState.restoreWithoutContext(replaying: batches)
+        let parentChain = try ChainTree.restoreWithoutContext(replaying: batches)
         XCTAssertFalse(declaredOnly.isEmpty, "fixture must contain a weighed-only block")
 
-        let anchors = await parentChain.hasStateContinuity(from: empty, to: declaredOnly)
+        let anchors = parentChain.executedSetAdvanced(from: empty, to: declaredOnly)
         XCTAssertFalse(
             anchors,
             "a declared post-state must stay unanchorable however deep the chain"
@@ -846,26 +810,20 @@ final class ParentStateAttestationTierTests: XCTestCase {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        let level = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        var level = try ChainTree.fromGenesis(
+            block: childGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: spec()
         )
 
-        let outcome = try await level.importBlock(
-            try BlockHeader(node: blockOne),
-            fetcher: fetcher,
-            childPackage: try await childValidationPackage(
-                proof: proof, fetcher: fetcher
-            ),
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: testAdmissionStage
+        let outcome = try await level.admit(
+            blockOne, fetcher: fetcher, child: TestChildPackage(proof: proof)
         )
 
         // Block 1 must be made to prove its anchor. Demanding the continuity
         // evidence is retriable and correct; silently accepting an unanchored
         // parentState is not.
-        guard case .rejected(let failure, _) = outcome else {
+        guard case .rejected(let failure) = outcome else {
             return XCTFail(
                 """
                 Block 1 was admitted with a parentState anchored to nothing but \
@@ -924,20 +882,13 @@ final class ParentStateAttestationTierTests: XCTestCase {
             "must exercise the walk, not the identity short-circuit"
         )
 
-        let level = ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-        let admitted = try await level.importBlock(
-            try BlockHeader(node: executed),
-            fetcher: fetcher,
-            validationContentStorer: fetcher,
-            materializedVolumeStorer: fetcher,
-            stage: testAdmissionStage
-        )
-        guard case .accepted = admitted else {
+        var chain = try AdmissionFixture.makeChain(genesis: genesis)
+        let admitted = try await chain.admit(executed, fetcher: fetcher)
+        guard let update = admitted.update, !update.excluded else {
             return XCTFail("eager admission must accept, got \(admitted)")
         }
 
-        let chain = await level.chain
-        let attested = await chain.hasStateContinuity(
+        let attested = chain.executedSetAdvanced(
             from: executed.prevState.rawCID,
             to: executed.postState.rawCID
         )

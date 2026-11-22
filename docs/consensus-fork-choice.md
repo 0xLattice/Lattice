@@ -101,9 +101,7 @@ one identity at different blocks in the same chain is invalid and is rejected
 atomically.
 
 Snapshots join monotonically. New unique facts and stronger quantities at the
-same location may be added; facts cannot be retracted or moved. Revision is a
-progress watermark, so an older or equal revision may still carry a previously
-unseen monotonic fact.
+same location may be added; facts cannot be retracted or moved.
 
 ## GHOST
 

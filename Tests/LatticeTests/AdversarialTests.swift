@@ -645,7 +645,7 @@ final class ConsensusResilienceTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: s, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var shortPrev = genesis
         for i in 1...3 {
@@ -653,12 +653,12 @@ final class ConsensusResilienceTests: XCTestCase {
                 previous: shortPrev, timestamp: base + Int64(i) * 1000,
                 target: UInt256(1000), nonce: UInt64(i), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             shortPrev = b
         }
-        let shortTip = await chain.canonicalTip
+        let shortTip = chain.canonicalTip
 
         var longPrev = genesis
         for i in 1...5 {
@@ -666,12 +666,12 @@ final class ConsensusResilienceTests: XCTestCase {
                 previous: longPrev, timestamp: base + Int64(i) * 500,
                 target: UInt256(1000), nonce: UInt64(i + 100), fetcher: fetcher
             )
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             longPrev = b
         }
-        let longTip = await chain.canonicalTip
+        let longTip = chain.canonicalTip
 
         XCTAssertNotEqual(shortTip, longTip)
         XCTAssertEqual(longTip, try! VolumeImpl<Block>(node: longPrev).rawCID)
@@ -694,14 +694,14 @@ final class ConsensusResilienceTests: XCTestCase {
             target: UInt256(1000), nonce: 2, fetcher: fetcher
         )
 
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
-        let result2 = await chain.submitTestBlock(
+        let result2 = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block2), block: block2
         )
         XCTAssertFalse(result2.extendsCanonical, "Block 2 submitted before block 1 should not extend")
 
-        let result1 = await chain.submitTestBlock(
+        let result1 = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block1), block: block1
         )
         XCTAssertTrue(result1.extendsCanonical)
@@ -714,24 +714,24 @@ final class ConsensusResilienceTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: s, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let block1 = try await buildAndStoreBlock(
             previous: genesis, timestamp: base + 1000,
             target: UInt256(1000), nonce: 1, fetcher: fetcher
         )
 
-        let result1 = await chain.submitTestBlock(
+        let result1 = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block1), block: block1
         )
         XCTAssertTrue(result1.extendsCanonical)
 
-        let result2 = await chain.submitTestBlock(
+        let result2 = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block1), block: block1
         )
         XCTAssertFalse(result2.extendsCanonical, "Duplicate should not extend")
 
-        let height = await chain.getHighestBlockHeight()
+        let height = chain.getHighestBlockHeight()
         XCTAssertEqual(height, 1)
     }
 

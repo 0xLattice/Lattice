@@ -47,8 +47,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 specCID: testCID("projection-delta:spec:\(n.name)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(n.height),
-                stateDiff: .empty
+                timestamp: Int64(n.height)
             )),
             .work(ChainWorkFact(
                 blockHash: n.hash,
@@ -70,14 +69,14 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         workCells: UInt64,
         truncations: UInt64,
         tip: String,
-        chain: ChainState
+        chain: ChainTree
     ) {
         let root = node("root", parent: nil, height: 0, work: 4)
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
-        let blocksBefore = await chain.canonicalProjectionBlockVisitCount
-        let segmentsBefore = await chain.canonicalProjectionSegmentVisitCount
-        let cellsBefore = await chain.segmentWorkUpdateCellCount
-        let truncationsBefore = await chain.truncatedCanonicalProjectionCount
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
+        let blocksBefore = chain.canonicalProjectionBlockVisitCount
+        let segmentsBefore = chain.canonicalProjectionSegmentVisitCount
+        let cellsBefore = chain.segmentWorkUpdateCellCount
+        let truncationsBefore = chain.truncatedCanonicalProjectionCount
         var previous = root
         for height in 1...length {
             let side = node(
@@ -86,20 +85,20 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(height),
                 work: 1
             )
-            _ = try await chain.applyStaged(admission(side))
+            _ = try chain.applyStaged(admission(side))
             let canonical = node(
                 "main-\(height)",
                 parent: previous.hash,
                 height: UInt64(height),
                 work: 4
             )
-            _ = try await chain.applyStaged(admission(canonical))
+            _ = try chain.applyStaged(admission(canonical))
             previous = canonical
         }
-        let blocksAfter = await chain.canonicalProjectionBlockVisitCount
-        let segmentsAfter = await chain.canonicalProjectionSegmentVisitCount
-        let cellsAfter = await chain.segmentWorkUpdateCellCount
-        let truncationsAfter = await chain.truncatedCanonicalProjectionCount
+        let blocksAfter = chain.canonicalProjectionBlockVisitCount
+        let segmentsAfter = chain.canonicalProjectionSegmentVisitCount
+        let cellsAfter = chain.segmentWorkUpdateCellCount
+        let truncationsAfter = chain.truncatedCanonicalProjectionCount
         return (
             blocksAfter - blocksBefore,
             segmentsAfter - segmentsBefore,
@@ -119,13 +118,13 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
             let run = try await syncMergedMiningChild(length: length)
             // Cost-only: the projected consensus state must still equal the
             // independent slow walk over the same graph.
-            let blocks = await run.chain.hashToBlock
+            let blocks = run.chain.hashToBlock
             let reference = try XCTUnwrap(
                 ForkChoiceOracle(blocks: blocks, excluded: []).view().canonicalProjection(),
                 "length \(length)"
             )
-            let tip = await run.chain.canonicalTip
-            let mainChain = await run.chain.canonicalHashes
+            let tip = run.chain.canonicalTip
+            let mainChain = run.chain.canonicalHashes
             XCTAssertEqual(tip, run.tip, "length \(length): tip")
             XCTAssertEqual(tip, reference.tip, "length \(length): reference tip")
             XCTAssertEqual(
@@ -224,7 +223,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
     func testDeepLosingSiblingMaterializesNothing() async throws {
         let length = 400
         let root = node("deep-root", parent: nil, height: 0, work: 4)
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
         var canonical = [root]
         var previous = root
         for height in 1...length {
@@ -234,13 +233,13 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(height),
                 work: 4
             )
-            _ = try await chain.applyStaged(admission(block))
+            _ = try chain.applyStaged(admission(block))
             canonical.append(block)
             previous = block
         }
 
-        let blocksBefore = await chain.canonicalProjectionBlockVisitCount
-        let segmentsBefore = await chain.canonicalProjectionSegmentVisitCount
+        let blocksBefore = chain.canonicalProjectionBlockVisitCount
+        let segmentsBefore = chain.canonicalProjectionSegmentVisitCount
         var siblings = 0
         for height in stride(from: 1, through: length - 1, by: 8) {
             let sibling = node(
@@ -249,13 +248,13 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(height),
                 work: 1
             )
-            _ = try await chain.applyStaged(admission(sibling))
+            _ = try chain.applyStaged(admission(sibling))
             siblings += 1
         }
-        let blocks = await chain.canonicalProjectionBlockVisitCount - blocksBefore
-        let segments = await chain.canonicalProjectionSegmentVisitCount
+        let blocks = chain.canonicalProjectionBlockVisitCount - blocksBefore
+        let segments = chain.canonicalProjectionSegmentVisitCount
             - segmentsBefore
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
 
         XCTAssertGreaterThan(siblings, 40, "the shape must cover real depth")
         XCTAssertEqual(tip, previous.hash, "a losing sibling must not move the tip")
@@ -294,7 +293,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         )
 
         let root = node("budget-root", parent: nil, height: 0, work: 4)
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
         var canonical = [root]
         var previous = root
         for height in 1...length {
@@ -304,7 +303,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(height),
                 work: 4
             )
-            _ = try await chain.applyStaged(admission(block))
+            _ = try chain.applyStaged(admission(block))
             canonical.append(block)
             previous = block
         }
@@ -320,18 +319,18 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(forkHeight + step),
                 work: 1
             )
-            _ = try await chain.applyStaged(admission(block))
+            _ = try chain.applyStaged(admission(block))
             branchTip = block
         }
-        let tipAfterBranch = await chain.canonicalTip
+        let tipAfterBranch = chain.canonicalTip
         XCTAssertEqual(
             tipAfterBranch,
             previous.hash,
             "the losing branch must not take the canonical path"
         )
 
-        let blocksBefore = await chain.canonicalProjectionBlockVisitCount
-        let segmentsBefore = await chain.canonicalProjectionSegmentVisitCount
+        let blocksBefore = chain.canonicalProjectionBlockVisitCount
+        let segmentsBefore = chain.canonicalProjectionSegmentVisitCount
         // One more block at the END of that branch: its ancestor line meets the
         // canonical path branchLength + 1 steps down, far past any budget.
         let deep = node(
@@ -340,12 +339,12 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
             height: UInt64(forkHeight + branchLength + 1),
             work: 1
         )
-        _ = try await chain.applyStaged(admission(deep))
-        let blocks = await chain.canonicalProjectionBlockVisitCount - blocksBefore
-        let segments = await chain.canonicalProjectionSegmentVisitCount
+        _ = try chain.applyStaged(admission(deep))
+        let blocks = chain.canonicalProjectionBlockVisitCount - blocksBefore
+        let segments = chain.canonicalProjectionSegmentVisitCount
             - segmentsBefore
 
-        let finalTip = await chain.canonicalTip
+        let finalTip = chain.canonicalTip
         XCTAssertEqual(
             finalTip,
             previous.hash,
@@ -374,7 +373,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
     /// the quotient one base per block: the merged-mining shape, and the only
     /// one on which these costs can be measured at all.
     private func forkedHistory(
-        _ chain: ChainState,
+        _ chain: inout ChainTree,
         prefix: String,
         length: Int,
         from root: Node
@@ -388,14 +387,14 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(height),
                 work: 1
             )
-            _ = try await chain.applyStaged(admission(sibling))
+            _ = try chain.applyStaged(admission(sibling))
             let block = node(
                 "\(prefix)-main-\(height)",
                 parent: previous.hash,
                 height: UInt64(height),
                 work: 4
             )
-            _ = try await chain.applyStaged(admission(block))
+            _ = try chain.applyStaged(admission(block))
             blocks.append(block)
             previous = block
         }
@@ -417,9 +416,9 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         let componentDepth = 4
         for history in [200, 800] {
             let root = node("graft-\(history)-root", parent: nil, height: 0, work: 4)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
+            var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
             let main = try await forkedHistory(
-                chain, prefix: "graft-\(history)", length: history, from: root
+                &chain, prefix: "graft-\(history)", length: history, from: root
             )
 
             // A component hanging off a block near the TIP, delivered
@@ -445,13 +444,13 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 parentHash = block.hash
             }
             for block in component.dropFirst().reversed() {
-                _ = try await chain.applyStaged(admission(block))
+                _ = try chain.applyStaged(admission(block))
             }
 
-            let before = await chain.segmentWorkUpdateCellCount
+            let before = chain.segmentWorkUpdateCellCount
             // The connecting block grafts the whole component at once.
-            _ = try await chain.applyStaged(admission(component[0]))
-            let after = await chain.segmentWorkUpdateCellCount
+            _ = try chain.applyStaged(admission(component[0]))
+            let after = chain.segmentWorkUpdateCellCount
             cells[history] = after - before
         }
 
@@ -471,12 +470,12 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         var cells: [Int: UInt64] = [:]
         for length in [200, 800] {
             let root = node("win-\(length)-root", parent: nil, height: 0, work: 4)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
+            var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
             let main = try await forkedHistory(
-                chain, prefix: "win-\(length)", length: length, from: root
+                &chain, prefix: "win-\(length)", length: length, from: root
             )
 
-            let before = await chain.segmentWorkUpdateCellCount
+            let before = chain.segmentWorkUpdateCellCount
             // Attached near the TIP, and heavy enough to outweigh the canonical
             // remainder above it, so the chain genuinely reorganizes onto it.
             //
@@ -491,11 +490,11 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: UInt64(length - 2),
                 work: UInt64(length) * 16
             )
-            _ = try await chain.applyStaged(admission(winner))
-            let after = await chain.segmentWorkUpdateCellCount
+            _ = try chain.applyStaged(admission(winner))
+            let after = chain.segmentWorkUpdateCellCount
             cells[length] = after - before
 
-            let tip = await chain.canonicalTip
+            let tip = chain.canonicalTip
             XCTAssertEqual(tip, winner.hash, "length \(length): the reorg must happen")
         }
 
@@ -515,9 +514,9 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         var cells: [Int: UInt64] = [:]
         for length in [200, 800] {
             let root = node("excl-\(length)-root", parent: nil, height: 0, work: 4)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
+            var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
             let main = try await forkedHistory(
-                chain, prefix: "excl-\(length)", length: length, from: root
+                &chain, prefix: "excl-\(length)", length: length, from: root
             )
             let doomed = node(
                 "excl-\(length)-doomed",
@@ -525,12 +524,12 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 height: 5,
                 work: 1
             )
-            _ = try await chain.applyStaged(admission(doomed))
-            _ = try? await chain.applyStaged(BlockImportBatch(facts: [
+            _ = try chain.applyStaged(admission(doomed))
+            _ = try? chain.applyStaged(BlockImportBatch(facts: [
                 .exclusion(ChainExclusionFact(blockHash: doomed.hash)),
             ]))
 
-            let before = await chain.segmentWorkUpdateCellCount
+            let before = chain.segmentWorkUpdateCellCount
             var previous = main[length]
             for step in 1...8 {
                 let block = node(
@@ -539,10 +538,10 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                     height: UInt64(length + step),
                     work: 4
                 )
-                _ = try await chain.applyStaged(admission(block))
+                _ = try chain.applyStaged(admission(block))
                 previous = block
             }
-            let after = await chain.segmentWorkUpdateCellCount
+            let after = chain.segmentWorkUpdateCellCount
             cells[length] = after - before
         }
 
@@ -564,12 +563,12 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         let root = node("dup-root", parent: nil, height: 0, work: 4)
         let a = node("dup-a", parent: root.hash, height: 1, work: 4)
         let b = node("dup-b", parent: root.hash, height: 1, work: 1)
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(root)])
-        _ = try await chain.applyStaged(admission(a))
-        _ = try await chain.applyStaged(admission(b))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(root)])
+        _ = try chain.applyStaged(admission(a))
+        _ = try chain.applyStaged(admission(b))
 
         let shared = testCID("projection-delta:shared-grind")
-        let first = try await chain.applyStaged(BlockImportBatch(facts: [
+        let first = try chain.applyStaged(BlockImportBatch(facts: [
             .work(ChainWorkFact(
                 blockHash: a.hash,
                 contribution: VerifiedWorkContribution(id: shared, work: UInt256(9))
@@ -580,7 +579,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
         // The same identity, stronger, at a different block: if this were
         // admitted the same work would be counted in two subtrees at once.
         do {
-            _ = try await chain.applyStaged(BlockImportBatch(facts: [
+            _ = try chain.applyStaged(BlockImportBatch(facts: [
                 .work(ChainWorkFact(
                     blockHash: b.hash,
                     contribution: VerifiedWorkContribution(
@@ -594,12 +593,12 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
             // Refused, as it must be.
         }
 
-        let blocks = await chain.hashToBlock
+        let blocks = chain.hashToBlock
         let reference = try XCTUnwrap(
             ForkChoiceOracle(blocks: blocks, excluded: []).view().canonicalProjection()
         )
-        let tip = await chain.canonicalTip
-        let path = await chain.canonicalHashes
+        let tip = chain.canonicalTip
+        let path = chain.canonicalHashes
         XCTAssertEqual(tip, reference.tip)
         XCTAssertEqual(path, Set(reference.path))
         XCTAssertEqual(tip, a.hash, "the relocated work must not have moved the tip")

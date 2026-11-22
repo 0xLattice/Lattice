@@ -35,10 +35,10 @@ final class ConsensusForkChoiceBucketATests: XCTestCase {
     }
 
     func testStrictlyHeavierFullyAvailableBranchWins() async {
-        let chain = makeChain(blocks: forkDag(), canonicalHashes: forkMainSet)
-        _ = await chain.reevaluateForkChoice()
+        var chain = makeChain(blocks: forkDag(), canonicalHashes: forkMainSet)
+        _ = chain.projectCanonicalChain()
 
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("F5"))
     }
 
@@ -52,7 +52,7 @@ final class ConsensusForkChoiceBucketATests: XCTestCase {
             target: target,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
         let block = try await buildAndStoreBlock(
             previous: genesis,
             timestamp: base + 1_000,
@@ -62,13 +62,13 @@ final class ConsensusForkChoiceBucketATests: XCTestCase {
             fetcher: fetcher
         )
 
-        _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
+        _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
 
         // Two blocks at target 1 each carry workForTarget(1) = 2^255, so the
         // cumulative work is 2^256 — beyond a single UInt256 (exercises WorkSum's
         // wide accumulation). Track the formula rather than a hardcoded literal.
         let unit = workForTarget(target)
-        let cumulativeWork = await chain.getTipCumulativeWork()
+        let cumulativeWork = chain.getTipCumulativeWork()
         XCTAssertEqual(cumulativeWork, WorkSum(unit) + unit)
         XCTAssertGreaterThan(cumulativeWork, WorkSum(UInt256.max))
     }

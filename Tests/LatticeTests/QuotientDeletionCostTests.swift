@@ -43,8 +43,7 @@ final class QuotientDeletionCostTests: XCTestCase {
                 specCID: testCID("quotient-cost:spec:\(name)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: hash,
@@ -65,10 +64,10 @@ final class QuotientDeletionCostTests: XCTestCase {
 
         for length in [200, 800] {
             let root = admission("root-\(length)", parent: nil, height: 0, work: 4)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [root.batch])
+            var chain = try ChainTree.restoreWithoutContext(replaying: [root.batch])
 
-            let blocksBefore = await chain.canonicalProjectionBlockVisitCount
-            let stepsBefore = await chain.canonicalProjectionSegmentVisitCount
+            let blocksBefore = chain.canonicalProjectionBlockVisitCount
+            let stepsBefore = chain.canonicalProjectionSegmentVisitCount
             var previousHash = root.hash
             for height in 1...length {
                 let next = admission(
@@ -77,25 +76,25 @@ final class QuotientDeletionCostTests: XCTestCase {
                     height: UInt64(height),
                     work: 4
                 )
-                _ = try await chain.applyStaged(next.batch)
+                _ = try chain.applyStaged(next.batch)
                 previousHash = next.hash
             }
-            steadyBlocks[length] = await chain.canonicalProjectionBlockVisitCount
+            steadyBlocks[length] = chain.canonicalProjectionBlockVisitCount
                 - blocksBefore
-            steadySteps[length] = await chain.canonicalProjectionSegmentVisitCount
+            steadySteps[length] = chain.canonicalProjectionSegmentVisitCount
                 - stepsBefore
 
             // An exclusion rebuilds the fork-choice index and reprojects with
             // `forceFull`, so this is the whole-chain descent over a run that
             // used to be a single segment.
-            let blocksAtFull = await chain.canonicalProjectionBlockVisitCount
-            let stepsAtFull = await chain.canonicalProjectionSegmentVisitCount
-            _ = try? await chain.applyStaged(BlockImportBatch(facts: [
+            let blocksAtFull = chain.canonicalProjectionBlockVisitCount
+            let stepsAtFull = chain.canonicalProjectionSegmentVisitCount
+            _ = try? chain.applyStaged(BlockImportBatch(facts: [
                 .exclusion(ChainExclusionFact(blockHash: previousHash)),
             ]))
-            fullBlocks[length] = await chain.canonicalProjectionBlockVisitCount
+            fullBlocks[length] = chain.canonicalProjectionBlockVisitCount
                 - blocksAtFull
-            fullSteps[length] = await chain.canonicalProjectionSegmentVisitCount
+            fullSteps[length] = chain.canonicalProjectionSegmentVisitCount
                 - stepsAtFull
         }
 
@@ -109,8 +108,8 @@ final class QuotientDeletionCostTests: XCTestCase {
         var mergedFullSteps: [Int: UInt64] = [:]
         for length in [200, 800] {
             let root = admission("m-root-\(length)", parent: nil, height: 0, work: 4)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [root.batch])
-            let stepsBefore = await chain.canonicalProjectionSegmentVisitCount
+            var chain = try ChainTree.restoreWithoutContext(replaying: [root.batch])
+            let stepsBefore = chain.canonicalProjectionSegmentVisitCount
             var previousHash = root.hash
             for height in 1...length {
                 let side = admission(
@@ -119,24 +118,24 @@ final class QuotientDeletionCostTests: XCTestCase {
                     height: UInt64(height),
                     work: 1
                 )
-                _ = try await chain.applyStaged(side.batch)
+                _ = try chain.applyStaged(side.batch)
                 let next = admission(
                     "m-main-\(length)-\(height)",
                     parent: previousHash,
                     height: UInt64(height),
                     work: 4
                 )
-                _ = try await chain.applyStaged(next.batch)
+                _ = try chain.applyStaged(next.batch)
                 previousHash = next.hash
             }
-            mergedSteadySteps[length] = await chain
+            mergedSteadySteps[length] = chain
                 .canonicalProjectionSegmentVisitCount - stepsBefore
 
-            let stepsAtFull = await chain.canonicalProjectionSegmentVisitCount
-            _ = try? await chain.applyStaged(BlockImportBatch(facts: [
+            let stepsAtFull = chain.canonicalProjectionSegmentVisitCount
+            _ = try? chain.applyStaged(BlockImportBatch(facts: [
                 .exclusion(ChainExclusionFact(blockHash: previousHash)),
             ]))
-            mergedFullSteps[length] = await chain
+            mergedFullSteps[length] = chain
                 .canonicalProjectionSegmentVisitCount - stepsAtFull
         }
 

@@ -52,15 +52,10 @@ genesis carried by a valid proof is a competing root; the child process chooses
 among them with its own fork choice. Only the root chain pins one genesis: its
 configured CID, carried by its `ChainRuntimeContext`.
 
-Each process owns:
+Each process owns one `ChainTree`: its `ChainRuntimeContext` (absolute chain
+path), its accepted same-chain forest, and its canonical projection.
 
-```text
-ChainLevel
-|- ChainRuntimeContext  absolute chain path
-`- ChainState           accepted same-chain forest + canonical projection
-```
-
-`ChainLevel` contains no child runtimes. Lattice has no cross-chain
+A `ChainTree` contains no child runtimes. Lattice has no cross-chain
 reorganization call and no multi-chain fork-choice loop.
 
 ## Evidence Boundary
@@ -88,18 +83,19 @@ For a non-genesis child candidate `C` with predecessor `P`, Lattice therefore
 requires:
 
 ```text
-P.parentState == C.parentState
-or
-P.parentState -> ... -> C.parentState
-through connected accepted blocks in the immediate parent
+some block of the immediate parent's executed set produced C.parentState,
+and is or descends from a block that produced P.parentState
 ```
 
-This is reflexive, transitive state reachability—not direct adjacency. Without
-it, mined bytes could jump a child backward or sideways to a parent state that
-does not continue its prior dependency. The immediate-parent process answers
-the exact state-pair question from its accepted graph. A connected
-noncanonical branch is sufficient; canonicity cannot revoke the immutable
-fact. The node authenticates and may cache or relay the answer.
+This is forward movement through executed parent history—not direct
+adjacency, and not equality: `P.parentState == C.parentState` still requires
+that the executed set produced the state, since equality is never evidence
+(spec §5.3 step 6). Without it, mined bytes could jump a child backward or
+sideways to a parent state that does not continue its prior dependency, or
+carry along an unproven one. The immediate-parent process answers the exact
+state-pair question from its executed set. An executed noncanonical branch is
+sufficient; canonicity cannot revoke the immutable fact. The node authenticates
+and may cache or relay the answer.
 
 The state proof itself remains content-addressed rather than becoming another
 parent assertion. Receipt-state keys are fixed-depth, domain-separated hashes,
@@ -126,36 +122,25 @@ terminal child is accepted and connected. See
 
 ## Import And Recovery
 
-Every external candidate follows one boundary:
+Every external candidate follows one boundary, all of it on the `ChainTree`
+value:
 
 ```text
-acquire
-  -> verify
-  -> targeted store
-  -> atomically stage one immutable batch
-  -> apply that exact batch
-  -> project one chain
+insert header (weigh)
+  -> connect (execute, off the tree)
+  -> apply the connect's batch
 ```
 
-The node's single stage callback receives `BlockImportStagingContext`, so the
-consensus batch and its verified hierarchy links cross one atomic durability
-boundary. Returning means the whole context is durable; throwing means none of
-its facts became visible. An existing runtime reserves one
-commit revision before staging so another actor mutation cannot consume the last
-available revision while the batch is becoming durable.
-
-Live import does not reacquire or rebuild a candidate after staging. Recovery
-replays already-authenticated staged batches through the same reducer. Replaying
-an identical batch is a no-op; conflicting immutable metadata fails closed.
-Root and child bootstrap expose no runtime until the genesis batch has been
-stored, staged, and restored.
+Each step returns the immutable facts it adds (`ChainTreeUpdate.batches`). The
+node persists them, with whatever block content and state it keeps, in one
+transaction of its own; Lattice stores nothing. Recovery replays the persisted
+batches through the same reducer (`ChainTree.restore`). Replaying an identical
+batch is a no-op; conflicting immutable metadata fails closed.
 
 A target miss is a proof-of-work failure. It creates no local consensus
 fact, executes no local transition, and causes no implicit Lattice retention.
-When an explicit predecessor is not connected, duplicate and non-verdict
-rejected outcomes expose that exact typed backfill requirement so the node can
-retry. The node may retain an exact child path when its availability policy
-calls for it.
+A held block whose ancestry is not connected names its parent; fetching that
+parent, and retaining any exact child path, is node availability policy.
 
 ## Ownership
 
@@ -185,8 +170,9 @@ coverage. It does not prune consensus inputs according to a node storage budget.
 
 The node decides how long to retain block bodies, materialized state,
 `StateDiff` payloads, proof Volumes, and CAS pins. `StateDiff` is local
-lifecycle metadata carried by the durable block fact; it is not committed in a
-block or stored in `BlockMeta`.
+lifecycle metadata: an execution output (`ConnectVerdict.stateDiff`,
+`ChainTreeUpdate.stateDiff`), not committed in a block, carried by the block
+fact, or stored in `BlockMeta`.
 
 ## Review Contract
 
@@ -196,8 +182,8 @@ A change preserves the architecture only if all of these remain true:
 2. Securing work depends on a content-bound directory commitment and target
    hit, not carrier validity or canonicity.
 3. Work is joined by grind identity before quantities are totaled.
-4. Non-genesis parent-state movement is reflexive or transitively forward
-   through the immediate parent's connected accepted graph.
+4. Non-genesis parent-state movement is forward through the immediate
+   parent's executed set, and equality is no exemption.
 5. Fork choice compares effective `trueCumWork`, then same-chain child block CID.
 6. External ingress uses one import boundary; recovery replays durable facts.
 7. Durable facts precede visible mutation.

@@ -17,8 +17,7 @@ import LatticePoW
 /// planned: `trueCumWork` (`forkChoiceWeight`), the held-subtree total
 /// (`subtreeWeight`), `cumulativeWork`, possession, exclusion and execution;
 /// the canonical path and tip against a naive GHOST descent; the act-on tip
-/// against the naive validated descent; and the revision (§12.5.11): +1 for
-/// each mutation the model accepts, unchanged for a duplicate or a refusal.
+/// against the naive validated descent.
 /// At the end of every seed the accepted fact sets are applied again to empty
 /// trees in two other arrival orders, which must reach the identical state.
 ///
@@ -564,20 +563,12 @@ struct SpecDifferential {
     /// The step's live outcome: whether it threw, and the run derivation's
     /// raised count.
     static func apply(
-        _ batch: OracleBatch, to side: OracleSide, reserved: Bool, in world: inout OracleWorld<LiveSubject>
+        _ batch: OracleBatch, to side: OracleSide, in world: inout OracleWorld<LiveSubject>
     ) -> (threw: Bool, weighed: [String]) {
         let staged = LiveSubject.batch(batch)
         do {
-            let result: SubmissionResult?
-            if side == .parent {
-                if reserved { precondition(world.parent.tree.reserveImportRevision()) }
-                result = reserved
-                    ? try world.parent.tree.applyReservedStaged(staged) : try world.parent.tree.apply(staged)
-            } else {
-                if reserved { precondition(world.child.tree.reserveImportRevision()) }
-                result = reserved
-                    ? try world.child.tree.applyReservedStaged(staged) : try world.child.tree.apply(staged)
-            }
+            let result = side == .parent
+                ? try world.parent.tree.apply(staged) : try world.child.tree.apply(staged)
             return (false, result?.weighed ?? [])
         } catch {
             return (true, [])
@@ -609,19 +600,15 @@ struct SpecDifferential {
               restoreModels(parentLog: run.parentPlan.log, childLog: run.childPlan.log) else {
             return "seed \(run.seed): the initial restore failed"
         }
-        if let failure = compare(world, step: -1, revisions: nil) { return failure }
+        if let failure = compare(world, step: -1) { return failure }
 
         for step in 0..<steps {
             let action = run.nextAction()
             run.history.append("\(step): \(run.describe(action))")
-            var expected: [OracleSide: UInt64] = [:]
-            let before: [OracleSide: UInt64] = [
-                .parent: world.parent.tree.currentRevision(), .child: world.child.tree.currentRevision(),
-            ]
             var applied: OracleOutcome?
             var restored = false
             switch action {
-            case .apply(let side, let batch, let reserved):
+            case .apply(let side, let batch):
                 // A block at a height its parent cannot have is dropped by
                 // header admission (§9.9) and never reaches this reducer.
                 if let block = batch.blockFact, let hash = SpecChain.standard(block.hash),
@@ -630,22 +617,16 @@ struct SpecDifferential {
                 }
                 var chain = model[side]!
                 let verdict = chain.apply(batch)
-                let live = Self.apply(batch, to: side, reserved: reserved, in: &world)
+                let live = Self.apply(batch, to: side, in: &world)
                 let refused: Bool
                 if case .refused = verdict { refused = true } else { refused = false }
                 if live.threw != refused {
                     return report(step: step, "apply: live \(live.threw ? "refused" : "accepted"), model \(verdict)")
                 }
                 applied = OracleOutcome(rendered: live.threw ? "throw:" : "applied")
-                expected[side] = before[side]! + (verdict == .mutated ? 1 : 0)
-                expected[side == .parent ? .child : .parent] = before[side == .parent ? .child : .parent]!
                 tallyVerdict(verdict, batch: batch, chain: model[side]!)
                 if !live.threw {
                     model[side] = chain
-                    let afterApply = Self.tree(world, side).currentRevision()
-                    if afterApply != expected[side]! {
-                        return report(step: step, "revision after apply \(afterApply), expected \(expected[side]!)")
-                    }
                     let derived = world.child.tree.applyParentRun(
                         from: world.parent.tree,
                         directory: childDirectory,
@@ -659,25 +640,15 @@ struct SpecDifferential {
                         return report(step: step, "runs raised \(derived.raised.count), expected \(raised)")
                     }
                     if raised > 0 { coverage["attributed run raised", default: 0] += 1 }
-                    expected[.child]! += UInt64(raised)
                 }
-            case .reevaluate(let side):
-                // The projection is always current, so this changes nothing.
-                let commit = side == .parent
-                    ? world.parent.tree.reevaluateForkChoice() : world.child.tree.reevaluateForkChoice()
-                if commit != nil { return report(step: step, "reevaluate moved the projection") }
-                expected = before
             case .serve(let directory):
                 world.parent.tree.serveRuns(for: directory)
-                expected = before
             case .deriveAllRuns:
                 let derived = world.child.tree.applyParentRun(from: world.parent.tree, directory: childDirectory)
                 guard let raised = deriveRuns() else { return report(step: step, "an attributed run would fall") }
                 if derived.raised.count != raised {
                     return report(step: step, "runs raised \(derived.raised.count), expected \(raised)")
                 }
-                expected = before
-                expected[.child]! += UInt64(raised)
             case .restart(let parentLog, let childLog):
                 var rebuilt = self
                 let modelRestores = rebuilt.restoreModels(parentLog: parentLog, childLog: childLog)
@@ -689,14 +660,12 @@ struct SpecDifferential {
                     model = rebuilt.model
                     lastPath = [:]
                     coverage["restart", default: 0] += 1
-                } else {
-                    expected = before
                 }
             case .idle:
-                expected = before
+                break
             }
             run.book(action, applied: applied, restored: restored)
-            if let failure = compare(world, step: step, revisions: expected.isEmpty ? nil : expected) {
+            if let failure = compare(world, step: step) {
                 return failure
             }
         }
@@ -734,7 +703,7 @@ struct SpecDifferential {
 
     /// Every derived quantity of both chains, live against the model.
     mutating func compare(
-        _ world: OracleWorld<LiveSubject>, step: Int, revisions: [OracleSide: UInt64]?
+        _ world: OracleWorld<LiveSubject>, step: Int
     ) -> String? {
         for side in [OracleSide.parent, .child] {
             let tree = Self.tree(world, side)
@@ -742,9 +711,6 @@ struct SpecDifferential {
             let differences = Self.differences(tree, chain, plan: run.plan(side))
             if !differences.isEmpty {
                 return report(step: step, differences.prefix(12).map { "\(side.rawValue) \($0)" }.joined(separator: "\n"))
-            }
-            if let expected = revisions?[side], tree.currentRevision() != expected {
-                return report(step: step, "\(side.rawValue) revision \(tree.currentRevision()), expected \(expected)")
             }
             tallyShapes(side, chain)
         }
@@ -839,7 +805,7 @@ struct SpecDifferential {
                 while !pending.isEmpty {
                     var deferred: [OracleBatch] = []
                     for batch in pending {
-                        let live = Self.apply(batch, to: side, reserved: false, in: &replayed)
+                        let live = Self.apply(batch, to: side, in: &replayed)
                         if live.threw {
                             deferred.append(batch)
                         } else {
@@ -874,13 +840,13 @@ struct SpecDifferential {
         return nil
     }
 
-    /// Every consensus observable `LiveSubject` renders, the revision aside.
+    /// Every consensus observable `LiveSubject` renders.
     func observation(_ world: OracleWorld<LiveSubject>) -> [String: String] {
         var result: [String: String] = [:]
         for side in [OracleSide.parent, .child] {
             var subject = side == .parent ? world.parent : world.child
             let seen = subject.observe(run.probe(side))
-            for (key, value) in seen where key != "revision" {
+            for (key, value) in seen {
                 // The schedule spec under a disconnected block is provisional
                 // (its root is not held) until its component grafts.
                 if key.hasSuffix(" scheduleSpec"),

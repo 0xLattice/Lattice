@@ -14,7 +14,7 @@ final class FactStoreRestoreTests: XCTestCase {
     /// before their parents, second grinds, stronger observations,
     /// exclusions, validations) in its scripted or a shuffled arrival order.
     /// A validation is sometimes staged as the node's execution batch,
-    /// re-stating the block fact with a state diff and one grind (sometimes
+    /// re-stating the block fact and one grind (sometimes
     /// stronger than any seen yet), and sometimes folded into the block's own
     /// batch (the eager tier).
     private struct Journal {
@@ -44,7 +44,7 @@ final class FactStoreRestoreTests: XCTestCase {
                 journal.batches.append(event.batch)
                 continue
             }
-            let restatedBlock = ChainFact.block(restated(block, salt: event.index))
+            let restatedBlock = ChainFact.block(block)
             if let last = journal.batches.last, last.facts.count == 2,
                case .block(let staged) = last.facts[0], staged.blockHash == block.blockHash,
                random.chance(50) {
@@ -69,18 +69,6 @@ final class FactStoreRestoreTests: XCTestCase {
             journal.executionBatches += 1
         }
         return journal
-    }
-
-    private func restated(_ fact: ChainBlockFact, salt: Int) -> ChainBlockFact {
-        ChainBlockFact(
-            blockHash: fact.blockHash, parentBlockHash: fact.parentBlockHash,
-            blockHeight: fact.blockHeight, postStateCID: fact.postStateCID,
-            prevStateCID: fact.prevStateCID, parentStateCID: fact.parentStateCID,
-            specCID: fact.specCID, target: fact.target, nextTarget: fact.nextTarget,
-            timestamp: fact.timestamp,
-            stateDiff: StateDiff(replaced: [testCID("old-\(salt)"): 1], created: [testCID("new-\(salt)"): 1]),
-            childCommitments: fact.childCommitments
-        )
     }
 
     /// The node's fact store: each fact once by id, at the first-seen batch
@@ -111,13 +99,11 @@ final class FactStoreRestoreTests: XCTestCase {
         var facts: [ChainFact] {
             rows.values.sorted { ($0.seq, $0.position) < ($1.seq, $1.position) }.map(\.fact)
         }
-
-        var seqCount: Int { Set(rows.values.map(\.seq)).count }
     }
 
     private func capture(_ tree: ChainTree, _ graph: ForkChoiceGoldenGraph) async throws -> ForkChoiceGolden {
-        let chain = ChainState(tree: tree.detached())
-        await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
+        var chain = tree.detached()
+        chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
         return try await ForkChoiceGolden.capture(chain, graph: graph)
     }
 
@@ -134,28 +120,21 @@ final class FactStoreRestoreTests: XCTestCase {
             raised += staged.raisedGrinds
 
             // Live: every batch through the reducer in journal order.
-            let live = try await ChainState.restore(replaying: [journal[0]], context: context)
-            for batch in journal.dropFirst() { _ = try await live.replay(batch) }
-            let liveRevision = await live.currentRevision()
+            var live = try ChainTree.restore(replaying: [journal[0]], context: context)
+            for batch in journal.dropFirst() { _ = try live.replay(batch) }
 
-            let fromBatches = try ChainTree.restore(
-                replaying: journal, revisionFloor: UInt64(journal.count), context: context
-            )
+            let fromBatches = try ChainTree.restore(replaying: journal, context: context)
             let expected = try await capture(fromBatches, graph)
 
             var shuffled = store.facts
             random.shuffle(&shuffled)
             for facts in [store.facts, shuffled] {
-                let fromFacts = try ChainTree.restore(
-                    facts: facts, revisionFloor: UInt64(store.seqCount), context: context
-                )
+                let fromFacts = try ChainTree.restore(facts: facts, context: context)
                 let actual = try await capture(fromFacts, graph)
                 XCTAssertEqual(
                     ForkChoiceGolden.diff(expected: expected, actual: actual), [], "seed \(seed)"
                 )
-                XCTAssertGreaterThanOrEqual(fromFacts.currentRevision(), liveRevision, "seed \(seed)")
             }
-            XCTAssertGreaterThanOrEqual(fromBatches.currentRevision(), liveRevision, "seed \(seed)")
         }
         XCTAssertGreaterThan(executions, 0, "execution batches must re-state block facts")
         XCTAssertGreaterThan(eager, 0, "some blocks must stage executed in one batch")
@@ -185,7 +164,7 @@ final class FactStoreRestoreTests: XCTestCase {
         var random = GoldenRandom(seed: 5)
         var duplicated = facts
         for case .block(let block) in facts where random.chance(40) {
-            duplicated.insert(.block(restated(block, salt: random.nextInt(1_000))), at: random.nextInt(duplicated.count + 1))
+            duplicated.insert(.block(block), at: random.nextInt(duplicated.count + 1))
         }
         XCTAssertGreaterThan(duplicated.count, facts.count)
         let expected = try await capture(ChainTree.restore(replaying: journal, context: context), graph)
@@ -199,11 +178,11 @@ final class FactStoreRestoreTests: XCTestCase {
             blockHash: block.blockHash, parentBlockHash: block.parentBlockHash,
             blockHeight: block.blockHeight, postStateCID: block.postStateCID,
             prevStateCID: block.prevStateCID, specCID: block.specCID, target: block.target,
-            nextTarget: block.nextTarget, timestamp: block.timestamp + 1, stateDiff: block.stateDiff,
+            nextTarget: block.nextTarget, timestamp: block.timestamp + 1,
             childCommitments: block.childCommitments
         ))
         XCTAssertThrowsError(try ChainTree.restore(facts: facts + [conflicting], context: context)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .corruptConsensusGraph)
         }
     }
 
@@ -216,10 +195,10 @@ final class FactStoreRestoreTests: XCTestCase {
         let journal = graph.events.map(\.batch)
         let facts = FactStore(journal).facts
         XCTAssertThrowsError(try ChainTree.restore(replaying: journal, context: root)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
         XCTAssertThrowsError(try ChainTree.restore(facts: facts, context: root)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
 
         var pinned = Set<String>()
@@ -257,7 +236,7 @@ final class FactStoreRestoreTests: XCTestCase {
         }
         for corrupt in [withoutWork, withoutGenesis] {
             XCTAssertThrowsError(try ChainTree.restore(facts: corrupt, context: context)) {
-                XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+                XCTAssertEqual($0 as? ChainTreeRestoreError, .corruptConsensusGraph)
             }
         }
     }

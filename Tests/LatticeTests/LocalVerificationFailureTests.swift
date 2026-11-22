@@ -42,11 +42,11 @@ final class LocalVerificationFailureTests: XCTestCase {
 
     func testDataErrorsSplitIntoLocalFaultsAndContentVerdicts() {
         for error in Self.localFaults {
-            let classified = ChainLevel.classifyValidationFailureForTesting(error)
+            let classified = classifyValidationFailure(error)
             XCTAssertEqual(classified, .localVerificationFailure, "\(error)")
-            XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(classified), "\(error)")
+            XCTAssertFalse(BlockImport.isDeterministicInvalidity(classified), "\(error)")
             XCTAssertEqual(
-                ChainLevel.classifyResolutionFailureForTesting(error),
+                classifyResolutionFailure(error),
                 .localVerificationFailure,
                 "\(error)"
             )
@@ -54,15 +54,15 @@ final class LocalVerificationFailureTests: XCTestCase {
         // A CID the content names with no usable multihash, and a policy
         // input the content makes unencodable, are properties of the content.
         for error in [DataErrors.cidCreationFailed, DataErrors.missingDeclaredChild("x")] {
-            let classified = ChainLevel.classifyValidationFailureForTesting(error)
+            let classified = classifyValidationFailure(error)
             XCTAssertEqual(classified, .protocolInvalid, "\(error)")
-            XCTAssertTrue(ChainLevel.isDeterministicInvalidityForTesting(classified), "\(error)")
+            XCTAssertTrue(BlockImport.isDeterministicInvalidity(classified), "\(error)")
         }
-        let policy = ChainLevel.classifyValidationFailureForTesting(
+        let policy = classifyValidationFailure(
             WasmPolicyError.contextEncodingFailed
         )
         XCTAssertEqual(policy, .protocolInvalid)
-        XCTAssertTrue(ChainLevel.isDeterministicInvalidityForTesting(policy))
+        XCTAssertTrue(BlockImport.isDeterministicInvalidity(policy))
     }
 
     private struct Fixture {
@@ -131,49 +131,44 @@ final class LocalVerificationFailureTests: XCTestCase {
         XCTAssertFalse(fixture.tree.hasExecutedAncestry(blockHash: fixture.blockHash))
     }
 
-    func testActorPathRetriesALocalFaultAndStillExcludesContentFailures() async throws {
+    /// The same partition through admission as a node drives it: a local
+    /// fault is retried whether execution follows the header at once or a
+    /// block already weighed, and a content-caused failure of a weighed
+    /// block excludes it.
+    func testAdmissionRetriesALocalFaultAndStillExcludesContentFailures() async throws {
         for fault in Self.localFaults {
             let fixture = try await fixture()
-            let level = AdmissionFixture.makeLevel(genesis: fixture.genesis)
+            var tree = try AdmissionFixture.makeChain(genesis: fixture.genesis)
             let faulting = FaultingFetcher(
                 backing: fixture.fetcher, blockHash: fixture.blockHash, fault: fault
             )
             let header = try BlockHeader(node: fixture.block)
-            for mode in [ImportMode.full, .execution] {
-                let result = try await level.admit(
-                    header, mode: mode, fetcher: faulting, storer: fixture.fetcher
-                )
+            for mode in [TestAdmitMode.full, .execution] {
+                let result = try await tree.admit(header, mode: mode, fetcher: faulting)
                 XCTAssertEqual(result.failure, .localVerificationFailure, "\(fault) \(mode)")
             }
+            XCTAssertFalse(tree.isExcludedRoot(fixture.blockHash), "\(fault)")
             await faulting.heal()
-            let healed = try await level.admit(
-                header, mode: .execution, fetcher: faulting, storer: fixture.fetcher
-            )
-            guard case .accepted = healed else {
-                return XCTFail("\(fault): the retry must validate, got \(healed)")
-            }
+            let healed = try await tree.admit(header, mode: .execution, fetcher: faulting)
+            let update = try XCTUnwrap(healed.update, "\(fault): the retry must validate, got \(healed)")
+            XCTAssertFalse(update.excluded, "\(fault)")
         }
 
-        // The validated tier excludes a content-caused failure of a weighed
-        // block: accepted with an exclusion, not a retryable rejection.
+        // Execution excludes a content-caused failure of a weighed block:
+        // applied with an exclusion, not a retryable rejection.
         let fixture = try await fixture()
-        let level = AdmissionFixture.makeLevel(genesis: fixture.genesis)
+        var tree = try AdmissionFixture.makeChain(genesis: fixture.genesis)
         let header = try BlockHeader(node: fixture.block)
-        let weighed = try await level.admit(header, mode: .header, fetcher: fixture.fetcher)
-        guard case .accepted = weighed else {
-            return XCTFail("the header must weigh, got \(weighed)")
-        }
+        let weighed = try await tree.admit(header, mode: .header, fetcher: fixture.fetcher)
+        XCTAssertNotNil(weighed.update, "the header must weigh, got \(weighed)")
         let faulting = FaultingFetcher(
             backing: fixture.fetcher, blockHash: fixture.blockHash,
             fault: DataErrors.cidCreationFailed
         )
-        let excluded = try await level.admit(
-            header, mode: .execution, fetcher: faulting, storer: fixture.fetcher
-        )
-        guard case .accepted(let acceptance) = excluded else {
-            return XCTFail("a content-caused failure must exclude, got \(excluded)")
-        }
-        XCTAssertTrue(acceptance.facts.facts.contains {
+        let excluded = try await tree.admit(header, mode: .execution, fetcher: faulting)
+        let update = try XCTUnwrap(excluded.update, "a content-caused failure must exclude, got \(excluded)")
+        XCTAssertTrue(update.excluded)
+        XCTAssertTrue(update.batches.flatMap(\.facts).contains {
             if case .exclusion = $0 { return true }
             return false
         })

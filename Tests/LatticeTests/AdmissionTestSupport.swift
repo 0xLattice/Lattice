@@ -11,103 +11,113 @@ import UInt256
 import cashew
 import WAT
 
-// MARK: - Admission with test defaults
+// MARK: - Admission, as the node drives a tree
 
-extension ChainLevel {
-    /// Chain-local admission with the fixture defaults: eager mode, the
-    /// fetcher doubling as the validation-content store (and, unless
-    /// `materialized` says otherwise, the materialized store), no child
-    /// package, the current validation context, and a no-op stage. A call
-    /// names only what its scenario changes.
-    func admit(
-        _ header: BlockHeader,
-        mode: ImportMode = .full,
-        fetcher: any Fetcher & VolumeStorer,
-        materialized: (any VolumeStorer)? = nil,
-        childPackage: ChildValidationPackage? = nil,
-        validationContext: ValidationContext = .current,
-        stage: @Sendable (BlockImportStagingContext) async throws -> Void = testAdmissionStage
-    ) async throws -> BlockImportResult {
-        try await admit(
-            header,
-            mode: mode,
-            fetcher: fetcher,
-            storer: fetcher,
-            materialized: materialized,
-            childPackage: childPackage,
-            validationContext: validationContext,
-            stage: stage
-        )
+/// A child block's cross-chain inputs as a test builds them: the proof of
+/// the work securing it, and the parent-chain continuity link a node would
+/// have derived from its parent level.
+struct TestChildPackage: Sendable {
+    let proof: ChildBlockProof
+    let parentStateContinuityLink: ParentStateContinuityLink?
+
+    init(proof: ChildBlockProof, parentStateContinuityLink: ParentStateContinuityLink? = nil) {
+        self.proof = proof
+        self.parentStateContinuityLink = parentStateContinuityLink
     }
 
-    /// The fixture defaults for a fetcher that does not store: the
-    /// validation-content store is named explicitly.
-    func admit(
-        _ header: BlockHeader,
-        mode: ImportMode = .full,
-        fetcher: any Fetcher,
-        storer: any VolumeStorer,
-        materialized: (any VolumeStorer)? = nil,
-        childPackage: ChildValidationPackage? = nil,
-        validationContext: ValidationContext = .current,
-        stage: @Sendable (BlockImportStagingContext) async throws -> Void = testAdmissionStage
-    ) async throws -> BlockImportResult {
-        try await importBlock(
-            header,
-            fetcher: fetcher,
-            childPackage: childPackage,
-            validationContext: validationContext,
-            validationContentStorer: storer,
-            materializedVolumeStorer: materialized ?? storer,
-            mode: mode,
-            stage: stage
-        )
-    }
+    /// Parent facts that know exactly this package's link.
+    var parentFacts: any ParentChainFacts { LinkFacts(link: parentStateContinuityLink) }
+}
 
-    /// ``admit(_:mode:fetcher:materialized:childPackage:validationContext:stage:)``
-    /// for a block held inline.
-    func admit(
+/// Parent facts that answer one link and nothing else.
+struct LinkFacts: ParentChainFacts {
+    let link: ParentStateContinuityLink?
+    func hasContinuity(_ asked: ParentStateContinuityLink) async -> Bool { asked == link }
+}
+
+/// Which steps `admit` takes: the header alone (`.header`, weighing the
+/// block), execution alone of a block already weighed (`.execution`), or
+/// both (`.full`).
+enum TestAdmitMode: Sendable {
+    case full
+    case header
+    case execution
+}
+
+extension ChainTree {
+    /// Admit `block` as a node does: its header (`insertRootHeader`, or
+    /// `insertChildHeader` with the evidence `child`'s proof verifies), then
+    /// `connectJob` → `connect` → `applyConnect`. Returns the admission of the
+    /// last step taken: a header that is refused, or lands excluded, is not
+    /// executed, and nor is a block already executed. A child's parent facts
+    /// are `parentFacts`, else `child`'s link.
+    mutating func admit(
         _ block: Block,
-        mode: ImportMode = .full,
-        fetcher: any Fetcher & VolumeStorer,
-        materialized: (any VolumeStorer)? = nil,
-        childPackage: ChildValidationPackage? = nil,
-        validationContext: ValidationContext = .current,
-        stage: @Sendable (BlockImportStagingContext) async throws -> Void = testAdmissionStage
-    ) async throws -> BlockImportResult {
-        try await admit(
-            try BlockHeader(node: block),
-            mode: mode,
+        mode: TestAdmitMode = .full,
+        fetcher: any Fetcher,
+        child: TestChildPackage? = nil,
+        parentFacts: (any ParentChainFacts)? = nil,
+        validationContext: ValidationContext = .current
+    ) async throws -> ChainTreeAdmission {
+        let blockHash = try BlockHeader(node: block).rawCID
+        var header: ChainTreeAdmission?
+        if mode != .execution {
+            guard let childIndex = try? await block.children.resolve(fetcher: fetcher).node else {
+                return .rejected(.unavailableEvidence)
+            }
+            let inserted: ChainTreeAdmission
+            if context?.isRoot ?? true {
+                inserted = insertRootHeader(block, childIndex: childIndex, validationContext: validationContext)
+            } else if let child, let context {
+                switch child.proof.verifySecuringWork(child: block, chainPath: context.path) {
+                case .failure(let failure):
+                    return .rejected(ChainTree.headerFailure(failure))
+                case .success(let evidence):
+                    inserted = insertChildHeader(
+                        block, childIndex: childIndex, evidence: evidence, validationContext: validationContext
+                    )
+                }
+            } else {
+                return .rejected(.crossChainEvidenceRequired(.childProof(
+                    chainPath: context?.path ?? [], childCID: blockHash
+                )))
+            }
+            if mode == .header || inserted.failure != nil || inserted.update?.excluded == true {
+                return inserted
+            }
+            if case .duplicate = inserted, isExecuted(blockHash: blockHash) { return inserted }
+            header = inserted
+        }
+        guard let job = connectJob(for: blockHash) else {
+            return header ?? .rejected(.notAcceptedAtCurrentChain)
+        }
+        let verdict = await ChainTree.connect(
+            job,
             fetcher: fetcher,
-            materialized: materialized,
-            childPackage: childPackage,
-            validationContext: validationContext,
-            stage: stage
+            parentFacts: parentFacts ?? child?.parentFacts,
+            validationContext: validationContext
         )
+        return applyConnect(verdict)
     }
 
-    /// ``admit(_:mode:fetcher:storer:materialized:childPackage:validationContext:stage:)``
-    /// for a block held inline.
-    func admit(
-        _ block: Block,
-        mode: ImportMode = .full,
+    /// ``admit(_:mode:fetcher:child:parentFacts:validationContext:)`` of the
+    /// block `header` names, resolved from `fetcher`.
+    mutating func admit(
+        _ header: BlockHeader,
+        mode: TestAdmitMode = .full,
         fetcher: any Fetcher,
-        storer: any VolumeStorer,
-        materialized: (any VolumeStorer)? = nil,
-        childPackage: ChildValidationPackage? = nil,
-        validationContext: ValidationContext = .current,
-        stage: @Sendable (BlockImportStagingContext) async throws -> Void = testAdmissionStage
-    ) async throws -> BlockImportResult {
-        try await admit(
-            try BlockHeader(node: block),
-            mode: mode,
-            fetcher: fetcher,
-            storer: storer,
-            materialized: materialized,
-            childPackage: childPackage,
-            validationContext: validationContext,
-            stage: stage
-        )
+        child: TestChildPackage? = nil,
+        parentFacts: (any ParentChainFacts)? = nil,
+        validationContext: ValidationContext = .current
+    ) async throws -> ChainTreeAdmission {
+        switch await BlockImport.resolveBlock(header, fetcher: fetcher) {
+        case .failure(let failure): return .rejected(failure)
+        case .success(let resolved):
+            return try await admit(
+                resolved.block, mode: mode, fetcher: fetcher, child: child,
+                parentFacts: parentFacts, validationContext: validationContext
+            )
+        }
     }
 }
 
@@ -119,68 +129,6 @@ func chainLocalSpec(wasmPolicies: [WasmPolicyRef] = []) -> ChainSpec {
 
 enum ChainLocalTestError: Error, Sendable {
     case unexpectedFailure
-    case storageFailure
-    case stageFailure
-}
-
-struct FailingAdmissionStorer: Storer, VolumeStorer {
-    func store(entries: [String: Data]) async throws {
-        throw ChainLocalTestError.storageFailure
-    }
-
-    func store(volume: SerializedVolume) async throws {
-        throw ChainLocalTestError.storageFailure
-    }
-}
-
-actor RecordingAdmissionStorer: Storer, VolumeStorer {
-    private let backing = StorableFetcher()
-    private var roots = Set<String>()
-    private var calls = 0
-
-    func store(entries: [String: Data]) async throws {
-        calls += 1
-        await backing.store(entries: entries)
-    }
-
-    func store(volume: SerializedVolume) async throws {
-        calls += 1
-        roots.insert(volume.root)
-        await backing.store(volume: volume)
-    }
-
-    func volumeRoots() -> Set<String> { roots }
-    func storeCallCount() -> Int { calls }
-}
-
-actor AdmissionStageRecorder {
-    private var batches: [BlockImportBatch] = []
-    private var contexts: [BlockImportStagingContext] = []
-
-    func stage(_ batch: BlockImportBatch) {
-        batches.append(batch)
-    }
-
-    func stage(_ context: BlockImportStagingContext) {
-        contexts.append(context)
-        batches.append(context.batch)
-    }
-
-    func count(for blockHash: String) -> Int {
-        batches.count { batch in
-            batch.facts.contains { fact in
-                switch fact {
-                case .block(let block): block.blockHash == blockHash
-                case .work(let work): work.blockHash == blockHash
-                case .exclusion(let exclusion): exclusion.blockHash == blockHash
-                case .validation(let validation): validation.blockHash == blockHash
-                }
-            }
-        }
-    }
-
-    func recordedBatches() -> [BlockImportBatch] { batches }
-    func recordedContexts() -> [BlockImportStagingContext] { contexts }
 }
 
 /// The admission fixtures: an always-hit target, chain-local genesis/child
@@ -222,22 +170,10 @@ enum AdmissionFixture {
         )
     }
 
-    static func makeLevel(genesis: Block) -> ChainLevel {
-        ChainLevel(testChain: ChainState.fromGenesis(block: genesis))
-    }
-
-    static func makeLevel(
-        genesis: Block,
-        revision: UInt64
-    ) async throws -> (level: ChainLevel, seedBatch: BlockImportBatch) {
-        let seedBatch = try testAdmissionBatch(for: genesis)
-        return (
-            ChainLevel(testChain: try await ChainState.restoreWithoutContext(
-                replaying: [seedBatch],
-                revisionFloor: revision
-            )),
-            seedBatch
-        )
+    /// A root chain seeded by `genesis` (built with `chainLocalSpec`), on a
+    /// context pinned to it.
+    static func makeChain(genesis: Block, spec: ChainSpec = chainLocalSpec()) throws -> ChainTree {
+        try ChainTree.fromGenesis(block: genesis, context: testChainContext(genesis: genesis), spec: spec)
     }
 
     static func signedStateChangingGenesisTransaction(
@@ -281,9 +217,9 @@ enum AdmissionFixture {
 
     static func makeChildProofFixture() async throws -> (
         fetcher: StorableFetcher,
-        childLevel: ChainLevel,
+        childChain: ChainTree,
         candidate: Block,
-        package: ChildValidationPackage
+        package: TestChildPackage
     ) {
         let fetcher = StorableFetcher()
         let parentGenesis = try await makeGenesis(fetcher: fetcher, timestamp: 1_000)
@@ -303,9 +239,10 @@ enum AdmissionFixture {
             nonce: 2,
             fetcher: fetcher
         )
-        let childLevel = ChainLevel(
-            chain: ChainState.fromGenesis(block: childGenesis),
-            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        let childChain = try ChainTree.fromGenesis(
+            block: childGenesis,
+            context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"]),
+            spec: chainLocalSpec()
         )
 
         let proof = try await ChildBlockProof.generate(
@@ -313,11 +250,6 @@ enum AdmissionFixture {
             childDirectory: "Child",
             fetcher: fetcher
         )
-        return (
-            fetcher,
-            childLevel,
-            candidate,
-            try await childValidationPackage(proof: proof, fetcher: fetcher)
-        )
+        return (fetcher, childChain, candidate, TestChildPackage(proof: proof))
     }
 }

@@ -580,28 +580,8 @@ final class HeaderAdmissionTests: XCTestCase {
         XCTAssertEqual(kinds(weighed.update?.batches), [["block", "work"]])
     }
 
-    /// Both batches of an excluded header land, or neither.
-    func testAnExcludedHeaderIsAppliedAllOrNothing() async throws {
-        let fetcher = StorableFetcher()
-        let genesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
-        let valid = try await AdmissionFixture.makeChild(of: genesis, fetcher: fetcher, timestamp: 2_000, nonce: 1)
-        let excluded = try await variant(
-            of: valid, prevState: LatticeStateHeader(rawCID: testCID("forged-prev-capacity")), fetcher: fetcher
-        )
-        // Room for exactly one more mutation.
-        var tree = try ChainTree.restore(
-            replaying: [try testAdmissionBatch(for: genesis)], revisionFloor: UInt64.max - 1,
-            context: testChainContext(genesis: genesis), specs: [chainLocalSpec()]
-        )
-        let refused = try await TreeDriver.insert(excluded, into: &tree, fetcher: fetcher)
-        XCTAssertEqual(refused.failure, .revisionExhausted)
-        XCTAssertFalse(tree.contains(blockHash: try cid(excluded)), "no half-applied header")
-        let linked = try await TreeDriver.insert(valid, into: &tree, fetcher: fetcher)
-        XCTAssertEqual(kinds(linked.update?.batches), [["block", "work"]], "one batch still fits")
-    }
-
     /// The configured Nexus genesis that misses its own target is a
-    /// proof-of-work failure at bootstrap, on both admission paths.
+    /// proof-of-work failure at bootstrap.
     func testAGenesisTargetMissIsAProofOfWorkFailureAtBootstrap() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await buildAndStoreGenesis(
@@ -616,16 +596,6 @@ final class HeaderAdmissionTests: XCTestCase {
             return XCTFail("a target miss bootstraps nothing")
         }
         XCTAssertEqual(failure, .proofOfWorkInvalid)
-        do {
-            _ = try await ChainLevel.bootstrap(
-                context: pinned, genesisHeader: header, fetcher: fetcher,
-                validationContentStorer: fetcher, materializedVolumeStorer: fetcher,
-                stage: testAdmissionStage
-            )
-            XCTFail("a target miss bootstraps nothing")
-        } catch let error as BlockImportError {
-            XCTAssertEqual(error, .proofOfWorkInvalid)
-        }
     }
 
     /// Nexus → Middle → Leaf, with one share: its hash misses Nexus's and

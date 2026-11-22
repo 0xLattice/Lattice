@@ -71,7 +71,7 @@ final class CrashRecoveryTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain1 = ChainState.fromGenesis(block: genesis)
+        var chain1 = ChainTree.fromGenesis(block: genesis)
         var batches = [try testAdmissionBatch(for: genesis)]
 
         var prev = genesis
@@ -80,7 +80,7 @@ final class CrashRecoveryTests: XCTestCase {
                 previous: prev, timestamp: base + Int64(i) * 1000,
                 target: UInt256(1000), nonce: UInt64(i), fetcher: fetcher
             )
-            let _ = await chain1.submitTestBlock(
+            let _ = chain1.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: b), block: b
             )
             batches.append(try testAdmissionBatch(for: b))
@@ -92,25 +92,25 @@ final class CrashRecoveryTests: XCTestCase {
         let data = try encoder.encode(batches)
         let decoded = try JSONDecoder().decode([BlockImportBatch].self, from: data)
 
-        let chain2 = try await ChainState.restoreWithoutContext(replaying: decoded)
+        var chain2 = try ChainTree.restoreWithoutContext(replaying: decoded)
 
-        let tip2 = await chain2.canonicalTip
-        let tip1 = await chain1.canonicalTip
+        let tip2 = chain2.canonicalTip
+        let tip1 = chain1.canonicalTip
         XCTAssertEqual(tip2, tip1)
 
-        let height2 = await chain2.getHighestBlockHeight()
+        let height2 = chain2.getHighestBlockHeight()
         XCTAssertEqual(height2, 5)
 
         let block6 = try await buildAndStoreBlock(
             previous: prev, timestamp: base + 6000,
             target: UInt256(1000), nonce: 6, fetcher: fetcher
         )
-        let result = await chain2.submitTestBlock(
+        let result = chain2.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block6), block: block6
         )
         XCTAssertTrue(result.extendsCanonical)
 
-        let finalHeight = await chain2.getHighestBlockHeight()
+        let finalHeight = chain2.getHighestBlockHeight()
         XCTAssertEqual(finalHeight, 6)
     }
 
@@ -121,13 +121,13 @@ final class CrashRecoveryTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let b1 = try await buildAndStoreBlock(
             previous: genesis, timestamp: base + 1000,
             target: UInt256(1000), nonce: 1, fetcher: fetcher
         )
-        let _ = await chain.submitTestBlock(
+        let _ = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: b1), block: b1
         )
 
@@ -158,26 +158,26 @@ final class TwoNodeConvergenceTests: XCTestCase {
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
 
-        let nodeA = ChainState.fromGenesis(block: genesis)
-        let nodeB = ChainState.fromGenesis(block: genesis)
+        var nodeA = ChainTree.fromGenesis(block: genesis)
+        var nodeB = ChainTree.fromGenesis(block: genesis)
 
         let blocks = try await buildChain(from: genesis, length: 6, base: base, fetcher: fetcher)
 
         for block in blocks.dropFirst() {
-            let _ = await nodeA.submitTestBlock(
+            let _ = nodeA.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
-            let _ = await nodeB.submitTestBlock(
+            let _ = nodeB.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
         }
 
-        let tipA = await nodeA.canonicalTip
-        let tipB = await nodeB.canonicalTip
+        let tipA = nodeA.canonicalTip
+        let tipB = nodeB.canonicalTip
         XCTAssertEqual(tipA, tipB, "Both nodes should converge to same tip")
 
-        let heightA = await nodeA.getHighestBlockHeight()
-        let heightB = await nodeB.getHighestBlockHeight()
+        let heightA = nodeA.getHighestBlockHeight()
+        let heightB = nodeB.getHighestBlockHeight()
         XCTAssertEqual(heightA, heightB)
         XCTAssertEqual(heightA, 5)
     }
@@ -190,12 +190,12 @@ final class TwoNodeConvergenceTests: XCTestCase {
         let genesis = try await buildAndStoreGenesis(
             spec: spec, timestamp: base, target: UInt256(1000), fetcher: fetcher
         )
-        let nodeA = ChainState.fromGenesis(block: genesis)
-        let nodeB = ChainState.fromGenesis(block: genesis)
+        var nodeA = ChainTree.fromGenesis(block: genesis)
+        var nodeB = ChainTree.fromGenesis(block: genesis)
 
         let forkA = try await buildChain(from: genesis, length: 6, base: base, fetcher: fetcher)
         for block in forkA.dropFirst() {
-            let _ = await nodeA.submitTestBlock(
+            let _ = nodeA.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
         }
@@ -209,23 +209,23 @@ final class TwoNodeConvergenceTests: XCTestCase {
             forkBBlocks.append(b)
         }
         for block in forkBBlocks.dropFirst() {
-            let _ = await nodeB.submitTestBlock(
+            let _ = nodeB.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
         }
 
-        let tipA = await nodeA.canonicalTip
-        let tipB = await nodeB.canonicalTip
+        let tipA = nodeA.canonicalTip
+        let tipB = nodeB.canonicalTip
         XCTAssertNotEqual(tipA, tipB, "Nodes diverge initially")
 
         // Node B receives all of fork A (longer) and should converge
         for block in forkA.dropFirst() {
-            let _ = await nodeB.submitTestBlock(
+            let _ = nodeB.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
         }
 
-        let finalTipB = await nodeB.canonicalTip
+        let finalTipB = nodeB.canonicalTip
         XCTAssertEqual(finalTipB, tipA, "Node B should converge to longer chain")
     }
 }
@@ -596,18 +596,18 @@ final class PerformanceRegressionTests: XCTestCase {
         )
 
         let blocks = try await buildChain(from: genesis, length: 51, base: base, fetcher: fetcher)
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let start = Date()
         for block in blocks.dropFirst() {
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block), block: block
             )
         }
         let elapsed = Date().timeIntervalSince(start)
 
         XCTAssertLessThan(elapsed, 2.0, "Submitting 50 blocks should take < 2 seconds")
-        let height = await chain.getHighestBlockHeight()
+        let height = chain.getHighestBlockHeight()
         XCTAssertEqual(height, 50)
     }
 }

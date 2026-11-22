@@ -26,7 +26,7 @@ final class CumulativeWorkPrefixSumTests: XCTestCase {
             target: target,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var previous = genesis
         var expected = WorkSum(perBlock)
@@ -38,10 +38,10 @@ final class CumulativeWorkPrefixSumTests: XCTestCase {
                 nonce: UInt64(height),
                 fetcher: fetcher
             )
-            _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
+            _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
             previous = block
             expected = expected + perBlock
-            let cumulativeWork = await chain.getTipCumulativeWork()
+            let cumulativeWork = chain.getTipCumulativeWork()
             XCTAssertEqual(cumulativeWork, expected)
         }
     }
@@ -56,7 +56,7 @@ final class CumulativeWorkPrefixSumTests: XCTestCase {
             target: target,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
         var batches = [try testAdmissionBatch(for: genesis)]
         var previous = genesis
         for height in 1...4 {
@@ -67,15 +67,15 @@ final class CumulativeWorkPrefixSumTests: XCTestCase {
                 nonce: UInt64(height),
                 fetcher: fetcher
             )
-            _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
+            _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: block), block: block)
             batches.append(try testAdmissionBatch(for: block))
             previous = block
         }
 
-        let before = await chain.getTipCumulativeWork()
-        let restored = try await ChainState.restoreWithoutContext(replaying: batches)
+        let before = chain.getTipCumulativeWork()
+        let restored = try ChainTree.restoreWithoutContext(replaying: batches)
 
-        let after = await restored.getTipCumulativeWork()
+        let after = restored.getTipCumulativeWork()
         XCTAssertEqual(after, before)
     }
 
@@ -106,16 +106,16 @@ final class CumulativeWorkPrefixSumTests: XCTestCase {
         )
         let parentHash = try BlockHeader(node: parent).rawCID
         let childHash = try BlockHeader(node: child).rawCID
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
-        _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: child), block: child)
-        let provisional = await chain.getCumulativeWork(forHash: childHash)
+        _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: child), block: child)
+        let provisional = chain.getCumulativeWork(forHash: childHash)
         XCTAssertEqual(provisional, WorkSum(work))
 
-        _ = await chain.submitTestBlock(blockHeader: try BlockHeader(node: parent), block: parent)
+        _ = chain.submitTestBlock(blockHeader: try BlockHeader(node: parent), block: parent)
 
-        let parentWork = await chain.getCumulativeWork(forHash: parentHash)
-        let childWork = await chain.getCumulativeWork(forHash: childHash)
+        let parentWork = chain.getCumulativeWork(forHash: parentHash)
+        let childWork = chain.getCumulativeWork(forHash: childHash)
         XCTAssertEqual(parentWork, WorkSum(work) + work)
         XCTAssertEqual(childWork, WorkSum(work) + work + work)
     }

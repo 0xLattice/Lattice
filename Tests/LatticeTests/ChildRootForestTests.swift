@@ -21,8 +21,9 @@ private func preferredChildForestHash(_ first: String, _ second: String) -> Stri
     forkChoicePrefersBlock(first, over: second) ? first : second
 }
 
-private func submitChildForestBlock(_ block: Block, to chain: ChainState) async -> SubmissionResult {
-    await chain.submitTestBlock(blockHeader: try! BlockHeader(node: block), block: block)
+@discardableResult
+private func submitChildForestBlock(_ block: Block, to chain: inout ChainTree) -> SubmissionResult {
+    chain.submitTestBlock(blockHeader: try! BlockHeader(node: block), block: block)
 }
 
 private func makeChildForestRoots() async throws -> (StorableFetcher, Block, Block) {
@@ -51,15 +52,15 @@ final class ChildRootForestTests: XCTestCase {
         let firstHash = childForestHash(first)
         let secondHash = childForestHash(second)
         let expectedTip = preferredChildForestHash(firstHash, secondHash)
-        let firstIncumbent = ChainState.fromGenesis(block: first)
-        let secondIncumbent = ChainState.fromGenesis(block: second)
+        var firstIncumbent = ChainTree.fromGenesis(block: first)
+        var secondIncumbent = ChainTree.fromGenesis(block: second)
 
-        let firstResult = await submitChildForestBlock(second, to: firstIncumbent)
-        let secondResult = await submitChildForestBlock(first, to: secondIncumbent)
-        let firstTip = await firstIncumbent.canonicalTip
-        let secondTip = await secondIncumbent.canonicalTip
-        let firstContainsSecond = await firstIncumbent.contains(blockHash: secondHash)
-        let secondContainsFirst = await secondIncumbent.contains(blockHash: firstHash)
+        let firstResult = submitChildForestBlock(second, to: &firstIncumbent)
+        let secondResult = submitChildForestBlock(first, to: &secondIncumbent)
+        let firstTip = firstIncumbent.canonicalTip
+        let secondTip = secondIncumbent.canonicalTip
+        let firstContainsSecond = firstIncumbent.contains(blockHash: secondHash)
+        let secondContainsFirst = secondIncumbent.contains(blockHash: firstHash)
 
         XCTAssertTrue(firstResult.addedBlock)
         XCTAssertTrue(secondResult.addedBlock)
@@ -91,28 +92,28 @@ final class ChildRootForestTests: XCTestCase {
             childForestHash(harder),
             childForestHash(easier)
         )
-        let harderFirst = ChainState.fromGenesis(block: genesis)
-        let easierFirst = ChainState.fromGenesis(block: genesis)
+        var harderFirst = ChainTree.fromGenesis(block: genesis)
+        var easierFirst = ChainTree.fromGenesis(block: genesis)
 
-        _ = await submitChildForestBlock(harder, to: harderFirst)
-        _ = await submitChildForestBlock(easier, to: harderFirst)
-        _ = await submitChildForestBlock(easier, to: easierFirst)
-        _ = await submitChildForestBlock(harder, to: easierFirst)
+        submitChildForestBlock(harder, to: &harderFirst)
+        submitChildForestBlock(easier, to: &harderFirst)
+        submitChildForestBlock(easier, to: &easierFirst)
+        submitChildForestBlock(harder, to: &easierFirst)
 
-        let harderFirstTip = await harderFirst.canonicalTip
-        let easierFirstTip = await easierFirst.canonicalTip
-        let restoredHarderFirst = try await ChainState.restoreWithoutContext(replaying: [
+        let harderFirstTip = harderFirst.canonicalTip
+        let easierFirstTip = easierFirst.canonicalTip
+        let restoredHarderFirst = try ChainTree.restoreWithoutContext(replaying: [
             testAdmissionBatch(for: genesis),
             testAdmissionBatch(for: harder),
             testAdmissionBatch(for: easier),
         ])
-        let restoredEasierFirst = try await ChainState.restoreWithoutContext(replaying: [
+        let restoredEasierFirst = try ChainTree.restoreWithoutContext(replaying: [
             testAdmissionBatch(for: genesis),
             testAdmissionBatch(for: easier),
             testAdmissionBatch(for: harder),
         ])
-        let restoredHarderFirstTip = await restoredHarderFirst.canonicalTip
-        let restoredEasierFirstTip = await restoredEasierFirst.canonicalTip
+        let restoredHarderFirstTip = restoredHarderFirst.canonicalTip
+        let restoredEasierFirstTip = restoredEasierFirst.canonicalTip
         XCTAssertEqual(harderFirstTip, expectedTip)
         XCTAssertEqual(easierFirstTip, expectedTip)
         XCTAssertEqual(restoredHarderFirstTip, expectedTip)
@@ -141,16 +142,16 @@ final class ChildRootForestTests: XCTestCase {
             childForestHash(first),
             childForestHash(second)
         )
-        let firstOrder = ChainState.fromGenesis(block: genesis)
-        let secondOrder = ChainState.fromGenesis(block: genesis)
+        var firstOrder = ChainTree.fromGenesis(block: genesis)
+        var secondOrder = ChainTree.fromGenesis(block: genesis)
 
-        _ = await submitChildForestBlock(first, to: firstOrder)
-        _ = await submitChildForestBlock(second, to: firstOrder)
-        _ = await submitChildForestBlock(second, to: secondOrder)
-        _ = await submitChildForestBlock(first, to: secondOrder)
+        submitChildForestBlock(first, to: &firstOrder)
+        submitChildForestBlock(second, to: &firstOrder)
+        submitChildForestBlock(second, to: &secondOrder)
+        submitChildForestBlock(first, to: &secondOrder)
 
-        let firstTip = await firstOrder.canonicalTip
-        let secondTip = await secondOrder.canonicalTip
+        let firstTip = firstOrder.canonicalTip
+        let secondTip = secondOrder.canonicalTip
         XCTAssertEqual(firstTip, expectedTip)
         XCTAssertEqual(secondTip, expectedTip)
     }
@@ -189,10 +190,10 @@ final class ChildRootForestTests: XCTestCase {
             nonce: 17,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         for block in [secondBase, secondLeaf, firstBase, firstLeaf] {
-            _ = await submitChildForestBlock(block, to: chain)
+            submitChildForestBlock(block, to: &chain)
         }
 
         let preferredBaseHash = preferredChildForestHash(
@@ -202,7 +203,7 @@ final class ChildRootForestTests: XCTestCase {
         let expectedTip = preferredBaseHash == childForestHash(firstBase)
             ? childForestHash(firstLeaf)
             : childForestHash(secondLeaf)
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, expectedTip)
     }
 
@@ -224,17 +225,17 @@ final class ChildRootForestTests: XCTestCase {
             nonce: 19,
             fetcher: fetcher
         )
-        let greaterFirst = ChainState.fromGenesis(block: genesis)
-        let easierFirst = ChainState.fromGenesis(block: genesis)
+        var greaterFirst = ChainTree.fromGenesis(block: genesis)
+        var easierFirst = ChainTree.fromGenesis(block: genesis)
 
-        _ = await submitChildForestBlock(greaterWork, to: greaterFirst)
-        _ = await submitChildForestBlock(easierNext, to: greaterFirst)
-        _ = await submitChildForestBlock(easierNext, to: easierFirst)
-        _ = await submitChildForestBlock(greaterWork, to: easierFirst)
+        submitChildForestBlock(greaterWork, to: &greaterFirst)
+        submitChildForestBlock(easierNext, to: &greaterFirst)
+        submitChildForestBlock(easierNext, to: &easierFirst)
+        submitChildForestBlock(greaterWork, to: &easierFirst)
 
         let expectedTip = childForestHash(greaterWork)
-        let greaterFirstTip = await greaterFirst.canonicalTip
-        let easierFirstTip = await easierFirst.canonicalTip
+        let greaterFirstTip = greaterFirst.canonicalTip
+        let easierFirstTip = easierFirst.canonicalTip
         XCTAssertEqual(greaterFirstTip, expectedTip)
         XCTAssertEqual(easierFirstTip, expectedTip)
     }
@@ -250,25 +251,21 @@ final class ChildRootForestTests: XCTestCase {
             fetcher: fetcher
         )
         let expectedTip = childForestHash(sideChild)
-        let parentFirst = ChainState.fromGenesis(block: incumbentRoot)
-        let childFirst = ChainState.fromGenesis(block: incumbentRoot)
+        var parentFirst = ChainTree.fromGenesis(block: incumbentRoot)
+        var childFirst = ChainTree.fromGenesis(block: incumbentRoot)
 
-        _ = await submitChildForestBlock(sideRoot, to: parentFirst)
-        _ = await submitChildForestBlock(sideChild, to: parentFirst)
+        submitChildForestBlock(sideRoot, to: &parentFirst)
+        submitChildForestBlock(sideChild, to: &parentFirst)
 
-        _ = await submitChildForestBlock(sideChild, to: childFirst)
-        let requirements = await childFirst.unresolvedSameChainPredecessors()
-        XCTAssertEqual(
-            requirements,
-            [SameChainPredecessorRequirement(
-                descendantCID: childForestHash(sideChild),
-                predecessorCID: childForestHash(sideRoot)
-            )]
-        )
-        _ = await submitChildForestBlock(sideRoot, to: childFirst)
+        submitChildForestBlock(sideChild, to: &childFirst)
+        // Held, unconnected, awaiting exactly its parent.
+        XCTAssertFalse(childFirst.hasConnectedAncestry(blockHash: childForestHash(sideChild)))
+        XCTAssertEqual(childFirst.parentHash(of: childForestHash(sideChild)), childForestHash(sideRoot))
+        XCTAssertFalse(childFirst.contains(blockHash: childForestHash(sideRoot)))
+        submitChildForestBlock(sideRoot, to: &childFirst)
 
-        let parentFirstTip = await parentFirst.canonicalTip
-        let childFirstTip = await childFirst.canonicalTip
+        let parentFirstTip = parentFirst.canonicalTip
+        let childFirstTip = childFirst.canonicalTip
         XCTAssertEqual(parentFirstTip, expectedTip)
         XCTAssertEqual(childFirstTip, expectedTip)
     }
@@ -283,13 +280,13 @@ final class ChildRootForestTests: XCTestCase {
             nonce: 5,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: incumbentRoot)
+        var chain = ChainTree.fromGenesis(block: incumbentRoot)
 
-        _ = await submitChildForestBlock(child, to: chain)
-        _ = await submitChildForestBlock(sideRoot, to: chain)
+        submitChildForestBlock(child, to: &chain)
+        submitChildForestBlock(sideRoot, to: &chain)
 
-        let snapshot = await chain.tipSnapshot
-        let tip = await chain.canonicalTip
+        let snapshot = chain.tipSnapshot
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, childForestHash(child))
         XCTAssertEqual(snapshot?.tipHeight, child.height)
         XCTAssertEqual(snapshot?.postStateCID, child.postState.rawCID)
@@ -306,21 +303,21 @@ final class ChildRootForestTests: XCTestCase {
             nonce: 4,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: incumbentRoot)
-        _ = await submitChildForestBlock(sideRoot, to: chain)
-        _ = await submitChildForestBlock(sideChild, to: chain)
-        let canonicalTip = await chain.canonicalTip
+        var chain = ChainTree.fromGenesis(block: incumbentRoot)
+        submitChildForestBlock(sideRoot, to: &chain)
+        submitChildForestBlock(sideChild, to: &chain)
+        let canonicalTip = chain.canonicalTip
 
-        let restored = try await ChainState.restoreWithoutContext(replaying: [
+        let restored = try ChainTree.restoreWithoutContext(replaying: [
             testAdmissionBatch(for: incumbentRoot),
             testAdmissionBatch(for: sideRoot),
             testAdmissionBatch(for: sideChild),
         ])
 
-        let restoredTip = await restored.canonicalTip
-        let containsIncumbent = await restored.contains(blockHash: childForestHash(incumbentRoot))
-        let containsSideRoot = await restored.contains(blockHash: childForestHash(sideRoot))
-        let containsSideChild = await restored.contains(blockHash: childForestHash(sideChild))
+        let restoredTip = restored.canonicalTip
+        let containsIncumbent = restored.contains(blockHash: childForestHash(incumbentRoot))
+        let containsSideRoot = restored.contains(blockHash: childForestHash(sideRoot))
+        let containsSideChild = restored.contains(blockHash: childForestHash(sideChild))
         XCTAssertEqual(restoredTip, canonicalTip)
         XCTAssertTrue(containsIncumbent)
         XCTAssertTrue(containsSideRoot)

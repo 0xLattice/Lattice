@@ -11,7 +11,7 @@ import cashew
 import UInt256
 
 final class ConsensusGraphRecoveryTests: XCTestCase {
-    func testCompleteConsensusGraphAndRevisionSurviveFactReplay() async throws {
+    func testCompleteConsensusGraphSurvivesFactReplay() async throws {
         let fetcher = StorableFetcher()
         let target = UInt256(1_000)
         let base = Int64(Date().timeIntervalSince1970 * 1_000) - 30_000
@@ -42,11 +42,11 @@ final class ConsensusGraphRecoveryTests: XCTestCase {
             nonce: 3,
             fetcher: fetcher
         )
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         for block in [first, second, descendant] {
             let header = try BlockHeader(node: block)
-            let result = await chain.submitBlock(
+            let result = chain.submitBlock(
                 blockHeader: header,
                 block: block,
                 contribution: VerifiedWorkContribution(
@@ -62,43 +62,37 @@ final class ConsensusGraphRecoveryTests: XCTestCase {
         let secondHash = try BlockHeader(node: second).rawCID
         let descendantHash = try BlockHeader(node: descendant).rawCID
         let expectedHashes = Set([genesisHash, firstHash, secondHash, descendantHash])
-        let rootValue = await chain.getConsensusBlock(hash: genesisHash)
-        let branchValue = await chain.getConsensusBlock(hash: secondHash)
+        let rootValue = chain.getConsensusBlock(hash: genesisHash)
+        let branchValue = chain.getConsensusBlock(hash: secondHash)
         let root = try XCTUnwrap(rootValue)
         let branch = try XCTUnwrap(branchValue)
 
-        let revision = await chain.currentRevision()
-        XCTAssertEqual(revision, 3)
         for hash in expectedHashes {
-            let contains = await chain.contains(blockHash: hash)
+            let contains = chain.contains(blockHash: hash)
             XCTAssertTrue(contains)
         }
         XCTAssertEqual(Set(root.childHashes), [firstHash, secondHash])
         XCTAssertEqual(branch.childHashes, [descendantHash])
 
-        let restored = try await ChainState.restoreWithoutContext(replaying: [
+        let restored = try ChainTree.restoreWithoutContext(replaying: [
             testAdmissionBatch(for: genesis),
             testAdmissionBatch(for: first),
             testAdmissionBatch(for: second),
             testAdmissionBatch(for: descendant),
         ])
-        let originalRootWork = await chain.subtreeWeight(forHash: genesisHash)
-        let restoredRootWork = await restored.subtreeWeight(forHash: genesisHash)
-        let originalTip = await chain.canonicalTip
-        let restoredTip = await restored.canonicalTip
+        let originalRootWork = chain.subtreeWeight(forHash: genesisHash)
+        let restoredRootWork = restored.subtreeWeight(forHash: genesisHash)
+        let originalTip = chain.canonicalTip
+        let restoredTip = restored.canonicalTip
 
-        let restoredRevision = await restored.currentRevision()
-        // Replay counts the genesis insert as a mutation; the live chain here
-        // was seeded by the test-only `fromGenesis` at revision 0.
-        XCTAssertEqual(restoredRevision, revision + 1)
         for hash in expectedHashes {
-            let contains = await restored.contains(blockHash: hash)
+            let contains = restored.contains(blockHash: hash)
             XCTAssertTrue(contains)
         }
         XCTAssertEqual(restoredTip, originalTip)
         XCTAssertEqual(restoredRootWork, originalRootWork)
         for hash in expectedHashes {
-            let value = await restored.getConsensusBlock(hash: hash)
+            let value = restored.getConsensusBlock(hash: hash)
             let meta = try XCTUnwrap(value)
             XCTAssertFalse(meta.workContributions.isEmpty)
         }

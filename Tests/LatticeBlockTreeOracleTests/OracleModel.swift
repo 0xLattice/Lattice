@@ -90,7 +90,7 @@ protocol OracleSubject {
         specs: [ChainSpec],
         parent: Self
     ) -> Result<Self, OracleRestoreFailure>
-    mutating func apply(_ batch: OracleBatch, reserved: Bool) -> OracleOutcome
+    mutating func apply(_ batch: OracleBatch) -> OracleOutcome
     mutating func serveRuns(_ directory: String)
     mutating func applyParentRun(
         from parent: Self,
@@ -98,7 +98,6 @@ protocol OracleSubject {
         parentBlocks: Set<String>?,
         held: Set<String>
     ) -> OracleOutcome
-    mutating func reevaluate() -> OracleOutcome
     /// The cheap read, which materializes no cache: what most steps compare,
     /// so a stale cache can carry across several unobserved mutations.
     mutating func observeTip() -> [String: String]

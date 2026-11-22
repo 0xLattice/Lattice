@@ -294,11 +294,10 @@ extension ChainTree {
             else { continue }
             let submission = credit(id, value, to: block, attributed: true)
             // A strict increase at a held block, at the one location its ID
-            // can have, is refused only when revisions are exhausted: never
-            // drop a derivation silently.
+            // can have, is never refused: never drop a derivation silently.
             precondition(
                 submission.addedContribution,
-                "attributed run \(id) at \(hash) refused: mutation revisions exhausted"
+                "attributed run \(id) at \(hash) refused"
             )
             raised.append(hash)
         }
@@ -307,7 +306,7 @@ extension ChainTree {
         let change = projectCanonicalChain(
             increasedAt: raised.count == 1 ? graph.handle(raised[0]) : nil
         )
-        return (raised, change?.atRevision(mutationGeneration))
+        return (raised, change)
     }
 
     /// The commitments recorded for a held block (§9.10), or nil when the

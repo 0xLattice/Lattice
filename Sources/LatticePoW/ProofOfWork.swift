@@ -20,21 +20,6 @@ public func workForTarget(_ target: UInt256) -> UInt256 {
     return (UInt256.max - target) / (target + UInt256(1)) + UInt256(1)
 }
 
-/// Work demonstrated by one observed hash. This is used for the setup-wide
-/// traversal floor, which is deliberately independent of any chain target.
-///
-/// The root-work test is inclusive (`observedHash <= threshold`), so a hash `h`
-/// demonstrates the same work as a target of `h`: `2^256 / (h + 1)`, the
-/// inclusive form used by `workForTarget`. The old exclusive `2^256 / h`
-/// over-credited by up to ~2x at tiny hashes (hash 1 scored ~2^256 rather than
-/// its true ~2^255). Saturating edges: hash 0 is the single smallest output
-/// (maximal work, clamped to `.max`); hash `.max` is trivially met (one unit).
-public func workForHash(_ hash: UInt256) -> UInt256 {
-    guard hash > UInt256.zero else { return UInt256.max }
-    guard hash < UInt256.max else { return UInt256(1) }
-    return (UInt256.max - hash) / (hash + UInt256(1)) + UInt256(1)
-}
-
 /// The block the difficulty schedule is measured from: height 1 of this block's
 /// OWN ancestry, carried forward so it costs nothing to reach.
 ///

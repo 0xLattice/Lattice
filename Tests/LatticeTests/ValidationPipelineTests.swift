@@ -162,14 +162,14 @@ final class BlockBuilderSubmissionTests: XCTestCase {
 
     func testBuiltBlocksFormValidChain() async throws {
         let genesis = try await genesisBlock()
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var prev = genesis
         var ts: Int64 = 2_000_000
         for i in 1...10 {
             let block = try await nextBlock(previous: prev, timestamp: ts, nonce: UInt64(i))
             let header = try! VolumeImpl<Block>(node: block)
-            let result = await chain.submitTestBlock(
+            let result = chain.submitTestBlock(
                 blockHeader: header,
                 block: block
             )
@@ -178,19 +178,19 @@ final class BlockBuilderSubmissionTests: XCTestCase {
             ts += 1_000
         }
 
-        let highest = await chain.getHighestBlockHeight()
+        let highest = chain.getHighestBlockHeight()
         XCTAssertEqual(highest, 10)
     }
 
     func testBuiltForkTriggersReorg() async throws {
         let genesis = try await genesisBlock()
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         var mainPrev = genesis
         var ts: Int64 = 2_000_000
         for i in 1...3 {
             let block = try await nextBlock(previous: mainPrev, timestamp: ts, nonce: UInt64(i))
-            let _ = await chain.submitTestBlock(
+            let _ = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block),
                 block: block
             )
@@ -198,8 +198,8 @@ final class BlockBuilderSubmissionTests: XCTestCase {
             ts += 1_000
         }
 
-        let tipBefore = await chain.canonicalTip
-        let heightBefore = await chain.getHighestBlockHeight()
+        let tipBefore = chain.canonicalTip
+        let heightBefore = chain.getHighestBlockHeight()
         XCTAssertEqual(heightBefore, 3)
 
         var forkPrev = genesis
@@ -207,7 +207,7 @@ final class BlockBuilderSubmissionTests: XCTestCase {
         var sawReorg = false
         for i in 1...5 {
             let block = try await nextBlock(previous: forkPrev, timestamp: ts, nonce: UInt64(100 + i))
-            let result = await chain.submitTestBlock(
+            let result = chain.submitTestBlock(
                 blockHeader: try! VolumeImpl<Block>(node: block),
                 block: block
             )
@@ -217,9 +217,9 @@ final class BlockBuilderSubmissionTests: XCTestCase {
         }
 
         XCTAssertTrue(sawReorg, "Longer fork should trigger reorg")
-        let tipAfter = await chain.canonicalTip
+        let tipAfter = chain.canonicalTip
         XCTAssertNotEqual(tipBefore, tipAfter)
-        let heightAfter = await chain.getHighestBlockHeight()
+        let heightAfter = chain.getHighestBlockHeight()
         XCTAssertEqual(heightAfter, 5)
     }
 }
@@ -483,48 +483,42 @@ final class OutOfOrderSubmissionTests: XCTestCase {
 
     func testMissingParentIsRequested() async throws {
         let genesis = try await genesisBlock()
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let block1 = try await nextBlock(previous: genesis, timestamp: 2_000_000, nonce: 1)
         let block2 = try await nextBlock(previous: block1, timestamp: 3_000_000, nonce: 2)
 
-        _ = await chain.submitTestBlock(
+        _ = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block2),
             block: block2
         )
-        let requirements = await chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(
-            requirements,
-            [SameChainPredecessorRequirement(
-                descendantCID: try VolumeImpl<Block>(node: block2).rawCID,
-                predecessorCID: try VolumeImpl<Block>(node: block1).rawCID
-            )]
-        )
+        let orphan = try VolumeImpl<Block>(node: block2).rawCID
+        XCTAssertFalse(chain.hasConnectedAncestry(blockHash: orphan))
+        XCTAssertEqual(chain.parentHash(of: orphan), try VolumeImpl<Block>(node: block1).rawCID)
     }
 
     func testParentArrivalConnectsQueuedDescendant() async throws {
         let genesis = try await genesisBlock()
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
 
         let block1 = try await nextBlock(previous: genesis, timestamp: 2_000_000, nonce: 1)
         let block2 = try await nextBlock(previous: block1, timestamp: 3_000_000, nonce: 2)
 
-        _ = await chain.submitTestBlock(
+        _ = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block2),
             block: block2
         )
-        let orphanRequirements = await chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(orphanRequirements.count, 1)
+        let orphan = try VolumeImpl<Block>(node: block2).rawCID
+        XCTAssertFalse(chain.hasConnectedAncestry(blockHash: orphan))
 
-        let _ = await chain.submitTestBlock(
+        let _ = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block1),
             block: block1
         )
 
-        let tip = await chain.canonicalTip
-        let remainingRequirements = await chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(tip, try! VolumeImpl<Block>(node: block2).rawCID)
-        XCTAssertTrue(remainingRequirements.isEmpty)
+        let tip = chain.canonicalTip
+        XCTAssertEqual(tip, orphan)
+        XCTAssertTrue(chain.hasConnectedAncestry(blockHash: orphan))
     }
 }
 

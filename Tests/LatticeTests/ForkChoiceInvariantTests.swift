@@ -23,15 +23,15 @@ import XCTest
 /// Every routed block's children are all routed, parent-consistent and one
 /// height above it, and its parent, when it has one, is routed.
 func assertRoutedClosedUnderChildren(
-    _ chain: ChainState,
+    _ chain: ChainTree,
     _ event: String,
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {
-    let blocks = await chain.hashToBlock
+    let blocks = chain.hashToBlock
     var routed = Set<String>()
     for hash in blocks.keys {
-        if await chain.hasConnectedAncestry(blockHash: hash) { routed.insert(hash) }
+        if chain.hasConnectedAncestry(blockHash: hash) { routed.insert(hash) }
     }
     // A restored chain always routes its genesis, so an empty set here would
     // make everything below vacuous.
@@ -72,20 +72,20 @@ final class ForkChoiceInvariantTests: XCTestCase {
 
     /// `chainWithMostWork` from every routed block — the descent every
     /// `forkChoiceSnapshot` takes, excluded starts included.
-    private func assertDescendsFromEveryRoutedBlock(_ chain: ChainState, _ label: String) async {
-        let blocks = await chain.hashToBlock
-        for hash in blocks.keys.sorted() where await chain.hasConnectedAncestry(blockHash: hash) {
-            let snapshot = await chain.forkChoiceSnapshot(startingAt: hash)
+    private func assertDescendsFromEveryRoutedBlock(_ chain: ChainTree, _ label: String) async {
+        let blocks = chain.hashToBlock
+        for hash in blocks.keys.sorted() where chain.hasConnectedAncestry(blockHash: hash) {
+            let snapshot = chain.forkChoiceSnapshot(startingAt: hash)
             XCTAssertNotNil(snapshot, "\(label): no snapshot from routed \(hash)")
         }
     }
 
     private func admitCheckingInvariants(_ order: [ForkChoiceGoldenEvent], _ label: String) async throws {
-        let chain = try await ChainState.restoreWithoutContext(replaying: [order[0].batch])
-        await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
+        var chain = try ChainTree.restoreWithoutContext(replaying: [order[0].batch])
+        chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
         await assertRoutedClosedUnderChildren(chain, "\(label): genesis")
         for event in order.dropFirst() {
-            _ = try await chain.replay(event.batch)
+            _ = try chain.replay(event.batch)
             await assertRoutedClosedUnderChildren(chain, "\(label): event \(event.index)")
         }
         await assertDescendsFromEveryRoutedBlock(chain, label)
@@ -103,8 +103,8 @@ final class ForkChoiceInvariantTests: XCTestCase {
         var batches = graph.events.map(\.batch)
         var random = GoldenRandom(seed: 0x5EED_5EED)
         random.shuffle(&batches)
-        let chain = try await ChainState.restoreWithoutContext(replaying: batches)
-        await chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
+        var chain = try ChainTree.restoreWithoutContext(replaying: batches)
+        chain.serveRuns(for: ForkChoiceGoldenGraph.directory)
         await assertRoutedClosedUnderChildren(chain, "shuffled restore")
         await assertDescendsFromEveryRoutedBlock(chain, "shuffled restore")
     }
@@ -117,21 +117,21 @@ final class ForkChoiceInvariantTests: XCTestCase {
             0x1234_5678, 0x8765_4321, 0x0DDC_0FFE, 0x51DE_CAFE,
         ] {
             let planned = SegmentBaseDifferentialFixtures.planned(seed: seed)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [planned[0].batch])
+            var chain = try ChainTree.restoreWithoutContext(replaying: [planned[0].batch])
             let order = [4, 3, 1, 2, 5] + Array(6..<planned.count)
             for index in order {
-                _ = try await chain.replay(planned[index].batch)
+                _ = try chain.replay(planned[index].batch)
                 await assertRoutedClosedUnderChildren(chain, "seed \(seed) block \(index)")
             }
             let shared = testCID("invariant-differential-\(seed)-shared")
             for strength in [3, 7, 11] {
-                _ = try await chain.replay(SegmentBaseDifferentialFixtures.work(
+                _ = try chain.replay(SegmentBaseDifferentialFixtures.work(
                     blockHash: planned[4].hash, id: shared, work: UInt64(strength)
                 ))
                 await assertRoutedClosedUnderChildren(chain, "seed \(seed) strengthening \(strength)")
             }
             for index in stride(from: 2, to: planned.count, by: 3) where planned[index].parentHash != nil {
-                _ = try await chain.replay(SegmentBaseDifferentialFixtures.exclusion(of: planned[index].hash))
+                _ = try chain.replay(SegmentBaseDifferentialFixtures.exclusion(of: planned[index].hash))
                 await assertRoutedClosedUnderChildren(chain, "seed \(seed) exclusion \(index)")
             }
             await assertDescendsFromEveryRoutedBlock(chain, "seed \(seed)")

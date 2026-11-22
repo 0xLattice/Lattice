@@ -435,38 +435,6 @@ public struct BlockBuilder {
         )
     }
 
-    // MARK: - Mining (find valid nonce)
-
-    public static func mine(
-        block: Block,
-        target: UInt256,
-        maxAttempts: UInt64 = UInt64.max
-    ) -> Block? {
-        for nonce in 0..<maxAttempts {
-            let data = Block.makeProofOfWorkPreimage(block: block, nonce: nonce)
-            let hash = UInt256.hash(data)
-            if target >= hash {
-                return Block(
-                    version: block.version,
-                    parent: block.parent,
-                    transactions: block.transactions,
-                    target: block.target,
-                    nextTarget: block.nextTarget,
-                    spec: block.spec,
-                    parentState: block.parentState,
-                    prevState: block.prevState,
-                    postState: block.postState,
-                    children: block.children,
-                    height: block.height,
-                    timestamp: block.timestamp,
-                    rewardRecipient: block.rewardRecipient,
-                    nonce: nonce
-                )
-            }
-        }
-        return nil
-    }
-
     // MARK: - Post State Computation
 
     /// With `maxStateGrowth`, a transition that would grow state past it

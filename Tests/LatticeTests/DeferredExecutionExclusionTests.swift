@@ -53,8 +53,7 @@ final class DeferredExecutionExclusionTests: XCTestCase {
                 specCID: testCID("exclusion-spec-\(block.hash)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(block.height),
-                stateDiff: .empty
+                timestamp: Int64(block.height)
             )),
             .work(ChainWorkFact(blockHash: block.hash, contribution: contribution)),
         ])
@@ -69,7 +68,7 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// Genesis G with a heavier chain H1→H2→H3 (work 5 each = 15) and a lighter
     /// chain L1→L2 (work 4 each = 8). Before exclusion the tip is H3.
     private func buildForkedChain() async throws -> (
-        chain: ChainState,
+        chain: ChainTree,
         g: PlannedBlock,
         h: [PlannedBlock],
         l: [PlannedBlock],
@@ -86,11 +85,11 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         var batches = [admission(for: g)]
         for b in h + l { batches.append(admission(for: b)) }
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(for: g)])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(for: g)])
         for b in h + l {
-            _ = try await chain.applyStaged(admission(for: b))
+            _ = try chain.applyStaged(admission(for: b))
         }
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, h3.hash, "precondition: heaviest chain H is the tip")
         return (chain, g, h, l, batches)
     }
@@ -100,19 +99,19 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// A heaviest chain whose block is proven invalid is EXCLUDED and the tip
     /// demotes to the heaviest VALID chain. Excluded blocks stay served.
     func testExcludedSubtreeDemotesTipToHeaviestValidChain() async throws {
-        let (chain, g, h, l, _) = try await buildForkedChain()
+        var (chain, g, h, l, _) = try await buildForkedChain()
 
-        _ = try await chain.applyStaged(exclusion(of: h[0]))
+        _ = try chain.applyStaged(exclusion(of: h[0]))
 
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, l[1].hash, "tip demotes to heaviest valid chain L2")
 
-        let path = await chain.canonicalHashes
+        let path = chain.canonicalHashes
         XCTAssertEqual(path, [g.hash, l[0].hash, l[1].hash])
 
         // Excluded facts are NOT pruned: still present and served.
         for b in h {
-            let present = await chain.contains(blockHash: b.hash)
+            let present = chain.contains(blockHash: b.hash)
             XCTAssertTrue(present, "excluded block \(b.hash) remains served")
         }
     }
@@ -120,18 +119,18 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// The live projection under exclusion matches the reference oracle applied
     /// to the same exclusion — both descents skip the excluded subtree.
     func testLiveProjectionMatchesReferenceOracleUnderExclusion() async throws {
-        let (chain, _, h, l, _) = try await buildForkedChain()
-        _ = try await chain.applyStaged(exclusion(of: h[0]))
+        var (chain, _, h, l, _) = try await buildForkedChain()
+        _ = try chain.applyStaged(exclusion(of: h[0]))
 
-        let blocks = await chain.hashToBlock
-        let excluded = await chain.excludedRootsForTesting
+        let blocks = chain.hashToBlock
+        let excluded = chain.excludedRootsForTesting
         guard let expected = ForkChoiceOracle(blocks: blocks, excluded: excluded)
             .view().canonicalProjection()
         else {
             return XCTFail("reference oracle produced no projection")
         }
-        let liveTip = await chain.canonicalTip
-        let livePath = await chain.canonicalHashes
+        let liveTip = chain.canonicalTip
+        let livePath = chain.canonicalHashes
         XCTAssertEqual(liveTip, expected.tip)
         XCTAssertEqual(livePath, Set(expected.path))
         XCTAssertEqual(expected.tip, l[1].hash)
@@ -140,10 +139,10 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// Exclusion survives restore: replaying all durable facts (including the
     /// exclusion) in an adversarial order reproduces the demoted tip.
     func testExclusionIsReplayInvariant() async throws {
-        let (chain, _, h, l, batches) = try await buildForkedChain()
-        _ = try await chain.applyStaged(exclusion(of: h[0]))
-        let expectedTip = await chain.canonicalTip
-        let expectedPath = await chain.canonicalHashes
+        var (chain, _, h, l, batches) = try await buildForkedChain()
+        _ = try chain.applyStaged(exclusion(of: h[0]))
+        let expectedTip = chain.canonicalTip
+        let expectedPath = chain.canonicalHashes
         XCTAssertEqual(expectedTip, l[1].hash)
 
         // Durable facts in an order that presents the exclusion before, between,
@@ -151,9 +150,9 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         var durable = batches
         durable.insert(exclusion(of: h[0]), at: 2)
 
-        let restored = try await ChainState.restoreWithoutContext(replaying: durable)
-        let restoredTip = await restored.canonicalTip
-        let restoredPath = await restored.canonicalHashes
+        let restored = try ChainTree.restoreWithoutContext(replaying: durable)
+        let restoredTip = restored.canonicalTip
+        let restoredPath = restored.canonicalHashes
         XCTAssertEqual(restoredTip, expectedTip)
         XCTAssertEqual(restoredPath, expectedPath)
     }
@@ -171,44 +170,44 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         let l1 = block("l1", parent: g, work: 4)
         let l2 = block("l2", parent: l1, work: 4)
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(for: g)])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(for: g)])
         // R and the valid chain exist; B and C do not yet.
-        _ = try await chain.applyStaged(admission(for: r))
-        _ = try await chain.applyStaged(admission(for: l1))
-        _ = try await chain.applyStaged(admission(for: l2))
+        _ = try chain.applyStaged(admission(for: r))
+        _ = try chain.applyStaged(admission(for: l1))
+        _ = try chain.applyStaged(admission(for: l2))
 
         // Prove R invalid while B, C are still absent.
-        _ = try await chain.applyStaged(exclusion(of: r))
+        _ = try chain.applyStaged(exclusion(of: r))
 
         // C arrives before its parent B — an orphan attach.
-        _ = try await chain.applyStaged(admission(for: c))
+        _ = try chain.applyStaged(admission(for: c))
         // B connects under the excluded root R, grafting C with it. Nothing is
         // folded anywhere: descendants of an excluded root need no bookkeeping,
         // because the descent never reaches them.
-        _ = try await chain.applyStaged(admission(for: b))
+        _ = try chain.applyStaged(admission(for: b))
 
-        let roots = await chain.excludedRootsForTesting
+        let roots = chain.excludedRootsForTesting
         XCTAssertEqual(roots, [r.hash], "only the proven-invalid root is recorded")
 
         // C weighs its work — validity never subtracts weight — and so does the
         // whole excluded subtree for its ancestors; yet nothing below R is ever
         // selected: the tip is the valid chain.
-        let cWeight = await chain.subtreeWeight(forHash: c.hash)
+        let cWeight = chain.subtreeWeight(forHash: c.hash)
         XCTAssertEqual(cWeight, WorkSum(UInt256(c.work)))
-        let gWeight = await chain.subtreeWeight(forHash: g.hash)
+        let gWeight = chain.subtreeWeight(forHash: g.hash)
         XCTAssertEqual(
             gWeight,
             [g, r, b, c, l1, l2].reduce(WorkSum.zero) { $0 + UInt256($1.work) },
             "the excluded subtree still weighs for its ancestors"
         )
-        let path = await chain.canonicalHashes
+        let path = chain.canonicalHashes
         XCTAssertFalse(path.contains(c.hash))
         XCTAssertFalse(path.contains(b.hash))
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, l2.hash)
 
         // Matches the reference oracle over the same exclusion.
-        let blocks = await chain.hashToBlock
+        let blocks = chain.hashToBlock
         let expected = ForkChoiceOracle(blocks: blocks, excluded: roots)
             .view().canonicalProjection()
         XCTAssertEqual(tip, expected?.tip)
@@ -220,10 +219,10 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// projection per insert — the single filtered segment index keeps the fast
     /// spine early-out working, so the full-projection counter stays bounded.
     func testSideBlockSpamUnderExclusionDoesNotFullyProjectPerInsert() async throws {
-        let (chain, g, h, _, _) = try await buildForkedChain()
-        _ = try await chain.applyStaged(exclusion(of: h[0]))
+        var (chain, g, h, _, _) = try await buildForkedChain()
+        _ = try chain.applyStaged(exclusion(of: h[0]))
 
-        let baseline = await chain.fullCanonicalProjectionCount
+        let baseline = chain.fullCanonicalProjectionCount
         // Many losing side blocks hung off genesis (height 1), none of which
         // changes the winning spine.
         for index in 0..<200 {
@@ -233,9 +232,9 @@ final class DeferredExecutionExclusionTests: XCTestCase {
                 height: 1,
                 work: 1
             )
-            _ = try await chain.applyStaged(admission(for: sibling))
+            _ = try chain.applyStaged(admission(for: sibling))
         }
-        let after = await chain.fullCanonicalProjectionCount
+        let after = chain.fullCanonicalProjectionCount
         XCTAssertLessThanOrEqual(
             after - baseline,
             5,
@@ -247,10 +246,10 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// defer-and-retry (not corrupt), then reproject identically to the live
     /// order. Exercises the missing-block defer path in `applyExclusion`.
     func testExclusionStrictlyBeforeBlockDefersAndReprojectsIdentically() async throws {
-        let (chain, _, h, l, batches) = try await buildForkedChain()
-        _ = try await chain.applyStaged(exclusion(of: h[0]))
-        let expectedTip = await chain.canonicalTip
-        let expectedPath = await chain.canonicalHashes
+        var (chain, _, h, l, batches) = try await buildForkedChain()
+        _ = try chain.applyStaged(exclusion(of: h[0]))
+        let expectedTip = chain.canonicalTip
+        let expectedPath = chain.canonicalHashes
         XCTAssertEqual(expectedTip, l[1].hash)
 
         // Durable order: genesis first (restore needs a root), then the exclusion
@@ -259,15 +258,15 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         durable.append(exclusion(of: h[0]))
         durable.append(contentsOf: batches.dropFirst())
 
-        let restored = try await ChainState.restoreWithoutContext(replaying: durable)
-        let restoredTip = await restored.canonicalTip
-        let restoredPath = await restored.canonicalHashes
+        let restored = try ChainTree.restoreWithoutContext(replaying: durable)
+        let restoredTip = restored.canonicalTip
+        let restoredPath = restored.canonicalHashes
         XCTAssertEqual(restoredTip, expectedTip)
         XCTAssertEqual(restoredPath, expectedPath)
 
         // And the excluded root is genuinely recorded after recovery; its
         // descendants need no record, since the descent never reaches them.
-        let roots = await restored.excludedRootsForTesting
+        let roots = restored.excludedRootsForTesting
         XCTAssertEqual(roots, [h[0].hash])
         for excluded in h {
             XCTAssertFalse(restoredPath.contains(excluded.hash), "\(excluded.hash) is never canonical")
@@ -277,22 +276,22 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// A miner cannot resurrect an excluded subtree by piling on more work: a
     /// heavier extension of the excluded chain is still never acted on.
     func testHeavierExtensionOfExcludedChainNeverResurrectsTip() async throws {
-        let (chain, _, h, l, _) = try await buildForkedChain()
-        _ = try await chain.applyStaged(exclusion(of: h[0]))
-        let tipAfterExclusion = await chain.canonicalTip
+        var (chain, _, h, l, _) = try await buildForkedChain()
+        _ = try chain.applyStaged(exclusion(of: h[0]))
+        let tipAfterExclusion = chain.canonicalTip
         XCTAssertEqual(tipAfterExclusion, l[1].hash)
 
         // H4 extends H3 with enormous work — the excluded subtree stays excluded.
         let h4 = block("h4", parent: h[2], work: 1_000_000)
-        _ = try await chain.applyStaged(admission(for: h4))
+        _ = try chain.applyStaged(admission(for: h4))
 
-        let tipAfterExtension = await chain.canonicalTip
+        let tipAfterExtension = chain.canonicalTip
         XCTAssertEqual(
             tipAfterExtension,
             l[1].hash,
             "excluded subtree extension is weighed-but-never-acted-on"
         )
-        let extendedPath = await chain.canonicalHashes
+        let extendedPath = chain.canonicalHashes
         XCTAssertEqual(extendedPath.contains(h4.hash), false)
     }
 
@@ -314,7 +313,7 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     /// the descent stops at B0, because B1 is never stepped into. What §9.9
     /// forbids is B1 itself, or anything below it, ever being selected.
     private func buildGraftedExclusionChain() async throws -> (
-        chain: ChainState,
+        chain: ChainTree,
         g: PlannedBlock,
         p: PlannedBlock,
         b0: PlannedBlock,
@@ -327,28 +326,28 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         let b1 = block("graft-b1", parent: b0, work: 10)
         let v1 = block("graft-v1", parent: g, work: 4)
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [admission(for: g)])
-        _ = try await chain.applyStaged(admission(for: v1))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [admission(for: g)])
+        _ = try chain.applyStaged(admission(for: v1))
 
         // B0 and B1 arrive while their connecting ancestor P is withheld, so
         // neither routes: the work is held, fork choice never sees it.
-        _ = try await chain.applyStaged(admission(for: b0))
-        _ = try await chain.applyStaged(admission(for: b1))
-        let b0Routed = await chain.hasConnectedAncestry(blockHash: b0.hash)
-        let b1Routed = await chain.hasConnectedAncestry(blockHash: b1.hash)
+        _ = try chain.applyStaged(admission(for: b0))
+        _ = try chain.applyStaged(admission(for: b1))
+        let b0Routed = chain.hasConnectedAncestry(blockHash: b0.hash)
+        let b1Routed = chain.hasConnectedAncestry(blockHash: b1.hash)
         XCTAssertFalse(b0Routed, "precondition: B0 is weighed but unrouted")
         XCTAssertFalse(b1Routed, "precondition: B1 is weighed but unrouted")
 
         // The verdict lands on an unrouted block.
-        _ = try await chain.applyStaged(exclusion(of: b1))
-        let roots = await chain.excludedRootsForTesting
+        _ = try chain.applyStaged(exclusion(of: b1))
+        let roots = chain.excludedRootsForTesting
         XCTAssertTrue(
             roots.contains(b1.hash),
             "precondition: durable exclusion recorded on an unrouted block"
         )
 
         // The withheld ancestor arrives and grafts the whole component in.
-        _ = try await chain.applyStaged(admission(for: p))
+        _ = try chain.applyStaged(admission(for: p))
         return (chain, g, p, b0, b1, v1)
     }
 
@@ -366,9 +365,9 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         }
 
         // Genesis range: G + P + B0 + B1 + V1. The excluded B1 weighs.
-        let snapG = await chain.forkChoiceSnapshot(startingAt: g.hash)
+        let snapG = chain.forkChoiceSnapshot(startingAt: g.hash)
         let liveG = snapG?.subtreeWork
-        let oracleG = await chain.subtreeWeight(forHash: g.hash)
+        let oracleG = chain.subtreeWeight(forHash: g.hash)
         XCTAssertEqual(
             liveG,
             plannedWork([g, p, b0, b1, v1]),
@@ -377,18 +376,18 @@ final class DeferredExecutionExclusionTests: XCTestCase {
         XCTAssertEqual(liveG, oracleG, "genesis: live index must match the recomputation")
 
         // The grafted component's own root: P + B0 + B1.
-        let snapP = await chain.forkChoiceSnapshot(startingAt: p.hash)
+        let snapP = chain.forkChoiceSnapshot(startingAt: p.hash)
         let liveP = snapP?.subtreeWork
-        let oracleP = await chain.subtreeWeight(forHash: p.hash)
+        let oracleP = chain.subtreeWeight(forHash: p.hash)
         XCTAssertEqual(liveP, plannedWork([p, b0, b1]), "grafted root counts its excluded descendant")
         XCTAssertEqual(liveP, oracleP, "grafted root: live index must match the recomputation")
 
-        let held = await chain.contains(blockHash: b1.hash)
+        let held = chain.contains(blockHash: b1.hash)
         XCTAssertTrue(held, "excluded block remains served")
-        let excludedWeight = await chain.subtreeWeight(forHash: b1.hash)
+        let excludedWeight = chain.subtreeWeight(forHash: b1.hash)
         XCTAssertEqual(excludedWeight, plannedWork([b1]), "an excluded block weighs its own work")
         // ... and descends nowhere.
-        let snapB1 = await chain.forkChoiceSnapshot(startingAt: b1.hash)
+        let snapB1 = chain.forkChoiceSnapshot(startingAt: b1.hash)
         XCTAssertEqual(snapB1?.tipHash, b1.hash)
         XCTAssertEqual(snapB1?.subtreeWork, plannedWork([b1]))
     }
@@ -401,17 +400,17 @@ final class DeferredExecutionExclusionTests: XCTestCase {
     func testExcludedWorkVotesForItsValidAncestorsButIsNeverSelected() async throws {
         let (chain, _, p, b0, b1, v1) = try await buildGraftedExclusionChain()
 
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, b0.hash, "the descent stops at the last selectable block above the exclusion")
-        let path = await chain.canonicalHashes
+        let path = chain.canonicalHashes
         XCTAssertTrue(path.contains(p.hash))
         XCTAssertTrue(path.contains(b0.hash))
         XCTAssertFalse(path.contains(b1.hash), "an excluded block is never canonical")
         XCTAssertFalse(path.contains(v1.hash))
 
         // The live projection agrees with the reference oracle.
-        let blocks = await chain.hashToBlock
-        let closure = await chain.excludedRootsForTesting
+        let blocks = chain.hashToBlock
+        let closure = chain.excludedRootsForTesting
         let expected = ForkChoiceOracle(blocks: blocks, excluded: closure)
             .view().canonicalProjection()
         XCTAssertEqual(tip, expected?.tip)

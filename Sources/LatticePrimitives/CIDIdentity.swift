@@ -1,7 +1,6 @@
 import Foundation
 import Crypto
 import CID
-import Synchronization
 
 /// Normalizes textual CID input before it becomes a consensus identity key.
 public enum CIDIdentity {
@@ -11,47 +10,11 @@ public enum CIDIdentity {
     // parse work on untrusted input to what the wire can represent.
     static let maximumTextBytes = Int(UInt16.max)
 
-    /// Strings already proven canonical. The check is a pure function of the
-    /// string but costs a full multibase parse, and the same
-    /// identity recurs across a block's facts and its successors' (hash,
-    /// parent, state, spec), so each is proven once. A canonical string is its
-    /// own canonical form, so membership is the whole answer. Bounded: the set
-    /// is dropped when full and holds only strings of at most
-    /// `provenCanonicalMaxBytes` (a real CID is ~59), so distinct inputs —
-    /// near-64 KiB CIDs from a peer included — cost at most a few MiB.
-    ///
-    /// ASCII only: `String` equality is Unicode canonical equivalence, under
-    /// which a non-ASCII spelling (U+212A KELVIN SIGN for "K") would match a
-    /// remembered ASCII CID that the parser itself refuses. Between ASCII
-    /// strings equality is byte equality.
-    private static let provenCanonical = Mutex<Set<String>>([])
-    static let provenCanonicalCapacity = 1 << 16
-    static let provenCanonicalMaxBytes = 128
-
     public static func canonicalString(_ value: String) -> String? {
         // The standard CID in canonical spelling is its own canonical form,
         // proven by the one strict decode (`CIDDigest`) without a parse.
         if CIDDigest(value) != nil { return value }
-        let memoizable = value.utf8.count <= provenCanonicalMaxBytes
-            && value.utf8.allSatisfy { $0 < 0x80 }
-        if memoizable, provenCanonical.withLock({ $0.contains(value) }) { return value }
-        guard let canonical = parseCanonicalString(value) else { return nil }
-        if memoizable, canonical == value {
-            provenCanonical.withLock {
-                if $0.count >= provenCanonicalCapacity { $0.removeAll(keepingCapacity: true) }
-                $0.insert(value)
-            }
-        }
-        return canonical
-    }
-
-    package static func isProvenCanonical(_ value: String) -> Bool {
-        provenCanonical.withLock { $0.contains(value) }
-    }
-
-    /// Start from an empty set, so a measurement sees cold-cache cost.
-    package static func forgetProvenCanonical() {
-        provenCanonical.withLock { $0.removeAll() }
+        return parseCanonicalString(value)
     }
 
     private static func parseCanonicalString(_ value: String) -> String? {

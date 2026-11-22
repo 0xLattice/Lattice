@@ -191,11 +191,11 @@ final class ForkChoicePropertyTests: XCTestCase {
                     blocks.append(makeBlockMeta(hash: blockCID("F\(i)"), previousHash: i == 1 ? blockCID("G") : blockCID("F\(i-1)"), height: UInt64(i), childHashes: children))
                 }
 
-                let chain = makeChain(blocks: blocks, canonicalHashes: Set([blockCID("G")] + (1...mainLen).map { blockCID("M\($0)") }))
-                let _ = await chain.reevaluateForkChoice()
+                var chain = makeChain(blocks: blocks, canonicalHashes: Set([blockCID("G")] + (1...mainLen).map { blockCID("M\($0)") }))
+                let _ = chain.projectCanonicalChain()
 
-                let tip = await chain.canonicalTip
-                let onMain = await chain.isCanonical(hash: tip)
+                let tip = chain.canonicalTip
+                let onMain = chain.isCanonical(hash: tip)
                 XCTAssertTrue(onMain, "Tip must be on main chain after reorg (mainLen=\(mainLen), forkLen=\(forkLen))")
             }
         }
@@ -208,10 +208,10 @@ final class ForkChoicePropertyTests: XCTestCase {
         let b1 = makeBlockMeta(hash: blockCID("B1"), previousHash: blockCID("G"), height: 1, childHashes: [blockCID("B2")])
         let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2)
 
-        let chain = makeChain(blocks: [g, a1, b1, b2], canonicalHashes: Set([blockCID("G"), blockCID("A1")]))
-        let _ = await chain.reevaluateForkChoice()
+        var chain = makeChain(blocks: [g, a1, b1, b2], canonicalHashes: Set([blockCID("G"), blockCID("A1")]))
+        let _ = chain.projectCanonicalChain()
 
-        let gOnMain = await chain.isCanonical(hash: blockCID("G"))
+        let gOnMain = chain.isCanonical(hash: blockCID("G"))
         XCTAssertTrue(gOnMain, "Genesis must always remain on main chain")
     }
 
@@ -224,8 +224,8 @@ final class ForkChoicePropertyTests: XCTestCase {
         let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2, childHashes: [blockCID("B3")])
         let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
-        let chain = makeChain(blocks: [g, a1, a2, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")]))
-        let reorg = await chain.reevaluateForkChoice()
+        var chain = makeChain(blocks: [g, a1, a2, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")]))
+        let reorg = chain.projectCanonicalChain()
 
         XCTAssertNotNil(reorg)
         if let reorg = reorg {
@@ -243,7 +243,7 @@ final class ForkChoicePropertyTests: XCTestCase {
         let a2 = makeBlockMeta(hash: blockCID("A2"), previousHash: blockCID("A1"), height: 2)
 
         let chain = makeChain(blocks: [g, a1, a2])
-        let work = await chain.chainWithMostWork(startingBlock: g)
+        let work = chain.chainWithMostWork(startingBlock: g)
         XCTAssertTrue(work.blocks.contains(blockCID("G")))
     }
 
@@ -257,10 +257,10 @@ final class ForkChoicePropertyTests: XCTestCase {
         let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
         let chain = makeChain(blocks: [g, a1, a2, b1, b2, b3])
-        let work = await chain.chainWithMostWork(startingBlock: g)
+        let work = chain.chainWithMostWork(startingBlock: g)
 
         for hash in work.blocks where hash != blockCID("G") {
-            let block = await chain.getConsensusBlock(hash: hash)
+            let block = chain.getConsensusBlock(hash: hash)
             XCTAssertNotNil(block)
             if let prevHash = block?.parentBlockHash {
                 XCTAssertTrue(work.blocks.contains(prevHash),

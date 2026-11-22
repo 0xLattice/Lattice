@@ -28,7 +28,6 @@ struct LiveSubject: OracleSubject {
                     target: block.target,
                     nextTarget: block.nextTarget,
                     timestamp: block.timestamp,
-                    stateDiff: .empty,
                     childCommitments: block.childCommitments
                 ))
             case .work(let blockHash, let grindID, let work):
@@ -73,19 +72,10 @@ struct LiveSubject: OracleSubject {
         }
     }
 
-    mutating func apply(_ batch: OracleBatch, reserved: Bool) -> OracleOutcome {
+    mutating func apply(_ batch: OracleBatch) -> OracleOutcome {
         let staged = Self.batch(batch)
         do {
-            let result: SubmissionResult?
-            if reserved {
-                guard tree.reserveImportRevision() else {
-                    return OracleOutcome(rendered: "noReservation")
-                }
-                result = try tree.applyReservedStaged(staged)
-            } else {
-                result = try tree.apply(staged)
-            }
-            guard let result else { return OracleOutcome(rendered: "nil") }
+            guard let result = try tree.apply(staged) else { return OracleOutcome(rendered: "nil") }
             let weighed = result.weighed.sorted()
             return OracleOutcome(
                 rendered: "block=\(result.addedBlock) contribution=\(result.addedContribution)"
@@ -116,12 +106,8 @@ struct LiveSubject: OracleSubject {
         )
     }
 
-    mutating func reevaluate() -> OracleOutcome {
-        OracleOutcome(rendered: Self.describe(tree.reevaluateForkChoice()))
-    }
-
     mutating func observeTip() -> [String: String] {
-        ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
+        ["tip": tree.canonicalTip]
     }
 
     mutating func observe(_ probe: OracleProbe) -> [String: String] {
@@ -131,9 +117,6 @@ struct LiveSubject: OracleSubject {
         seen["tipCumulativeWork"] = hex(tree.getTipCumulativeWork().toHexString())
         seen["specs"] = tree.specs.keys.sorted().joined(separator: ",")
         seen["preflight"] = Self.describe(tree.transactionPreflightTip())
-        seen["unresolved"] = tree.unresolvedSameChainPredecessors()
-            .map { "\($0.descendantCID)←\($0.predecessorCID)" }
-            .joined(separator: ",")
         for height in 0...probe.maxHeight {
             seen["canonical@\(height)"] = tree.canonicalBlockHash(atHeight: height) ?? "nil"
         }
@@ -147,8 +130,6 @@ struct LiveSubject: OracleSubject {
             seen["\(key) excludedRoot"] = "\(tree.isExcludedRoot(hash))"
             seen["\(key) connected"] = "\(tree.hasConnectedAncestry(blockHash: hash))"
             seen["\(key) parentHash"] = tree.parentHash(of: hash) ?? "nil"
-            seen["\(key) needs"] = tree.sameChainPredecessorRequirement(for: hash)
-                .map { "\($0.descendantCID)←\($0.predecessorCID)" } ?? "nil"
             seen["\(key) weight"] = tree.forkChoiceWeight(of: hash).map { hex($0.toHexString()) } ?? "nil"
             let meta = tree.getConsensusBlock(hash: hash)
             seen["\(key) meta"] = meta == nil ? "nil" : "present"
@@ -210,7 +191,6 @@ struct LiveSubject: OracleSubject {
             for to in probe.states {
                 let key = "state \(from)→\(to)"
                 seen["\(key) advanced"] = "\(tree.executedSetAdvanced(from: from, to: to))"
-                seen["\(key) continuity"] = "\(tree.hasStateContinuity(from: from, to: to))"
             }
         }
         return seen
@@ -223,7 +203,7 @@ struct LiveSubject: OracleSubject {
         let added = commit.canonicalBlocksAdded
             .sorted { $0.key < $1.key }
             .map { "\($0.key)@\($0.value)" }
-        return "r\(commit.revision) tip=\(commit.tipHash)"
+        return "tip=\(commit.tipHash)"
             + " added=\(added.joined(separator: ","))"
             + " removed=\(commit.canonicalBlocksRemoved.sorted().joined(separator: ","))"
     }
@@ -249,7 +229,8 @@ extension LiveSubject {
     /// descent, so these are the one place the twins differ.
     mutating func observeGraphQueries(_ probe: OracleProbe) -> [String: String] {
         var seen: [String: String] = [:]
-        // The node's retry loop: each tip refused is avoided in turn.
+        // The node's retry loop: each tip refused is avoided in turn
+        // (`ActOnRetryDescent.swift`, over public API).
         var avoided: Set<String> = []
         var tips: [String] = []
         for _ in 0..<4 {

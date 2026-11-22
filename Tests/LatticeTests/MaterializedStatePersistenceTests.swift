@@ -8,6 +8,10 @@ import XCTest
 @testable import LatticeImport
 import cashew
 
+/// A post-state stored by its diff alone (the `storeMaterialized(createdBy:)`
+/// fixture, as a node stores `materializedPostState`) resolves whole: the
+/// diff names every node the transition created, compressed radix nodes and
+/// receipt, balance and nonce changes included.
 final class MaterializedStatePersistenceTests: XCTestCase {
     func testStoreMaterializedPersistsCompressedRadixDescendants() async throws {
         let storage = StorableFetcher()

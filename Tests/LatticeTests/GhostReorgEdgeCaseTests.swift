@@ -31,15 +31,15 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let f2b = makeBlockMeta(hash: blockCID("F2b"), previousHash: blockCID("F1"), height: 2)
         let f3a = makeBlockMeta(hash: blockCID("F3a"), previousHash: blockCID("F2a"), height: 3)
 
-        let chain = makeChain(
+        var chain = makeChain(
             blocks: [g, m1, m2, m3, f1, f2a, f2b, f3a],
             canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2"), blockCID("M3")])
         )
         // subtreeWeight(F1) = {F1,F2a,F2b,F3a} = 4 > subtreeWeight(M1) = {M1,M2,M3} = 3.
-        let reorg = await chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg, "fork's branching subtree (4) outweighs main's single path (3)")
         // GHOST descent picks the heaviest leaf under F1 — the F2a→F3a branch.
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("F3a"), "descent rides the heavier branch to its leaf")
     }
 
@@ -51,10 +51,10 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let f1 = makeBlockMeta(hash: blockCID("F1"), previousHash: blockCID("G"),  height: 1, childHashes: [blockCID("F2")])
         let f2 = makeBlockMeta(hash: blockCID("F2"), previousHash: blockCID("F1"), height: 2)
 
-        let chain = makeChain(blocks: [g, m1, m2, f1, f2], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
-        let reorg = await chain.reevaluateForkChoice()
+        var chain = makeChain(blocks: [g, m1, m2, f1, f2], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg, "equal work and target choose the smaller segment-base hash")
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("F2"))
     }
 
@@ -68,14 +68,14 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let f2 = makeBlockMeta(hash: blockCID("F2"), previousHash: blockCID("F1"), height: 2, childHashes: [blockCID("F3")])
         let f3 = makeBlockMeta(hash: blockCID("F3"), previousHash: blockCID("F2"), height: 3)
 
-        let chain = makeChain(blocks: [g, m1, m2, f1, f2, f3], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
-        let reorg = await chain.reevaluateForkChoice()
+        var chain = makeChain(blocks: [g, m1, m2, f1, f2, f3], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         XCTAssertEqual(reorg?.canonicalBlocksRemoved, Set([blockCID("M1"), blockCID("M2")]), "entire old suffix removed")
         XCTAssertEqual(Set(reorg!.canonicalBlocksAdded.keys), Set([blockCID("F1"), blockCID("F2"), blockCID("F3")]), "winning path installed")
-        let tip = await chain.canonicalTip; XCTAssertEqual(tip, blockCID("F3"))
+        let tip = chain.canonicalTip; XCTAssertEqual(tip, blockCID("F3"))
         // Old main blocks are no longer on the main chain.
-        let m1OnMain = await chain.isCanonical(hash: blockCID("M1"))
+        let m1OnMain = chain.isCanonical(hash: blockCID("M1"))
         XCTAssertFalse(m1OnMain)
     }
 
@@ -89,15 +89,15 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let base = Int64(Date().timeIntervalSince1970 * 1000) - 50_000
         let spec = ChainSpec.test()
         let genesis = try await buildAndStoreGenesis(spec: spec, timestamp: base, target: diff, fetcher: fetcher)
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
         // Main chain G→A→B (2 blocks).
         let a = try await buildAndStoreBlock(previous: genesis, timestamp: base + 1000, target: diff, nonce: 1, fetcher: fetcher)
         let b = try await buildAndStoreBlock(previous: a, timestamp: base + 2000, target: diff, nonce: 2, fetcher: fetcher)
         for blk in [a, b] {
-            _ = await chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: blk), block: blk)
+            _ = chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: blk), block: blk)
         }
         let cid = { (blk: Block) in try! VolumeImpl<Block>(node: blk).rawCID }
-        let tipBefore = await chain.canonicalTip
+        let tipBefore = chain.canonicalTip
         XCTAssertEqual(tipBefore, cid(b))
 
         // Heavier fork G→X→Y→Z (3 blocks), delivered Z, Y, X (children before parents).
@@ -105,10 +105,10 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let y = try await buildAndStoreBlock(previous: x, timestamp: base + 2500, target: diff, nonce: 92, fetcher: fetcher)
         let z = try await buildAndStoreBlock(previous: y, timestamp: base + 3500, target: diff, nonce: 93, fetcher: fetcher)
         for blk in [z, y, x] {
-            _ = await chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: blk), block: blk)
+            _ = chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: blk), block: blk)
         }
         // Once X (the fork base) is delivered, the fork subtree (3) > main (2) ⇒ reorg.
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, cid(z), "out-of-order heavier fork reorgs once complete")
     }
 }
@@ -128,24 +128,24 @@ final class ReorgBookkeepingTests: XCTestCase {
         let base = Int64(Date().timeIntervalSince1970 * 1000) - 50_000
         let spec = ChainSpec.test()
         let genesis = try await buildAndStoreGenesis(spec: spec, timestamp: base, target: diff, fetcher: fetcher)
-        let chain = ChainState.fromGenesis(block: genesis)
+        var chain = ChainTree.fromGenesis(block: genesis)
         let cid = { (blk: Block) in try! VolumeImpl<Block>(node: blk).rawCID }
 
         // C0 extends genesis and becomes the tip.
         let c0 = try await buildAndStoreBlock(previous: genesis, timestamp: base + 1000, target: diff, nonce: 1, fetcher: fetcher)
-        _ = await chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: c0), block: c0)
-        let tipAfterC0 = await chain.canonicalTip
+        _ = chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: c0), block: c0)
+        let tipAfterC0 = chain.canonicalTip
         XCTAssertEqual(tipAfterC0, cid(c0))
 
         // C1 extends C0; G extends C1. Deliver G FIRST (out of order, before C1) so it
         // is attached but not on the main chain; then deliver C1 whose parent is the tip.
         let c1 = try await buildAndStoreBlock(previous: c0, timestamp: base + 2000, target: diff, nonce: 2, fetcher: fetcher)
         let gg = try await buildAndStoreBlock(previous: c1, timestamp: base + 3000, target: diff, nonce: 3, fetcher: fetcher)
-        _ = await chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: gg), block: gg)
+        _ = chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: gg), block: gg)
 
-        let result = await chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: c1), block: c1)
+        let result = chain.submitTestBlock(blockHeader: try! VolumeImpl<Block>(node: c1), block: c1)
         XCTAssertTrue(result.extendsCanonical, "C1's parent is the tip, so this extends the main chain")
-        let finalTip = await chain.canonicalTip
+        let finalTip = chain.canonicalTip
         XCTAssertEqual(finalTip, cid(gg), "the tip advances past the out-of-order grandchild")
         let added = result.commit?.canonicalBlocksAdded
         XCTAssertNotNil(added, "tip-extend that advances past out-of-order descendants must emit a commit")

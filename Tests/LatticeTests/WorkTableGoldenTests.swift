@@ -8,10 +8,12 @@ import UInt256
 @testable import LatticeBlockTree
 @testable import LatticeImport
 
-/// `workForTarget`, `workForHash` and `calculateAsertTarget` over a fixed
-/// table of inputs, results pinned as hex. These are consensus arithmetic:
-/// an off-by-one at an edge changes which chain is heavier or which target a
-/// block must beat.
+/// `workForTarget` and `calculateAsertTarget` over a fixed table of inputs,
+/// results pinned as hex. These are consensus arithmetic: an off-by-one at an
+/// edge changes which chain is heavier or which target a block must beat.
+/// The `workForHash` column is the hash-based work Lattice no longer ships
+/// (consensus prices work from the target); it is kept, from the 56.3
+/// reference, so the checked-in golden stays byte-identical.
 struct WorkTableGolden: Codable, Equatable {
     struct WorkEntry: Codable, Equatable {
         let name: String
@@ -138,7 +140,7 @@ final class WorkTableGoldenTests: XCTestCase {
                 name: name,
                 input: input.toHexString(),
                 workForTarget: workForTarget(input).toHexString(),
-                workForHash: workForHash(input).toHexString()
+                workForHash: ArithmeticDifferentialTests.referenceWorkForHash(input).toHexString()
             )
         }
         let asert = Self.asertCases.map { asertCase in

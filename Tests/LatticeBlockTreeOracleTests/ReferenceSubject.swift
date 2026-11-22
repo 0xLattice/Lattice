@@ -73,10 +73,10 @@ struct ReferenceSubject: OracleSubject {
         }
     }
 
-    mutating func apply(_ batch: OracleBatch, reserved: Bool) -> OracleOutcome {
+    mutating func apply(_ batch: OracleBatch) -> OracleOutcome {
         // The live tree refuses a block naming a non-standard link (spec
         // §3.1, `nonStandardLink`); 50.0.1 had no such rule, so the adapter
-        // refuses for it. The oracle applies such batches unreserved.
+        // refuses for it.
         if batch.facts.contains(where: {
             if case .block(let block) = $0 { return block.namesNonStandardLink }
             return false
@@ -85,16 +85,7 @@ struct ReferenceSubject: OracleSubject {
         }
         let staged = Self.batch(batch)
         do {
-            let result: SubmissionResult?
-            if reserved {
-                guard tree.reserveImportRevision() else {
-                    return OracleOutcome(rendered: "noReservation")
-                }
-                result = try tree.applyReservedStaged(staged)
-            } else {
-                result = try tree.apply(staged)
-            }
-            guard let result else { return OracleOutcome(rendered: "nil") }
+            guard let result = try tree.apply(staged) else { return OracleOutcome(rendered: "nil") }
             let weighed = result.weighed.sorted()
             return OracleOutcome(
                 rendered: "block=\(result.addedBlock) contribution=\(result.addedContribution)"
@@ -125,12 +116,8 @@ struct ReferenceSubject: OracleSubject {
         )
     }
 
-    mutating func reevaluate() -> OracleOutcome {
-        OracleOutcome(rendered: Self.describe(tree.reevaluateForkChoice()))
-    }
-
     mutating func observeTip() -> [String: String] {
-        ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
+        ["tip": tree.canonicalTip]
     }
 
     mutating func observe(_ probe: OracleProbe) -> [String: String] {
@@ -140,9 +127,6 @@ struct ReferenceSubject: OracleSubject {
         seen["tipCumulativeWork"] = hex(tree.getTipCumulativeWork().toHexString())
         seen["specs"] = tree.specs.keys.sorted().joined(separator: ",")
         seen["preflight"] = Self.describe(tree.transactionPreflightTip())
-        seen["unresolved"] = tree.unresolvedSameChainPredecessors()
-            .map { "\($0.descendantCID)←\($0.predecessorCID)" }
-            .joined(separator: ",")
         for height in 0...probe.maxHeight {
             seen["canonical@\(height)"] = tree.canonicalBlockHash(atHeight: height) ?? "nil"
         }
@@ -156,8 +140,6 @@ struct ReferenceSubject: OracleSubject {
             seen["\(key) excludedRoot"] = "\(tree.isExcludedRoot(hash))"
             seen["\(key) connected"] = "\(tree.hasConnectedAncestry(blockHash: hash))"
             seen["\(key) parentHash"] = tree.parentHash(of: hash) ?? "nil"
-            seen["\(key) needs"] = tree.sameChainPredecessorRequirement(for: hash)
-                .map { "\($0.descendantCID)←\($0.predecessorCID)" } ?? "nil"
             seen["\(key) weight"] = tree.forkChoiceWeight(of: hash).map { hex($0.toHexString()) } ?? "nil"
             // The reference fills its anchor cache lazily, on a query; the live
             // tree sets anchors as blocks connect. Neither cache is a consensus
@@ -224,7 +206,6 @@ struct ReferenceSubject: OracleSubject {
             for to in probe.states {
                 let key = "state \(from)→\(to)"
                 seen["\(key) advanced"] = "\(tree.executedSetAdvanced(from: from, to: to))"
-                seen["\(key) continuity"] = "\(tree.hasStateContinuity(from: from, to: to))"
             }
         }
         return seen
@@ -237,7 +218,7 @@ struct ReferenceSubject: OracleSubject {
         let added = commit.canonicalBlocksAdded
             .sorted { $0.key < $1.key }
             .map { "\($0.key)@\($0.value)" }
-        return "r\(commit.revision) tip=\(commit.tipHash)"
+        return "tip=\(commit.tipHash)"
             + " added=\(added.joined(separator: ","))"
             + " removed=\(commit.canonicalBlocksRemoved.sorted().joined(separator: ","))"
     }

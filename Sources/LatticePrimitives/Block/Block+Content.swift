@@ -60,6 +60,15 @@ public extension Block {
         ]
     }
 
+    /// What the block carries: `contentResolutionPaths` and its child index,
+    /// one node, without the child block Volumes it names. No state, parent
+    /// or child block.
+    static var carriedContentPaths: [[String]: ResolutionStrategy] {
+        var paths = contentResolutionPaths
+        paths[[CHILDREN_PROPERTY]] = .targeted
+        return paths
+    }
+
     /// Exact content needed to validate these transactions and the block's
     /// coinbase credit to `rewardRecipient`. The child index is one node,
     /// fetched without resolving its independently stored child block Volumes.
@@ -186,93 +195,11 @@ public extension VolumeImpl where NodeType == Block {
         try await resolve(paths: Block.contentResolutionPaths, fetcher: fetcher)
     }
 
-    /// Store ONLY this block's own Volume boundary: the root node plus its
-    /// in-boundary transaction trie and child index. The transaction bodies,
-    /// chain spec, prev/parent/post state, parent block, child blocks, and WASM
-    /// policy modules are all independent nested Volumes and are deliberately
-    /// excluded — none is resolved or stored. This is the tier-2 possession a
-    /// weighed (not-yet-executed) block needs: it is servable and locally present
-    /// for fork choice, but its body is deferred until the block is validated.
-    ///
-    /// The transaction trie is resolved `.list` (structure only, leaf Volumes
-    /// left unresolved) and the child index as its one node, so no
-    /// transaction-body / child-block Volume is fetched, then the single block
-    /// boundary Volume is stored.
-    func storeBlockBoundary(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
-        let content = try await resolve(
-            paths: [
-                [TRANSACTIONS_PROPERTY, ""]: .list,
-                [CHILDREN_PROPERTY]: .targeted,
-            ],
-            fetcher: fetcher
-        )
-        try await content.store(storer: storer)
-    }
-
-    /// Store the complete block Volume and exactly the nested Volumes needed to
-    /// validate it. Policy modules are independent Volumes; parent blocks and
-    /// post-state remain independent roots with caller-owned retention policy.
-    ///
-    /// The transactions are fetched under the chain's own `maxBlockSize`: once
-    /// their verified unique bytes exceed it the block is invalid, so this
-    /// throws `BlockContentSizeError.exceedsLimit`, requests nothing further,
-    /// and stores nothing. That error is a reason to execute the block, not a
-    /// verdict on it: execution applies the rule itself.
-    func storeBlock(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
-        try await storeBlock(fetcher: fetcher, storer: storer, readsState: true)
-    }
-
-    /// `storeBlock` without the state the block's validation reads: the
-    /// complete block Volume (with its child index), its spec, its
-    /// transactions and its policy modules, under the same transaction-byte
-    /// bound as `storeBlock`. Nothing under the block's prev, parent or post
-    /// state is fetched or stored, except the constant empty state stored
-    /// for a genesis (height-0) block. A node that derives a block's
-    /// pre-state by executing its parent fetches a block's content this way.
-    ///
-    /// With `parentReceiptWitness`, it then stores the block's parent-receipt
-    /// witness (`storeParentReceiptWitness`) from the content it resolved,
-    /// without resolving it again: a block with no withdrawal reads and
-    /// stores nothing more.
-    func storeBlockContent(
-        fetcher: any Fetcher, storer: any VolumeStorer, parentReceiptWitness: Bool = false
-    ) async throws {
-        try await storeBlock(fetcher: fetcher, storer: storer, readsState: false, witness: parentReceiptWitness)
-    }
-
-    /// The parent-receipt witness of this block's withdrawals
-    /// (`Block.parentReceiptWitnessPaths`): the nodes of its
-    /// `parentState.receiptState` on the path to each withdrawal's receipt:
-    /// the Volumes from the parent state's root down. The block's own Volume
-    /// is not among them (`storeBlockContent` stores it). A block with no
-    /// withdrawal stores nothing and reads nothing under its parent state. The transactions
-    /// are read under the same byte bound as `storeBlock`.
-    ///
-    /// `storeBlockContent` and this together hold everything executing the
-    /// block reads but its pre-state, which a node derives by executing the
-    /// block's parent: a node that let go of the parent chain's state can
-    /// still execute a withdrawal it fetched with its witness.
-    func storeParentReceiptWitness(fetcher: any Fetcher, storer: any VolumeStorer) async throws {
-        let (content, _) = try await resolveBoundedContent(fetcher: fetcher)
-        try await Self.storeParentReceiptWitness(of: content, fetcher: fetcher, storer: storer)
-    }
-
-    /// `storeParentReceiptWitness` of `content`, the block's resolved
-    /// content (`resolveBoundedContent`).
-    private static func storeParentReceiptWitness(
-        of content: Self, fetcher: any Fetcher, storer: any VolumeStorer
-    ) async throws {
-        let paths = Block.parentReceiptWitnessPaths(transactionBodies: try transactionBodies(of: content))
-        guard !paths.isEmpty else { return }
-        let resolved = try await content.resolve(paths: paths, fetcher: fetcher)
-        guard let parentState = resolved.node?.parentState else { throw DataErrors.nodeNotAvailable }
-        let statePaths = Dictionary(uniqueKeysWithValues: paths.keys.map { (Array($0.dropFirst()), StorageStrategy.targeted) })
-        try await parentState.store(paths: statePaths, storer: storer)
-    }
-
     /// The block's content (`Block.contentResolutionPaths`), its transactions
-    /// read under its chain's `maxBlockSize`, and that spec.
-    private func resolveBoundedContent(fetcher: any Fetcher) async throws -> (Self, ChainSpec) {
+    /// read under its chain's `maxBlockSize`, and that spec. Once their
+    /// verified unique bytes exceed it, throws
+    /// `BlockContentSizeError.exceedsLimit` and requests nothing further.
+    func resolveBoundedContent(fetcher: any Fetcher) async throws -> (Self, ChainSpec) {
         let header = try await resolve(paths: [[SPEC_PROPERTY]: .targeted], fetcher: fetcher)
         guard let spec = header.node?.spec.node else { throw DataErrors.nodeNotAvailable }
         let counter = BlockContentByteCounter(limit: spec.maxBlockSize)
@@ -289,7 +216,7 @@ public extension VolumeImpl where NodeType == Block {
     }
 
     /// The bodies of the transactions resolved `content` carries.
-    private static func transactionBodies(of content: Self) throws -> [TransactionBody] {
+    static func transactionBodies(of content: Self) throws -> [TransactionBody] {
         guard let transactionNode = content.node?.transactions.node else {
             throw DataErrors.nodeNotAvailable
         }
@@ -299,53 +226,5 @@ public extension VolumeImpl where NodeType == Block {
             }
             return body
         }
-    }
-
-    private func storeBlock(
-        fetcher: any Fetcher, storer: any VolumeStorer, readsState: Bool, witness: Bool = false
-    ) async throws {
-        let (content, spec) = try await resolveBoundedContent(fetcher: fetcher)
-        guard let block = content.node, block.transactions.node != nil else {
-            throw DataErrors.nodeNotAvailable
-        }
-        let resolutionPaths: [[String]: ResolutionStrategy]
-        if readsState {
-            resolutionPaths = Block.validationPaths(
-                transactionBodies: try Self.transactionBodies(of: content),
-                rewardRecipient: block.rewardRecipient
-            )
-        } else {
-            var paths = Block.contentResolutionPaths
-            paths[[CHILDREN_PROPERTY]] = .targeted
-            resolutionPaths = paths
-        }
-        let resolved = try await content.resolve(paths: resolutionPaths, fetcher: fetcher)
-        let storagePaths: [[String]: StorageStrategy] = resolutionPaths.compactMapValues {
-            switch $0 {
-            case .targeted: .targeted
-            case .recursive: .recursive
-            case .list, .range: nil
-            }
-        }
-        try await resolved.store(paths: storagePaths, storer: storer)
-        for moduleCID in Set(spec.wasmPolicies.map(\.moduleCID)).sorted() {
-            try await WasmPolicyModuleHeader(rawCID: moduleCID)
-                .resolve(fetcher: fetcher)
-                .store(storer: storer)
-        }
-        if block.height == 0 {
-            try await LatticeState.emptyHeader.storeRecursively(storer: storer)
-        }
-        if witness {
-            try await Self.storeParentReceiptWitness(of: content, fetcher: fetcher, storer: storer)
-        }
-    }
-
-    /// Convenience for a combined fetcher/Volume storer.
-    func storeBlock(storer: any VolumeStorer) async throws {
-        guard let fetcher = storer as? any Fetcher else {
-            throw DataErrors.nodeNotAvailable
-        }
-        try await storeBlock(fetcher: fetcher, storer: storer)
     }
 }

@@ -28,23 +28,23 @@ final class SegmentTailProjectionTests: XCTestCase {
             height: 65
         )
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
-        _ = try await chain.applyStaged(segmentTailAdmission(alternate))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
+        _ = try chain.applyStaged(segmentTailAdmission(alternate))
         for block in canonicalTail {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
 
-        let initialTip = await chain.canonicalTip
-        let initialMainChain = await chain.canonicalHashes
+        let initialTip = chain.canonicalTip
+        let initialMainChain = chain.canonicalHashes
         XCTAssertEqual(initialTip, canonicalTail.last!.hash)
         XCTAssertEqual(initialMainChain, Set([root.hash] + canonicalTail.map(\.hash)))
 
-        await chain.resetFullCanonicalProjectionCount()
-        let submission = try await chain.applyStaged(segmentTailAdmission(appended))
+        chain.resetFullCanonicalProjectionCount()
+        let submission = try chain.applyStaged(segmentTailAdmission(appended))
         let result = try XCTUnwrap(submission)
         let commit = try XCTUnwrap(result.commit)
-        let projectionCount = await chain.fullCanonicalProjectionCount
-        let finalMainChain = await chain.canonicalHashes
+        let projectionCount = chain.fullCanonicalProjectionCount
+        let finalMainChain = chain.canonicalHashes
 
         XCTAssertEqual(
             projectionCount,
@@ -75,28 +75,28 @@ final class SegmentTailProjectionTests: XCTestCase {
             )
         }
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
-        _ = try await chain.applyStaged(segmentTailAdmission(alternate))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
+        _ = try chain.applyStaged(segmentTailAdmission(alternate))
         for block in canonicalTail {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
 
-        let tipBefore = await chain.canonicalTip
-        let mainChainBefore = await chain.canonicalHashes
+        let tipBefore = chain.canonicalTip
+        let mainChainBefore = chain.canonicalHashes
         XCTAssertEqual(tipBefore, canonicalTail.last!.hash)
 
-        await chain.resetFullCanonicalProjectionCount()
+        chain.resetFullCanonicalProjectionCount()
         let contribution = VerifiedWorkContribution(
             id: testCID("segment-tail:additional-canonical-grind"),
             work: UInt256(7)
         )
-        let commit = await chain.addWorkContribution(
+        let commit = chain.addWorkContribution(
             contribution,
             to: canonicalTail.last!.hash
         ).commit
-        let projectionCount = await chain.fullCanonicalProjectionCount
-        let tipAfter = await chain.canonicalTip
-        let mainChainAfter = await chain.canonicalHashes
+        let projectionCount = chain.fullCanonicalProjectionCount
+        let tipAfter = chain.canonicalTip
+        let mainChainAfter = chain.canonicalHashes
 
         let nonReorgCommit = try XCTUnwrap(commit)
         XCTAssertFalse(nonReorgCommit.canonicalChanged)
@@ -123,14 +123,14 @@ final class SegmentTailProjectionTests: XCTestCase {
                 height: UInt64(index + 1)
             )
         }
-        let chain = try await ChainState.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
-        _ = try await chain.applyStaged(segmentTailAdmission(alternate))
+        var chain = try ChainTree.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
+        _ = try chain.applyStaged(segmentTailAdmission(alternate))
         for block in canonicalTail {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
 
-        await chain.resetFullCanonicalProjectionCount()
-        let initialBlock = await chain.hashToBlock[canonicalTail.last!.hash]
+        chain.resetFullCanonicalProjectionCount()
+        let initialBlock = chain.hashToBlock[canonicalTail.last!.hash]
         let initial = WorkMeasure(
             try XCTUnwrap(initialBlock)
                 .workContributions.values
@@ -145,7 +145,7 @@ final class SegmentTailProjectionTests: XCTestCase {
                 work: UInt256(index.isMultiple(of: 64) ? UInt64(index + 1) : 1)
             )
             contributions.append(contribution)
-            _ = await chain.addWorkContribution(
+            _ = chain.addWorkContribution(
                 contribution,
                 to: canonicalTail.last!.hash
             )
@@ -153,9 +153,9 @@ final class SegmentTailProjectionTests: XCTestCase {
 
         var expected = initial
         expected.formUnion(WorkMeasure(contributions))
-        let block = await chain.hashToBlock[canonicalTail.last!.hash]
+        let block = chain.hashToBlock[canonicalTail.last!.hash]
         let retained = WorkMeasure(try XCTUnwrap(block).workContributions.values)
-        let projectionCount = await chain.fullCanonicalProjectionCount
+        let projectionCount = chain.fullCanonicalProjectionCount
 
         XCTAssertEqual(retained, expected)
         XCTAssertEqual(
@@ -182,26 +182,26 @@ final class SegmentTailProjectionTests: XCTestCase {
         let c1 = segmentTailBlock(name: "reorg-c1", parent: c0.hash, height: 6, work: 2)
         let d0 = segmentTailBlock(name: "reorg-d0", parent: fork.hash, height: 5, work: 1)
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
         for block in [prefix, a0, a1, a2] {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
-        let initialMainChain = await chain.canonicalHashes
+        let initialMainChain = chain.canonicalHashes
         XCTAssertEqual(initialMainChain, Set([root.hash, prefix.hash, a0.hash, a1.hash, a2.hash]))
 
         // These are deliberately connected below an unavailable B0. They must
         // not affect the selected path until B0 joins the existing prefix.
         for block in [b1, fork, c0, d0, c1] {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
-        let tipBeforeAttachment = await chain.canonicalTip
+        let tipBeforeAttachment = chain.canonicalTip
         XCTAssertEqual(tipBeforeAttachment, a2.hash)
 
-        let submission = try await chain.applyStaged(segmentTailAdmission(b0))
+        let submission = try chain.applyStaged(segmentTailAdmission(b0))
         let result = try XCTUnwrap(submission)
         let commit = try XCTUnwrap(result.commit)
-        let finalMainChain = await chain.canonicalHashes
-        let d0IsCanonical = await chain.isCanonical(hash: d0.hash)
+        let finalMainChain = chain.canonicalHashes
+        let d0IsCanonical = chain.isCanonical(hash: d0.hash)
 
         XCTAssertEqual(commit.tipHash, c1.hash)
         XCTAssertEqual(
@@ -243,24 +243,24 @@ final class SegmentTailProjectionTests: XCTestCase {
         let e = segmentTailBlock(name: "extend-e", parent: d.hash, height: 5)
         let f = segmentTailBlock(name: "extend-f", parent: e.hash, height: 6)
 
-        let chain = try await ChainState.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [segmentTailAdmission(root)])
         for block in [a, side, b, c] {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
-        let tipBefore = await chain.canonicalTip
+        let tipBefore = chain.canonicalTip
         XCTAssertEqual(tipBefore, c.hash)
-        let mainChainBefore = await chain.canonicalHashes
+        let mainChainBefore = chain.canonicalHashes
 
         for block in [f, e] {
-            _ = try await chain.applyStaged(segmentTailAdmission(block))
+            _ = try chain.applyStaged(segmentTailAdmission(block))
         }
-        let held = await chain.canonicalTip
+        let held = chain.canonicalTip
         XCTAssertEqual(held, c.hash, "an unconnected component must not be selected")
 
-        let submission = try await chain.applyStaged(segmentTailAdmission(d))
+        let submission = try chain.applyStaged(segmentTailAdmission(d))
         let result = try XCTUnwrap(submission)
         let commit = try XCTUnwrap(result.commit)
-        let mainChainAfter = await chain.canonicalHashes
+        let mainChainAfter = chain.canonicalHashes
 
         XCTAssertEqual(commit.tipHash, f.hash)
         XCTAssertEqual(
@@ -312,8 +312,7 @@ private func segmentTailAdmission(_ block: SegmentTailBlock) -> BlockImportBatch
             specCID: testCID("segment-tail:spec:\(block.name)"),
             target: "1",
             nextTarget: "1",
-            timestamp: Int64(block.height),
-            stateDiff: .empty
+            timestamp: Int64(block.height)
         )),
         .work(ChainWorkFact(
             blockHash: block.hash,
@@ -326,19 +325,19 @@ private func segmentTailAdmission(_ block: SegmentTailBlock) -> BlockImportBatch
 }
 
 private func assertSegmentTailReferenceParity(
-    _ chain: ChainState,
+    _ chain: ChainTree,
     file: StaticString = #filePath,
     line: UInt = #line
 ) async {
-    let blocks = await chain.hashToBlock
+    let blocks = chain.hashToBlock
     guard let reference = ForkChoiceOracle(blocks: blocks, excluded: [])
         .view().canonicalProjection()
     else {
         XCTFail("reference projection missing", file: file, line: line)
         return
     }
-    let tip = await chain.canonicalTip
-    let mainChain = await chain.canonicalHashes
+    let tip = chain.canonicalTip
+    let mainChain = chain.canonicalHashes
     XCTAssertEqual(
         tip,
         reference.tip,

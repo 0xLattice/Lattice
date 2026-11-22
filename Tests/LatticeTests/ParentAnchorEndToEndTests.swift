@@ -69,19 +69,16 @@ private struct ParentStateLetGo: Fetcher {
     }
 }
 
-/// Counts every read it passes to `backing`.
-private final class ReadCountingFetcher: Fetcher, @unchecked Sendable {
-    let backing: StorableFetcher
-    private let lock = NSLock()
-    private var reads: [String] = []
-    init(_ backing: StorableFetcher) { self.backing = backing }
-    /// How many times each CID was read.
-    var counts: [String: Int] { lock.withLock { reads.reduce(into: [:]) { $0[$1, default: 0] += 1 } } }
-
-    func fetch(rawCid: String) async throws -> Data {
-        lock.withLock { reads.append(rawCid) }
-        return try await backing.fetch(rawCid: rawCid)
-    }
+/// The parent-receipt witness of the block `cid` names
+/// (`Block.parentReceiptWitnessPaths`): the nodes of its
+/// `parentState.receiptState` on the path to each withdrawal's receipt.
+private func storeParentReceiptWitness(of cid: String, fetcher: any Fetcher, storer: any VolumeStorer) async throws {
+    let (content, _) = try await VolumeImpl<Block>(rawCID: cid).resolveBoundedContent(fetcher: fetcher)
+    let paths = Block.parentReceiptWitnessPaths(transactionBodies: try VolumeImpl<Block>.transactionBodies(of: content))
+    let resolved = try await content.resolve(paths: paths, fetcher: fetcher)
+    let parentState = try XCTUnwrap(resolved.node?.parentState)
+    let statePaths = Dictionary(uniqueKeysWithValues: paths.keys.map { (Array($0.dropFirst()), StorageStrategy.targeted) })
+    try await parentState.store(paths: statePaths, storer: storer)
 }
 
 /// Every node of `state`'s closure, read from `fetcher`.
@@ -437,7 +434,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
     /// A child withdrawal executes from its parent-receipt witness alone
     /// (§3.5): with the parent's state let go of, and no one holding it, the
     /// block is unavailable, never invalid; given only the witness
-    /// `storeParentReceiptWitness` stores, it executes, and its verdict
+    /// `Block.parentReceiptWitnessPaths` names, it executes, and its verdict
     /// carries the post-state its execution produced. Anchored where its
     /// receipt is absent, it is unavailable without the parent's state and
     /// invalid with its witness alone: the witness proves the absence.
@@ -481,7 +478,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         let lacking = parentState.subtracting(childState)
         let witness = StorableFetcher()
         // From the block's CID alone, as a node holding its content reads it.
-        try await VolumeImpl<Block>(rawCID: try cid(withdrawal)).storeParentReceiptWitness(fetcher: w.fetcher, storer: witness)
+        try await storeParentReceiptWitness(of: try cid(withdrawal), fetcher: w.fetcher, storer: witness)
         XCTAssertFalse(witness.contains(rawCid: try cid(withdrawal)), "the block's own Volume is its content's, not the witness's")
         let witnessed = Set(witness.entries.keys).intersection(lacking)
         XCTAssertFalse(witnessed.isEmpty, "the witness is parent state")
@@ -534,7 +531,7 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         )
         XCTAssertNotNil(unrefuted.retryFailure, "without the parent's state, no verdict: only the receipt read decides")
         let absence = StorableFetcher()
-        try await VolumeImpl<Block>(rawCID: try cid(forged)).storeParentReceiptWitness(fetcher: w.fetcher, storer: absence)
+        try await storeParentReceiptWitness(of: try cid(forged), fetcher: w.fetcher, storer: absence)
         let refuted = await ChainTree.connect(
             try XCTUnwrap(child.connectJob(for: try cid(forged))),
             fetcher: ParentStateLetGo(backing: w.fetcher, denied: bareState.subtracting(absence.entries.keys)),
@@ -542,60 +539,6 @@ final class ParentAnchorEndToEndTests: XCTestCase {
         )
         XCTAssertTrue(refuted.provesInvalid, "\(String(describing: refuted.retryFailure))")
         XCTAssertNil(refuted.materializedPostState)
-    }
-
-    /// `storeBlockContent` with `parentReceiptWitness` stores what it and
-    /// `storeParentReceiptWitness` store, resolving the block's content
-    /// once: a withdrawal reads its content's nodes once, not twice, and a
-    /// block with no withdrawal reads exactly what its content alone does.
-    func testContentWithItsWitnessResolvesTheContentOnce() async throws {
-        let w = try await World()
-        let s = try await w.parentBlock(on: w.g, at: -90_000, transactions: [w.receiptTx], reward: w.withdrawerAddr)
-        try await w.weighParent(s)
-        try await w.executeParent(s)
-        let genesis = try await w.childGenesis(anchoredAt: w.g, at: -94_000)
-        var child = try await w.bootstrapChild(genesis, carrierParent: w.g)
-        let deposit = try await w.childBlock(
-            previous: genesis, transactions: [w.depositTx], at: -80_000, reward: w.demanderAddr
-        )
-        try await w.weigh(deposit, carrierParent: w.g, on: &child)
-        try assertConnected(try await w.connect(deposit, on: &child), block: deposit, tree: child, "deposit")
-        let withdrawal = try await w.childBlock(
-            previous: deposit, anchoredAt: s, transactions: [w.withdrawalTx], at: -70_000, reward: w.withdrawerAddr
-        )
-
-        // A withdrawal: the same Volumes as the two calls, its content read
-        // as often as the content alone reads it, and beyond that only the
-        // witness's own nodes.
-        let header = VolumeImpl<Block>(rawCID: try cid(withdrawal))
-        let contentReads = ReadCountingFetcher(w.fetcher)
-        let content = StorableFetcher()
-        try await header.storeBlockContent(fetcher: contentReads, storer: content)
-        let witness = StorableFetcher()
-        try await header.storeParentReceiptWitness(fetcher: w.fetcher, storer: witness)
-        XCTAssertTrue(witness.contains(rawCid: s.postState.rawCID), "the witness, from the parent state's root")
-        let together = StorableFetcher()
-        let togetherReads = ReadCountingFetcher(w.fetcher)
-        try await header.storeBlockContent(fetcher: togetherReads, storer: together, parentReceiptWitness: true)
-        XCTAssertEqual(together.entries, content.entries.merging(witness.entries) { first, _ in first })
-        XCTAssertEqual(together.volumeRoots(), content.volumeRoots().union(witness.volumeRoots()))
-        let extra = togetherReads.counts.filter { contentReads.counts[$0.key] == nil }
-        for (read, times) in contentReads.counts {
-            XCTAssertEqual(togetherReads.counts[read], times, "content node \(read) read again")
-        }
-        XCTAssertFalse(extra.isEmpty)
-        XCTAssertTrue(Set(extra.keys).isSubset(of: witness.entries.keys), "beyond its content, only the witness is read")
-
-        // No withdrawal: nothing more read or stored than its content.
-        let plainReads = ReadCountingFetcher(w.fetcher)
-        let plain = StorableFetcher()
-        try await VolumeImpl<Block>(rawCID: try cid(deposit)).storeBlockContent(fetcher: plainReads, storer: plain)
-        let withWitnessReads = ReadCountingFetcher(w.fetcher)
-        let withWitness = StorableFetcher()
-        try await VolumeImpl<Block>(rawCID: try cid(deposit))
-            .storeBlockContent(fetcher: withWitnessReads, storer: withWitness, parentReceiptWitness: true)
-        XCTAssertEqual(withWitnessReads.counts, plainReads.counts)
-        XCTAssertEqual(withWitness.entries, plain.entries)
     }
 
     // MARK: - 2. Laundering

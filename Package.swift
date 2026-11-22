@@ -17,14 +17,8 @@ let package = Package(
         .library(name: "LatticeBlockTree", targets: ["LatticeBlockTree"]),
         .library(name: "LatticeImport", targets: ["LatticeImport"]),
         .executable(
-            name: "LatticeDemo",
-            targets: ["LatticeDemo"]),
-        .executable(
             name: "lattice-determinism-check",
             targets: ["DeterminismCheck"]),
-        .executable(
-            name: "LatticeSim",
-            targets: ["LatticeSim"]),
     ],
     dependencies: [
         // Exact: SHA-256, signature verification, and key-to-address encoding
@@ -117,9 +111,6 @@ let package = Package(
                 "LatticeBlockTree",
                 "LatticeImport",
             ]),
-        .executableTarget(
-            name: "LatticeDemo",
-            dependencies: ["Lattice"]),
         // — shared golden-vector source of truth, imported by
         // both the XCTest suite (macOS) and the determinism executable (Linux).
         .target(
@@ -133,27 +124,17 @@ let package = Package(
         .executableTarget(
             name: "DeterminismCheck",
             dependencies: ["DeterminismGoldens"]),
-        // Wave-4: the consensus simulator / adversarial-scenario harness lives
-        // outside the Lattice library product, so simulation-only code never
-        // ships in the consensus library. Drives Lattice through its public
-        // (simulation-facing) API only.
+        // Dev tooling, not products: the consensus simulator and its
+        // adversarial-scenario harness (`swift run LatticeSim`). It drives
+        // Lattice through its public API only and never ships with it.
         .target(
             name: "LatticeSimulation",
-            dependencies: ["Lattice"]),
+            dependencies: ["Lattice"],
+            path: "Tools/LatticeSimulation"),
         .executableTarget(
             name: "LatticeSim",
-            dependencies: ["LatticeSimulation"]),
-        // Restore-replay benchmark (not a product): `swift run -c release
-        // LatticeReplayBench <blocks>`.
-        .executableTarget(
-            name: "LatticeReplayBench",
-            dependencies: [
-                "LatticePrimitives",
-                "LatticePoW",
-                "LatticeBlockTree",
-                .product(name: "cashew", package: "cashew"),
-                .product(name: "UInt256", package: "UInt256"),
-            ]),
+            dependencies: ["LatticeSimulation"],
+            path: "Tools/LatticeSim"),
         // The 50.0.1 block tree, frozen verbatim as its own module: the
         // equivalence oracle LatticeBlockTreeOracleTests drives beside the
         // live LatticeBlockTree. Test-only; not part of any product.

@@ -44,27 +44,9 @@ final class CIDIdentityTests: XCTestCase {
         XCTAssertEqual(work.total, WorkSum(UInt256(11)))
     }
 
-    /// The proven-canonical memo answers byte-for-byte as the parser does,
-    /// cold or warm — including for a spelling that only Unicode canonical
-    /// equivalence (KELVIN SIGN for "K") makes equal to a remembered CID.
-    func testRememberedCanonicalFormsAnswerExactlyAsTheParserDoes() throws {
-        let v0 = "QmUo6yRfuCzKY9tJDCLEH8ytTh3Y9jbCG5RbbYgnt1JFWQ"
-        let kelvin = v0.replacingOccurrences(of: "K", with: "\u{212A}")
-        XCTAssertEqual(kelvin, v0, "Swift String equality treats the two as one")
-        let inputs = [v0, kelvin, alternateCID, testCID("memo")]
-        func answers() -> [[UInt8]?] {
-            inputs.map { CIDIdentity.canonicalString($0).map { Array($0.utf8) } }
-        }
-        CIDIdentity.forgetProvenCanonical()
-        let cold = answers()
-        let warm = answers()
-        XCTAssertEqual(cold, warm)
-        XCTAssertEqual(cold[0], Array(v0.utf8), "the v0 CID must be canonical and so remembered")
-    }
-
-    /// Only short canonical strings are remembered: a count-bounded memo must
-    /// not let long canonical strings from a peer multiply its memory.
-    func testLongCanonicalCIDIsNotRemembered() throws {
+    /// A canonical CID that is not the standard one — a long one, or a short
+    /// one of another codec — is its own canonical form through the parse.
+    func testNonStandardCanonicalCIDsAreTheirOwnCanonicalForm() throws {
         func identityCID(digestLength: Int) -> String {
             var length = [UInt8]()
             var n = digestLength
@@ -80,14 +62,12 @@ final class CIDIdentityTests: XCTestCase {
         let long = try XCTUnwrap(CIDIdentity.canonicalString(identityCID(digestLength: 25_000)))
         XCTAssertGreaterThan(long.utf8.count, 40_000)
         XCTAssertEqual(CIDIdentity.canonicalString(long), long)
-        XCTAssertFalse(CIDIdentity.isProvenCanonical(long))
 
         // A short canonical CID the parse proves (the standard CID never
-        // reaches the memo: `CIDDigest` proves it without a parse).
+        // reaches it: `CIDDigest` proves it without a parse).
         let digest = Array(try CID(testCID("short-is-remembered")).rawBuffer.suffix(32))
         let short = CIDIdentity.base32Multibase([0x01, 0x55, 0x12, 0x20] + digest)
         XCTAssertEqual(CIDIdentity.canonicalString(short), short)
-        XCTAssertTrue(CIDIdentity.isProvenCanonical(short))
     }
 
     /// The local base32 encoder is the library's v1 text form, byte for byte,

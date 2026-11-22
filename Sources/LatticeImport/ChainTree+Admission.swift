@@ -81,6 +81,10 @@ public struct ChainTreeUpdate: Sendable {
     public let commit: ChainCommit?
     /// The executed post-state (`applyConnect` of a valid block only).
     public let materializedPostState: LatticeState?
+    /// The state diff of the block this update executed (`applyConnect` of
+    /// a valid block only); nil when nothing was executed. An execution
+    /// output for the node's state window, not a consensus fact.
+    public let stateDiff: StateDiff?
     /// Every block whose credited work these batches added or raised, plus
     /// every block they connected — a grafted orphan component in full
     /// (`SubmissionResult.weighed`). What a child's derivation of this
@@ -90,8 +94,8 @@ public struct ChainTreeUpdate: Sendable {
 
 public enum ChainTreeAdmission: Sendable {
     case applied(ChainTreeUpdate)
-    /// Nothing new: no fact was emitted. A re-projection that promoted a
-    /// candidate is carried. (Re-connecting an executed block is not this: it
+    /// Nothing new: no fact was emitted, and the projection, always current,
+    /// did not move, so `promotedCommit` is nil. (Re-connecting an executed block is not this: it
     /// re-emits its validation batch, as the actor path re-stages it, and
     /// replaying that batch is a no-op.)
     case duplicate(promotedCommit: ChainCommit?)
@@ -137,7 +141,7 @@ struct AnchorSnapshot: DifficultyAnchorSource {
 public struct ConnectVerdict: Sendable {
     enum Outcome: Sendable {
         /// Executed and valid, with the block `connect` decoded to execute it.
-        case valid(BlockImportBatch, LatticeState?, Block)
+        case valid(BlockImportBatch, LatticeState?, StateDiff, Block)
         /// Execution completed and proved the block invalid.
         case invalid(isGenesis: Bool)
         /// No verdict (availability, ordering, missing parent facts).
@@ -170,7 +174,16 @@ public struct ConnectVerdict: Sendable {
     /// child's `prevState` by CID). One that finds none commits before it
     /// executes the child.
     public var materializedPostState: LatticeState? {
-        if case .valid(_, let state, _) = outcome { return state }
+        if case .valid(_, let state, _, _) = outcome { return state }
+        return nil
+    }
+
+    /// The state diff the block's execution produced, when the verdict is
+    /// valid (`ChainTreeUpdate.stateDiff` once applied): node bookkeeping
+    /// for its state window, not a consensus fact. Nil for any other
+    /// verdict.
+    public var stateDiff: StateDiff? {
+        if case .valid(_, _, let diff, _) = outcome { return diff }
         return nil
     }
 
@@ -179,7 +192,7 @@ public struct ConnectVerdict: Sendable {
     /// node again. Only the block's own node: its links (transactions,
     /// states, children) are not loaded. Nil for any other verdict.
     public var connectedBlock: Block? {
-        if case .valid(_, _, let block) = outcome { return block }
+        if case .valid(_, _, _, let block) = outcome { return block }
         return nil
     }
 }
@@ -261,7 +274,7 @@ extension ChainTree {
     /// whose bytes match but are not a well-formed block (a non-standard
     /// link included), or a child `parentState` that is not its carrier's
     /// `prevState`, is structural (drop, no blame; spec §9.9).
-    public static func headerFailure(
+    package static func headerFailure(
         _ failure: ChildProofVerificationFailure
     ) -> BlockImportError {
         switch failure {
@@ -279,8 +292,8 @@ extension ChainTree {
     /// the target schedule from its root's spec. A block already held takes
     /// `addWork`.
     ///
-    /// - Weighed: the block fact (declared post-state, empty diff, child
-    ///   commitments) and its work fact.
+    /// - Weighed: the block fact (declared post-state, child commitments)
+    ///   and its work fact.
     /// - Weighed and excluded: the same, then its exclusion — for
     ///   `spec != parent.spec` or `prevState != parent.postState`. Its work
     ///   weighs; it is never selected.
@@ -353,7 +366,7 @@ extension ChainTree {
             blockHash: blockHash,
             block: block,
             contribution: contribution,
-            kind: .block(.empty, nil, validated: false),
+            kind: .block(nil, validated: false),
             childCommitments: childIndex.entries.mapValues(\.rawCID)
         )
         switch admission {
@@ -386,7 +399,7 @@ extension ChainTree {
         }
         if let existing = workContribution(id: contribution.id, at: hash),
            existing.work >= contribution.work {
-            return .duplicate(promotedCommit: reevaluateForkChoice())
+            return .duplicate(promotedCommit: nil)
         }
         guard acceptsWorkLocation(of: contribution.id, at: hash) else {
             return .rejected(.providerMalformedEvidence)
@@ -494,13 +507,13 @@ extension ChainTree {
                 block: block,
                 contribution: job.contribution,
                 kind: .block(
-                    transition.stateDiff,
                     transition.materializedPostState,
                     validated: true
                 ),
                 childCommitments: commitments
             ),
             transition.materializedPostState,
+            transition.stateDiff,
             block
         ))
     }
@@ -532,7 +545,7 @@ extension ChainTree {
                 of: blockHash,
                 excluded: true
             )
-        case .valid(let facts, let materializedPostState, _):
+        case .valid(let facts, let materializedPostState, let stateDiff, _):
             guard contains(blockHash: blockHash) else {
                 return .rejected(.notYetValid)
             }
@@ -543,7 +556,8 @@ extension ChainTree {
             return applyAdmission(
                 [facts],
                 of: blockHash,
-                materializedPostState: materializedPostState
+                materializedPostState: materializedPostState,
+                stateDiff: stateDiff
             )
         }
     }
@@ -618,7 +632,7 @@ extension ChainTree {
             blockHash: blockHash,
             block: block,
             contribution: work,
-            kind: .block(.empty, nil, validated: false),
+            kind: .block(nil, validated: false),
             childCommitments: childIndex.entries.mapValues(\.rawCID)
         )
         let admission = applyAdmission([facts], of: blockHash)
@@ -667,14 +681,10 @@ extension ChainTree {
             validationContext: validationContext
         )
         if let failure = verdict.retryFailure { return .failure(failure) }
-        guard case .valid(let facts, _, _) = verdict.outcome,
+        guard case .valid(let facts, _, let stateDiff, _) = verdict.outcome,
               let executed = tree.applyConnect(verdict).update else {
             return .failure(.protocolInvalid)
         }
-        let stateDiff = facts.facts.lazy.compactMap { fact -> StateDiff? in
-            if case .block(let value) = fact { return value.stateDiff }
-            return nil
-        }.first ?? .empty
         return .success(GenesisBootstrap(
             tree: tree,
             facts: facts,
@@ -685,19 +695,16 @@ extension ChainTree {
 
     /// Apply the batches this API derived, in order, reporting what they
     /// emitted and the net canonical change. A batch that changed no weight
-    /// (a validation of a held block) still re-projects, since execution can
-    /// make a heavier candidate selectable.
+    /// (a validation of a held block) moves nothing: the projection reads
+    /// weights and excluded roots only, and every mutation of either already
+    /// brought it current.
     private mutating func applyAdmission(
         _ batches: [BlockImportBatch],
         of blockHash: String,
         excluded: Bool = false,
-        materializedPostState: LatticeState? = nil
+        materializedPostState: LatticeState? = nil,
+        stateDiff: StateDiff? = nil
     ) -> ChainTreeAdmission {
-        // All or nothing: every batch here is one consensus mutation, so the
-        // capacity for all of them is checked before the first is applied.
-        guard hasMutationCapacity(for: UInt64(batches.count)) else {
-            return .rejected(.revisionExhausted)
-        }
         var commit: ChainCommit?
         var weighed: [String] = []
         for facts in batches {
@@ -707,8 +714,7 @@ extension ChainTree {
             } catch {
                 return .rejected(.localVerificationFailure)
             }
-            let next = submission == nil ? reevaluateForkChoice() : submission?.commit
-            commit = ChainCommit.composing(commit, then: next)
+            commit = ChainCommit.composing(commit, then: submission?.commit)
             weighed += submission?.weighed ?? []
         }
         return .applied(ChainTreeUpdate(
@@ -717,6 +723,7 @@ extension ChainTree {
             excluded: excluded,
             commit: commit,
             materializedPostState: materializedPostState,
+            stateDiff: stateDiff,
             weighed: weighed
         ))
     }
@@ -739,7 +746,6 @@ extension ChainCommit {
             .subtracting(second.canonicalBlocksAdded.keys)
             .union(second.canonicalBlocksRemoved.subtracting(first.canonicalBlocksAdded.keys))
         return ChainCommit(
-            revision: second.revision,
             tipHash: second.tipHash,
             canonicalBlocksAdded: added,
             canonicalBlocksRemoved: removed

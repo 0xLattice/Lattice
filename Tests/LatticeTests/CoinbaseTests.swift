@@ -579,7 +579,7 @@ final class CoinbaseRecipientAdmissionTests: XCTestCase {
 
     /// A relayed twin of a nil-recipient block with a present-but-invalid
     /// recipient (`""` above all: it once shared the original's preimage) is
-    /// refused from its bytes before it can weigh, in every import mode.
+    /// refused from its bytes before it can weigh, header alone or executed.
     func testMalformedRecipientTwinIsRefusedAsARoot() async throws {
         let fetcher = StorableFetcher()
         let genesis = try await AdmissionFixture.makeGenesis(fetcher: fetcher, timestamp: 1_000)
@@ -588,18 +588,17 @@ final class CoinbaseRecipientAdmissionTests: XCTestCase {
             let twin = withRewardRecipient(honest, recipient)
             try await storeBuiltBlock(twin, in: fetcher)
             let twinCID = try BlockHeader(node: twin).rawCID
-            for mode in [ImportMode.header, .full] {
-                let level = AdmissionFixture.makeLevel(genesis: genesis)
-                let result = try await level.admit(
+            for mode in [TestAdmitMode.header, .full] {
+                var chain = try AdmissionFixture.makeChain(genesis: genesis)
+                let result = try await chain.admit(
                     BlockHeader(rawCID: twinCID), mode: mode, fetcher: fetcher
                 )
                 XCTAssertEqual(result.failure, .protocolInvalid, "recipient \"\(recipient)\" mode \(mode)")
-                let weighed = await level.chain.contains(blockHash: twinCID)
-                XCTAssertFalse(weighed)
+                XCTAssertFalse(chain.contains(blockHash: twinCID))
             }
         }
-        let level = AdmissionFixture.makeLevel(genesis: genesis)
-        let result = try await level.admit(honest, mode: .header, fetcher: fetcher)
+        var chain = try AdmissionFixture.makeChain(genesis: genesis)
+        let result = try await chain.admit(honest, mode: .header, fetcher: fetcher)
         XCTAssertNil(result.failure, "control: the honest block weighs")
     }
 
@@ -616,10 +615,9 @@ final class CoinbaseRecipientAdmissionTests: XCTestCase {
             previous: parentGenesis, children: ["Child": candidate],
             timestamp: 3_000, target: AdmissionFixture.easy, nonce: 3, fetcher: fetcher
         )
-        func childLevel() -> ChainLevel {
-            ChainLevel(
-                chain: ChainState.fromGenesis(block: childGenesis),
-                context: testChainContext(path: [DEFAULT_ROOT_DIRECTORY, "Child"])
+        func childChain() async throws -> ChainTree {
+            try await testChain(
+                genesis: childGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"], fetcher: fetcher
             )
         }
         for recipient in malformed {
@@ -636,16 +634,18 @@ final class CoinbaseRecipientAdmissionTests: XCTestCase {
             // The twin's bytes are what its CID names: a malformed recipient
             // is structural, dropped without blame (spec §9.9).
             XCTAssertEqual(failure, .protocolInvalid)
-            let result = try await childLevel().admit(
-                candidate, fetcher: fetcher, childPackage: ChildValidationPackage(proof: proof)
+            var chain = try await childChain()
+            let result = try await chain.admit(
+                candidate, fetcher: fetcher, child: TestChildPackage(proof: proof)
             )
             XCTAssertEqual(result.failure, .protocolInvalid, "recipient \"\(recipient)\"")
         }
         let honestProof = try await ChildBlockProof.generate(
             rootHeader: try BlockHeader(node: carrier), childDirectory: "Child", fetcher: fetcher
         )
-        let accepted = try await childLevel().admit(
-            candidate, fetcher: fetcher, childPackage: ChildValidationPackage(proof: honestProof)
+        var chain = try await childChain()
+        let accepted = try await chain.admit(
+            candidate, fetcher: fetcher, child: TestChildPackage(proof: honestProof)
         )
         XCTAssertNil(accepted.failure, "control: the honest carrier secures the child")
     }

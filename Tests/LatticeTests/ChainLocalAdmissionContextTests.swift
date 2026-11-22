@@ -67,13 +67,13 @@ final class ChainLocalAdmissionContextTests: XCTestCase {
         struct UnrecognizedError: Error {}
         let unknown = UnrecognizedError()
 
-        let validation = ChainLevel.classifyValidationFailureForTesting(unknown)
+        let validation = classifyValidationFailure(unknown)
         XCTAssertEqual(validation, .unavailableEvidence)
-        XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(validation))
+        XCTAssertFalse(BlockImport.isDeterministicInvalidity(validation))
 
-        let resolution = ChainLevel.classifyResolutionFailureForTesting(unknown)
+        let resolution = classifyResolutionFailure(unknown)
         XCTAssertEqual(resolution, .unavailableEvidence)
-        XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(resolution))
+        XCTAssertFalse(BlockImport.isDeterministicInvalidity(resolution))
     }
 
     func testValidationErrorsPartitionIntoAvailabilityAndLocalFailure() {
@@ -92,10 +92,10 @@ final class ChainLocalAdmissionContextTests: XCTestCase {
             let expected: BlockImportError = error == .serializationError
                 ? .localVerificationFailure
                 : .unavailableEvidence
-            let classified = ChainLevel.classifyValidationFailureForTesting(error)
+            let classified = classifyValidationFailure(error)
             XCTAssertEqual(classified, expected, "\(error)")
             XCTAssertFalse(
-                ChainLevel.isDeterministicInvalidityForTesting(classified),
+                BlockImport.isDeterministicInvalidity(classified),
                 "\(error) is never a verdict"
             )
         }
@@ -110,7 +110,7 @@ final class ChainLocalAdmissionContextTests: XCTestCase {
             .proofOfWorkInvalid,
         ] {
             XCTAssertTrue(
-                ChainLevel.isDeterministicInvalidityForTesting(failure),
+                BlockImport.isDeterministicInvalidity(failure),
                 "\(failure) is a completed invalidity verdict"
             )
         }
@@ -121,10 +121,9 @@ final class ChainLocalAdmissionContextTests: XCTestCase {
             .crossChainEvidenceRequired(.childProof(chainPath: [], childCID: "x")),
             .notYetValid,
             .notAcceptedAtCurrentChain,
-            .revisionExhausted,
         ] {
             XCTAssertFalse(
-                ChainLevel.isDeterministicInvalidityForTesting(failure),
+                BlockImport.isDeterministicInvalidity(failure),
                 "\(failure) is transient and never excludes"
             )
         }

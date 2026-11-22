@@ -40,7 +40,7 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
                 postStateCID: testCID("wv-post:\(b.name)"),
                 prevStateCID: b.parent.map { testCID("wv-post:\($0)") } ?? testCID("wv-prev:genesis"),
                 specCID: testCID("wv-spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(1_000 + height), stateDiff: .empty
+                timestamp: Int64(1_000 + height)
             )),
             .work(ChainWorkFact(
                 blockHash: h(b.name),
@@ -99,25 +99,25 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         return Oracle(weights: weights, tip: current, path: path)
     }
 
-    private func assertMatches(_ chain: ChainState, _ blocks: [Planned], excluded: Set<String>,
-                               _ label: String, file: StaticString = #filePath, line: UInt = #line) async {
+    private func assertMatches(_ chain: ChainTree, _ blocks: [Planned], excluded: Set<String>,
+                               _ label: String, file: StaticString = #filePath, line: UInt = #line) {
         let expected = oracle(blocks, excluded: excluded)
         for b in blocks {
-            let weight = await chain.subtreeWeight(forHash: h(b.name))
+            let weight = chain.subtreeWeight(forHash: h(b.name))
             XCTAssertEqual(weight, expected.weights[b.name], "\(label): weight of \(b.name) is pure work",
                            file: file, line: line)
         }
-        let tip = await chain.canonicalTip
-        let path = await chain.canonicalHashes
+        let tip = chain.canonicalTip
+        let path = chain.canonicalHashes
         XCTAssertEqual(tip, h(expected.tip), "\(label): tip is the heaviest selectable path", file: file, line: line)
         XCTAssertEqual(path, Set(expected.path.map(h)), "\(label): canonical path", file: file, line: line)
         let genesis = blocks.first { $0.parent == nil }!.name
-        let snapshot = await chain.forkChoiceSnapshot(startingAt: h(genesis))
+        let snapshot = chain.forkChoiceSnapshot(startingAt: h(genesis))
         XCTAssertEqual(snapshot?.subtreeWork, expected.weights[genesis], "\(label): whole-graph weight", file: file, line: line)
         XCTAssertEqual(snapshot?.tipHash, h(expected.tip), "\(label): descent from genesis", file: file, line: line)
         // The differential reference agrees with the definition too.
-        let live = await chain.hashToBlock
-        let roots = await chain.excludedRootsForTesting
+        let live = chain.hashToBlock
+        let roots = chain.excludedRootsForTesting
         let reference = ForkChoiceOracle(blocks: live, excluded: roots).view().canonicalProjection()
         XCTAssertEqual(reference?.tip, h(expected.tip), "\(label): reference oracle", file: file, line: line)
     }
@@ -125,24 +125,24 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
     /// Build live in `order` (exclusions interleaved once their block exists),
     /// then cold-restore from the same facts shuffled by `rng`.
     private func build(_ blocks: [Planned], excluded: [String], order: [Int],
-                       rng: inout SeededRNG) async throws -> (live: ChainState, cold: ChainState) {
+                       rng: inout SeededRNG) async throws -> (live: ChainTree, cold: ChainTree) {
         let hs = heights(blocks)
         let facts = blocks.map { admission($0, height: hs[$0.name]!) }
         let genesis = blocks.firstIndex { $0.parent == nil }!
-        let live = try await ChainState.restoreWithoutContext(replaying: [facts[genesis]])
+        var live = try ChainTree.restoreWithoutContext(replaying: [facts[genesis]])
         var pendingExclusions = Set(excluded)
         var present: Set<String> = [blocks[genesis].name]
         for i in order where i != genesis {
-            _ = try await live.replay(facts[i])
+            _ = try live.replay(facts[i])
             present.insert(blocks[i].name)
             for name in pendingExclusions where present.contains(name) {
-                _ = try await live.replay(exclusion(name))
+                _ = try live.replay(exclusion(name))
                 pendingExclusions.remove(name)
             }
         }
-        for name in pendingExclusions { _ = try await live.replay(exclusion(name)) }
+        for name in pendingExclusions { _ = try live.replay(exclusion(name)) }
         let all = facts + excluded.map(exclusion)
-        let cold = try await ChainState.restoreWithoutContext(replaying: all.shuffled(using: &rng))
+        let cold = try ChainTree.restoreWithoutContext(replaying: all.shuffled(using: &rng))
         return (live, cold)
     }
 
@@ -162,12 +162,12 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         ]
         var rng = SeededRNG(seed: 1)
         let (live, cold) = try await build(blocks, excluded: ["i"], order: Array(blocks.indices), rng: &rng)
-        await assertMatches(live, blocks, excluded: ["i"], "live")
-        await assertMatches(cold, blocks, excluded: ["i"], "cold")
+        assertMatches(live, blocks, excluded: ["i"], "live")
+        assertMatches(cold, blocks, excluded: ["i"], "cold")
         // Pin the numbers, so the oracle is not the only thing trusted.
-        let v = await live.subtreeWeight(forHash: h("v"))
+        let v = live.subtreeWeight(forHash: h("v"))
         XCTAssertEqual(v, WorkSum(UInt256(36)), "1 + 10 + 20 + 5: the invalid subtree weighs")
-        let tip = await live.canonicalTip
+        let tip = live.canonicalTip
         XCTAssertEqual(tip, h("w"))
     }
 
@@ -181,24 +181,24 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             Planned(name: "i", parent: "v", work: 50),
         ]
         var rng = SeededRNG(seed: 2)
-        let (live, _) = try await build(blocks, excluded: ["i"], order: Array(blocks.indices), rng: &rng)
-        var tip = await live.canonicalTip
+        var (live, _) = try await build(blocks, excluded: ["i"], order: Array(blocks.indices), rng: &rng)
+        var tip = live.canonicalTip
         XCTAssertEqual(tip, h("v"), "nothing below V is selectable")
         // More work under I: V's weight rises, the tip does not move.
         let heavier = Planned(name: "i2", parent: "i", work: 500)
-        _ = try await live.replay(admission(heavier, height: 3))
+        _ = try live.replay(admission(heavier, height: 3))
         blocks.append(heavier)
-        tip = await live.canonicalTip
+        tip = live.canonicalTip
         XCTAssertEqual(tip, h("v"))
-        let v = await live.subtreeWeight(forHash: h("v"))
+        let v = live.subtreeWeight(forHash: h("v"))
         XCTAssertEqual(v, WorkSum(UInt256(551)))
         // A valid child W with work 1 is chosen over I with 550 below it.
         let w = Planned(name: "w", parent: "v", work: 1)
-        _ = try await live.replay(admission(w, height: 2))
+        _ = try live.replay(admission(w, height: 2))
         blocks.append(w)
-        tip = await live.canonicalTip
+        tip = live.canonicalTip
         XCTAssertEqual(tip, h("w"), "validity selects; weight only ranks selectable children")
-        await assertMatches(live, blocks, excluded: ["i"], "after W")
+        assertMatches(live, blocks, excluded: ["i"], "after W")
     }
 
     /// Excluding a block that was never canonical changes nothing — no weight
@@ -212,19 +212,19 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             Planned(name: "b", parent: "g", work: 3),
         ]
         var rng = SeededRNG(seed: 3)
-        let (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
-        await live.resetFullCanonicalProjectionCount()
-        _ = try await live.replay(exclusion("b"))
-        let fullAfterSide = await live.fullCanonicalProjectionCount
+        var (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
+        live.resetFullCanonicalProjectionCount()
+        _ = try live.replay(exclusion("b"))
+        let fullAfterSide = live.fullCanonicalProjectionCount
         XCTAssertEqual(fullAfterSide, 0, "a non-canonical exclusion projects nothing")
-        var tip = await live.canonicalTip
+        var tip = live.canonicalTip
         XCTAssertEqual(tip, h("a2"))
-        _ = try await live.replay(exclusion("a"))
-        let fullAfterCanonical = await live.fullCanonicalProjectionCount
+        _ = try live.replay(exclusion("a"))
+        let fullAfterCanonical = live.fullCanonicalProjectionCount
         XCTAssertEqual(fullAfterCanonical, 1, "a canonical exclusion re-selects once")
-        tip = await live.canonicalTip
+        tip = live.canonicalTip
         XCTAssertEqual(tip, h("g"), "both children excluded: the genesis is the last selectable block")
-        await assertMatches(live, blocks, excluded: ["a", "b"], "both excluded")
+        assertMatches(live, blocks, excluded: ["a", "b"], "both excluded")
     }
 
     /// Right after a canonical exclusion, miners that have not executed the
@@ -239,25 +239,25 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             parent = "n\(i)"
         }
         var rng = SeededRNG(seed: 5)
-        let (live, _) = try await build(blocks, excluded: ["n60"], order: Array(blocks.indices), rng: &rng)
-        var tip = await live.canonicalTip
+        var (live, _) = try await build(blocks, excluded: ["n60"], order: Array(blocks.indices), rng: &rng)
+        var tip = live.canonicalTip
         XCTAssertEqual(tip, h("n59"))
-        await live.resetFullCanonicalProjectionCount()
-        let visitsBefore = await live.canonicalProjectionBlockVisitCount
+        live.resetFullCanonicalProjectionCount()
+        let visitsBefore = live.canonicalProjectionBlockVisitCount
         var under = "n60"
         for i in 61...70 {
             let b = Planned(name: "n\(i)", parent: under, work: 2)
-            _ = try await live.replay(admission(b, height: UInt64(i)))
+            _ = try live.replay(admission(b, height: UInt64(i)))
             blocks.append(b)
             under = "n\(i)"
         }
-        let full = await live.fullCanonicalProjectionCount
-        let visitsAfter = await live.canonicalProjectionBlockVisitCount
+        let full = live.fullCanonicalProjectionCount
+        let visitsAfter = live.canonicalProjectionBlockVisitCount
         XCTAssertEqual(full, 0, "ten blocks under the excluded sole child: zero whole-chain projections")
         XCTAssertEqual(visitsAfter, visitsBefore, "and zero descent steps")
-        tip = await live.canonicalTip
+        tip = live.canonicalTip
         XCTAssertEqual(tip, h("n59"))
-        await assertMatches(live, blocks, excluded: ["n60"], "after extension")
+        assertMatches(live, blocks, excluded: ["n60"], "after extension")
     }
 
     /// Ties are broken by the consensus rule on CID bytes; an excluded
@@ -270,16 +270,16 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             Planned(name: "y", parent: "g", work: 7),
         ]
         var rng = SeededRNG(seed: 6)
-        let (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
+        var (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
         let winner = forkChoicePrefersBlock(h("x"), over: h("y")) ? "x" : "y"
         let loser = winner == "x" ? "y" : "x"
-        let tip = await live.canonicalTip
+        let tip = live.canonicalTip
         XCTAssertEqual(tip, h(winner))
-        await assertMatches(live, blocks, excluded: [], "tie")
-        _ = try await live.replay(exclusion(winner))
-        let after = await live.canonicalTip
+        assertMatches(live, blocks, excluded: [], "tie")
+        _ = try live.replay(exclusion(winner))
+        let after = live.canonicalTip
         XCTAssertEqual(after, h(loser), "the excluded tie-winner yields")
-        await assertMatches(live, blocks, excluded: [winner], "tie, winner excluded")
+        assertMatches(live, blocks, excluded: [winner], "tie, winner excluded")
     }
 
     /// A chain whose every root is proven invalid has nothing to stand on:
@@ -292,14 +292,14 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             Planned(name: "a", parent: "g", work: 5),
         ]
         var rng = SeededRNG(seed: 7)
-        let (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
+        var (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
         do {
-            _ = try await live.replay(exclusion("g"))
+            _ = try live.replay(exclusion("g"))
             XCTFail("excluding the only root must be refused")
-        } catch ChainStateRestoreError.corruptConsensusGraph {}
-        let roots = await live.excludedRootsForTesting
+        } catch ChainTreeRestoreError.corruptConsensusGraph {}
+        let roots = live.excludedRootsForTesting
         XCTAssertTrue(roots.isEmpty, "a refused exclusion records nothing")
-        let tip = await live.canonicalTip
+        let tip = live.canonicalTip
         XCTAssertEqual(tip, h("a"))
         // A second, lighter root: merely PRESENT it is not a chain to stand
         // on; once EXECUTED, excluding the first moves selection to it. Named
@@ -308,21 +308,21 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         // halves below depend on which root is trusted.
         let z = Planned(name: "z", parent: nil, work: 1)
         XCTAssertLessThan(h("g"), h("z"), "fixture: g must remain the restore seed")
-        _ = try await live.replay(admission(z, height: 0))
+        _ = try live.replay(admission(z, height: 0))
         do {
-            _ = try await live.replay(exclusion("g"))
+            _ = try live.replay(exclusion("g"))
             XCTFail("an unexecuted second root is not a chain to stand on")
-        } catch ChainStateRestoreError.corruptConsensusGraph {}
-        _ = try await live.replay(BlockImportBatch.validation(blockHash: h("z")))
-        _ = try await live.replay(exclusion("g"))
-        let moved = await live.canonicalTip
+        } catch ChainTreeRestoreError.corruptConsensusGraph {}
+        _ = try live.replay(BlockImportBatch.validation(blockHash: h("z")))
+        _ = try live.replay(exclusion("g"))
+        let moved = live.canonicalTip
         XCTAssertEqual(moved, h("z"), "selection moves to the remaining executed root")
-        let path = await live.canonicalHashes
+        let path = live.canonicalHashes
         XCTAssertFalse(path.contains(h("g")), "an excluded root is never canonical")
         XCTAssertFalse(path.contains(h("a")))
         // And nothing is extended beneath the excluded root.
-        _ = try await live.replay(admission(Planned(name: "a2", parent: "a", work: 50), height: 2))
-        let still = await live.canonicalTip
+        _ = try live.replay(admission(Planned(name: "a2", parent: "a", work: 50), height: 2))
+        let still = live.canonicalTip
         XCTAssertEqual(still, h("z"))
         // Recovery is order-independent: the root exclusion defers until the
         // other root's validation has replayed, in every enumeration order.
@@ -332,9 +332,9 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             exclusion("g"), admission(Planned(name: "a2", parent: "a", work: 50), height: 2),
         ]
         for trial in 0..<12 {
-            let cold = try await ChainState.restoreWithoutContext(replaying: facts.shuffled(using: &rng))
-            let coldTip = await cold.canonicalTip
-            let coldRoots = await cold.excludedRootsForTesting
+            let cold = try ChainTree.restoreWithoutContext(replaying: facts.shuffled(using: &rng))
+            let coldTip = cold.canonicalTip
+            let coldRoots = cold.excludedRootsForTesting
             XCTAssertEqual(coldTip, h("z"), "cold \(trial)")
             XCTAssertEqual(coldRoots, [h("g")], "cold \(trial)")
         }
@@ -343,9 +343,9 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         let unexecuted = facts.filter { $0 != BlockImportBatch.validation(blockHash: h("z")) }
         for trial in 0..<6 {
             do {
-                _ = try await ChainState.restoreWithoutContext(replaying: unexecuted.shuffled(using: &rng))
+                _ = try ChainTree.restoreWithoutContext(replaying: unexecuted.shuffled(using: &rng))
                 XCTFail("order \(trial): a root exclusion with no executed root to stand on cannot replay")
-            } catch ChainStateRestoreError.corruptConsensusGraph {}
+            } catch ChainTreeRestoreError.corruptConsensusGraph {}
         }
     }
 
@@ -359,30 +359,30 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             Planned(name: "b", parent: "g", work: 2),
         ]
         var rng = SeededRNG(seed: 4)
-        let (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
+        var (live, _) = try await build(blocks, excluded: [], order: Array(blocks.indices), rng: &rng)
         // a2 is executed ahead of a, which is then proven invalid. An
         // executed block is never excluded (execution is never revoked).
         for name in ["g", "a2", "b"] {
-            _ = try await live.replay(BlockImportBatch.validation(blockHash: h(name)))
+            _ = try live.replay(BlockImportBatch.validation(blockHash: h(name)))
         }
         do {
-            _ = try await live.replay(exclusion("b"))
+            _ = try live.replay(exclusion("b"))
             XCTFail("an executed block is never excluded")
         } catch {}
-        _ = try await live.replay(exclusion("a"))
-        let a2 = await live.hasExecutedAncestry(blockHash: h("a2"))
-        let a = await live.hasExecutedAncestry(blockHash: h("a"))
-        let b = await live.hasExecutedAncestry(blockHash: h("b"))
+        _ = try live.replay(exclusion("a"))
+        let a2 = live.hasExecutedAncestry(blockHash: h("a2"))
+        let a = live.hasExecutedAncestry(blockHash: h("a"))
+        let b = live.hasExecutedAncestry(blockHash: h("b"))
         XCTAssertFalse(a, "an excluded block is not attested")
         XCTAssertFalse(a2, "nor anything below it")
         XCTAssertTrue(b, "the rest of the frontier is untouched")
-        let weightA = await live.subtreeWeight(forHash: h("a"))
+        let weightA = live.subtreeWeight(forHash: h("a"))
         XCTAssertEqual(weightA, WorkSum(UInt256(4)), "and its weight is untouched too")
         // Attestation between two states never passes through an excluded
         // block — the withdrawal-settlement gate — even though a2 was executed.
-        let through = await live.hasStateContinuity(from: testCID("wv-post:g"), to: testCID("wv-post:a2"))
+        let through = live.executedSetAdvanced(from: testCID("wv-post:g"), to: testCID("wv-post:a2"))
         XCTAssertFalse(through, "no continuity through a proven-invalid block")
-        let valid = await live.hasStateContinuity(from: testCID("wv-post:g"), to: testCID("wv-post:b"))
+        let valid = live.executedSetAdvanced(from: testCID("wv-post:g"), to: testCID("wv-post:b"))
         XCTAssertTrue(valid, "continuity along the valid branch is untouched")
     }
 
@@ -411,8 +411,8 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             let order = Array(blocks.indices).shuffled(using: &rng)
             let (live, cold) = try await build(blocks, excluded: Array(excluded), order: order, rng: &rng)
             let label = "trial \(trial) (\(count) blocks, excluded \(excluded.sorted()))"
-            await assertMatches(live, blocks, excluded: excluded, "\(label) live")
-            await assertMatches(cold, blocks, excluded: excluded, "\(label) cold")
+            assertMatches(live, blocks, excluded: excluded, "\(label) live")
+            assertMatches(cold, blocks, excluded: excluded, "\(label) cold")
             // Count the trials where an exclusion actually changed the selection,
             // so the suite cannot pass on trials where exclusion was moot.
             if oracle(blocks, excluded: excluded).tip != oracle(blocks, excluded: []).tip {

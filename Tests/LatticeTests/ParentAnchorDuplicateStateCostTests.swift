@@ -22,7 +22,7 @@ final class ParentAnchorDuplicateStateCostTests: XCTestCase {
                     blockHash: hash, parentBlockHash: parent, blockHeight: height,
                     postStateCID: to, prevStateCID: from, specCID: AnchorCIDPool.spec,
                     target: UInt256.max.toHexString(), nextTarget: UInt256.max.toHexString(),
-                    timestamp: Int64(next), stateDiff: .empty
+                    timestamp: Int64(next)
                 )),
                 .work(ChainWorkFact(blockHash: hash, contribution: VerifiedWorkContribution(
                     id: testCID("dup-cost-grind-\(next)"), work: 1
@@ -52,14 +52,11 @@ final class ParentAnchorDuplicateStateCostTests: XCTestCase {
     ) {
         let pairs = tree.anchoredProducers(of: from).count * tree.anchoredProducers(of: to).count
         let (answer, newMs) = measure { tree.executedSetAdvanced(from: from, to: to) }
-        var copy = tree
-        let (old, oldMs) = measure { copy.hasStateContinuity(from: from, to: to) }
         XCTAssertEqual(answer, expected, name)
-        XCTAssertEqual(old, expected, "\(name): the graph search agrees")
         XCTAssertLessThan(newMs, boundMilliseconds, name)
         print(String(
-            format: "[anchor-cost] %@: blocks %d, producer pairs %d, executedSetAdvanced %.2f ms (%.2f us/pair), old search %.2f ms",
-            name, tree.blockCount, pairs, newMs, pairs > 0 ? newMs * 1_000 / Double(pairs) : 0, oldMs
+            format: "[anchor-cost] %@: blocks %d, producer pairs %d, executedSetAdvanced %.2f ms (%.2f us/pair)",
+            name, tree.blockCount, pairs, newMs, pairs > 0 ? newMs * 1_000 / Double(pairs) : 0
         ))
     }
 

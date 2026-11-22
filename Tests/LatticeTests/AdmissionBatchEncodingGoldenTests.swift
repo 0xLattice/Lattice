@@ -101,7 +101,6 @@ final class AdmissionBatchEncodingGoldenTests: XCTestCase {
                     target: UInt256(1_000).toHexString(),
                     nextTarget: UInt256(999).toHexString(),
                     timestamp: 1_700_000_000_123,
-                    stateDiff: StateDiff(replaced: [cid("replaced"): 1], created: [cid("created"): 2]),
                     childCommitments: [
                         "Child": cid("child-block"),
                         "Other": cid("other-block"),
@@ -124,8 +123,7 @@ final class AdmissionBatchEncodingGoldenTests: XCTestCase {
                     specCID: cid("spec"),
                     target: UInt256.max.toHexString(),
                     nextTarget: UInt256.max.toHexString(),
-                    timestamp: 0,
-                    stateDiff: .empty
+                    timestamp: 0
                 )),
                 .work(ChainWorkFact(
                     blockHash: cid("genesis"),
@@ -171,5 +169,16 @@ final class AdmissionBatchEncodingGoldenTests: XCTestCase {
             XCTAssertEqual(decoded, fixtures[entry.name], "\(entry.name): decoded batch")
             XCTAssertEqual(try Self.encoder().encode(decoded), bytes, "\(entry.name): re-encoded bytes")
         }
+    }
+
+    /// A log written before the block fact lost its `stateDiff` still
+    /// decodes: the extra key is ignored, and the fact re-encodes without it.
+    func testLegacyBlockFactWithStateDiffDecodes() throws {
+        let legacy = #"{"facts":[{"block":{"_0":{"blockHash":"bafyreibdzqkw7vny7tzcnfotyrbbk4dnyqnuh2mek7mctekibjeuzmaujq","blockHeight":0,"nextTarget":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","postStateCID":"bafyreiba6r5pnzhwzep542sbq4tvlfyn2ovtobbqsdi37ngqfzy5sapsni","prevStateCID":"bafyreiccezk4phts3ecej3hxpf4ofut76r2fmlkqhsn7eoplpxcnkzn77m","specCID":"bafyreifnjwp35fnkia6hui4u5awaxgc4hd4gqxvqt3r6lk5g5vmy4hho5q","stateDiff":{"created":{},"replaced":{}},"target":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","timestamp":0}}},{"work":{"_0":{"blockHash":"bafyreibdzqkw7vny7tzcnfotyrbbk4dnyqnuh2mek7mctekibjeuzmaujq","contribution":{"id":"bafyreibdzqkw7vny7tzcnfotyrbbk4dnyqnuh2mek7mctekibjeuzmaujq","work":"0x1"}}}}]}"#
+        let decoded = try JSONDecoder().decode(BlockImportBatch.self, from: Data(legacy.utf8))
+        let fixture = try XCTUnwrap(fixedBatches().first { $0.name == "genesisWithoutCommitments" }?.batch)
+        XCTAssertEqual(decoded, fixture)
+        let reencoded = String(decoding: try Self.encoder().encode(decoded), as: UTF8.self)
+        XCTAssertFalse(reencoded.contains("stateDiff"))
     }
 }

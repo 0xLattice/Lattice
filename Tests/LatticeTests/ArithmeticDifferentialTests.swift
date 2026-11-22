@@ -239,7 +239,6 @@ final class ArithmeticDifferentialTests: XCTestCase {
         }
         for value in values {
             XCTAssertEqual(workForTarget(value), ArithmeticDifferentialTests.referenceWorkForTarget(value), "\(value)")
-            XCTAssertEqual(workForHash(value), ArithmeticDifferentialTests.referenceWorkForHash(value), "\(value)")
         }
     }
 

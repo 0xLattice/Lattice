@@ -105,8 +105,8 @@ final class BlockSizeDuringFetchTests: XCTestCase {
                 XCTFail("unverified bytes must not complete the size check")
             } catch {
                 XCTAssertFalse(error is BlockContentSizeError)
-                XCTAssertFalse(ChainLevel.isDeterministicInvalidityForTesting(
-                    ChainLevel.classifyValidationFailureForTesting(error)
+                XCTAssertFalse(BlockImport.isDeterministicInvalidity(
+                    classifyValidationFailure(error)
                 ))
             }
         }
@@ -173,9 +173,9 @@ final class BlockSizeDuringFetchTests: XCTestCase {
         XCTAssertLessThanOrEqual(servedBytes, limit + largest)
     }
 
-    // MARK: - Acquisition and admission
+    // MARK: - The bound, and admission
 
-    func testStoreBlockStopsAtTheChainsLimitAndStoresNothing() async throws {
+    func testBoundedContentStopsAtTheChainsLimit() async throws {
         let source = StorableFetcher()
         let transaction = contentTransaction(nonce: 0, payloadBytes: 50_000)
         let block = try await buildAndStoreGenesis(
@@ -183,18 +183,16 @@ final class BlockSizeDuringFetchTests: XCTestCase {
             timestamp: 1, target: UInt256.max, fetcher: source
         )
         let withoutBody = HidingFetcher(base: source, hidden: [transaction.body.rawCID])
-        let destination = StorableFetcher()
         do {
-            try await BlockHeader(rawCID: BlockHeader(node: block).rawCID)
-                .storeBlock(fetcher: withoutBody, storer: destination)
-            XCTFail("an oversized block is not stored")
+            _ = try await BlockHeader(rawCID: BlockHeader(node: block).rawCID)
+                .resolveBoundedContent(fetcher: withoutBody)
+            XCTFail("an oversized block's content is not resolved")
         } catch {
             XCTAssertEqual(error as? BlockContentSizeError, .exceedsLimit)
         }
-        XCTAssertTrue(destination.entries.isEmpty)
     }
 
-    func testStoreBlockStoresABlockWhoseTransactionsAreExactlyTheLimit() async throws {
+    func testBoundedContentResolvesTransactionsOfExactlyTheLimit() async throws {
         let source = StorableFetcher()
         let transactions = (0..<8).map { contentTransaction(nonce: $0, payloadBytes: 256) }
         func genesis(_ maxBlockSize: Int) async throws -> Block {
@@ -203,7 +201,7 @@ final class BlockSizeDuringFetchTests: XCTestCase {
                 timestamp: 1, target: UInt256.max, fetcher: source
             )
         }
-        // The bytes `storeBlock` fetches under the limit: everything below the
+        // The bytes `resolveBoundedContent` counts: everything below the
         // transaction index. The spec is its own Volume, so they do not move
         // with the limit it carries.
         let underTransactions = StorableFetcher()
@@ -212,21 +210,18 @@ final class BlockSizeDuringFetchTests: XCTestCase {
         let exact = underTransactions.entries.values.reduce(0) { $0 + $1.count }
 
         let atLimit = try await genesis(exact)
-        let stored = StorableFetcher()
-        try await BlockHeader(rawCID: BlockHeader(node: atLimit).rawCID)
-            .storeBlock(fetcher: source, storer: stored)
-        XCTAssertTrue(stored.volumeRoots().contains(try BlockHeader(node: atLimit).rawCID))
+        let (content, _) = try await BlockHeader(rawCID: BlockHeader(node: atLimit).rawCID)
+            .resolveBoundedContent(fetcher: source)
+        XCTAssertEqual(try BlockHeader.transactionBodies(of: content).count, transactions.count)
 
         let oneOver = try await genesis(exact - 1)
-        let refused = StorableFetcher()
         do {
-            try await BlockHeader(rawCID: BlockHeader(node: oneOver).rawCID)
-                .storeBlock(fetcher: source, storer: refused)
-            XCTFail("one byte over the limit is not stored")
+            _ = try await BlockHeader(rawCID: BlockHeader(node: oneOver).rawCID)
+                .resolveBoundedContent(fetcher: source)
+            XCTFail("one byte over the limit is not resolved")
         } catch {
             XCTAssertEqual(error as? BlockContentSizeError, .exceedsLimit)
         }
-        XCTAssertTrue(refused.entries.isEmpty)
     }
 
     /// The block's content exceeds its chain's limit and part of it cannot be
@@ -302,7 +297,7 @@ final class BlockSizeDuringFetchTests: XCTestCase {
             )
             XCTFail("no spec, no limit, no verdict")
         } catch {
-            XCTAssertEqual(ChainLevel.classifyValidationFailureForTesting(error), .unavailableEvidence)
+            XCTAssertEqual(classifyValidationFailure(error), .unavailableEvidence)
         }
     }
 

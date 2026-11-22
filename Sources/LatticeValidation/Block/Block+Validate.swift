@@ -228,29 +228,6 @@ public extension Block {
         return true
     }
 
-    /// `source:` overload of ``validateNexus(fetcher:chain:chainPath:reportTemporalFailure:)``.
-    /// Wraps the batched cashew ``ContentSource`` in a single
-    /// ``CoalescingFetcher`` and delegates to the `fetcher:` version unchanged,
-    /// so validation is byte-identical to the per-CID path. Threading one
-    /// coalescer through the whole call collapses each concurrent wave of
-    /// content fetches (transaction bodies, ancestor walk, state resolution)
-    /// into batched requests without altering the validation logic.
-    func validateNexus(
-        source: any ContentSource,
-        chain: (any DifficultyAnchorSource)? = nil,
-        chainPath: [String]? = nil,
-        reportTemporalFailure: Bool = false,
-        validationContext: ValidationContext = .current
-    ) async throws -> (Bool, StateDiff, LatticeState?) {
-        try await validateNexus(
-            fetcher: CoalescingFetcher(source),
-            chain: chain,
-            chainPath: chainPath,
-            reportTemporalFailure: reportTemporalFailure,
-            validationContext: validationContext
-        )
-    }
-
     /// Header linkage: the structural rules a non-genesis block must satisfy
     /// against its parent before anything is executed — version, parent
     /// resolution, spec continuity, `prevState == parent.postState`, and

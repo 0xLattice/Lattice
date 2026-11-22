@@ -10,7 +10,7 @@ import UInt256
 @testable import LatticeImport
 
 /// The spec-derived oracle (`ForkChoiceOracle.swift`) checked two ways: on its
-/// own against hand-computed spec examples, and against `ChainState` on the
+/// own against hand-computed spec examples, and against `ChainTree` on the
 /// golden graph and on the graphs the existing differential tests drive.
 @MainActor
 final class ForkChoiceOracleTests: XCTestCase {
@@ -31,8 +31,7 @@ final class ForkChoiceOracleTests: XCTestCase {
                 specCID: cid("spec"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: cid(name),
@@ -113,13 +112,13 @@ final class ForkChoiceOracleTests: XCTestCase {
         XCTAssertEqual(projection.path, [cid("g2"), cid("g2-child")])
     }
 
-    // MARK: - The oracle against ChainState
+    // MARK: - The oracle against ChainTree
 
     /// Tip, canonical path, and every present block's subtree and prefix
     /// totals must agree between the live chain and the oracle's model of the
     /// same facts.
     private func assertAgreement(
-        _ chain: ChainState,
+        _ chain: ChainTree,
         _ oracle: ForkChoiceOracle,
         _ event: String,
         file: StaticString = #filePath,
@@ -128,13 +127,13 @@ final class ForkChoiceOracleTests: XCTestCase {
         XCTAssertTrue(oracle.conflicts.isEmpty, "\(event): a grind was offered a second location", file: file, line: line)
         let view = oracle.view()
         let projection = try XCTUnwrap(view.canonicalProjection(), "\(event): no selectable root", file: file, line: line)
-        let liveTip = await chain.canonicalTip
+        let liveTip = chain.canonicalTip
         XCTAssertEqual(liveTip, projection.tip, "\(event): tip", file: file, line: line)
 
         var livePath: [String] = []
-        let tipHeight = await chain.getHighestBlockHeight()
+        let tipHeight = chain.getHighestBlockHeight()
         for height in 0...tipHeight {
-            let hash = await chain.canonicalBlockHash(atHeight: height)
+            let hash = chain.canonicalBlockHash(atHeight: height)
             livePath.append(try XCTUnwrap(
                 hash, "\(event): canonical index has a hole at height \(height)", file: file, line: line
             ))
@@ -145,7 +144,7 @@ final class ForkChoiceOracleTests: XCTestCase {
         // model the facts built, and the one-pass totals must be the walked
         // ones — the differential suites project through both.
         let held = ForkChoiceOracle(
-            blocks: await chain.hashToBlock, excluded: await chain.excludedRootsForTesting
+            blocks: chain.hashToBlock, excluded: chain.excludedRootsForTesting
         ).view()
         let heldProjection = try XCTUnwrap(
             held.canonicalProjection(totals: held.subtreeTotals()),
@@ -157,7 +156,7 @@ final class ForkChoiceOracleTests: XCTestCase {
         XCTAssertEqual(totals.count, view.blocks.count, "\(event): one total per block", file: file, line: line)
 
         for hash in view.blocks.keys.sorted() {
-            let subtree = await chain.subtreeWeight(forHash: hash)
+            let subtree = chain.subtreeWeight(forHash: hash)
             XCTAssertEqual(
                 subtree?.toHexString(), view.trueCumWork(of: hash).hex,
                 "\(event): trueCumWork of \(hash)", file: file, line: line
@@ -166,7 +165,7 @@ final class ForkChoiceOracleTests: XCTestCase {
                 totals[hash], view.trueCumWork(of: hash),
                 "\(event): subtreeTotals of \(hash)", file: file, line: line
             )
-            let prefix = await chain.getCumulativeWork(forHash: hash)
+            let prefix = chain.getCumulativeWork(forHash: hash)
             XCTAssertEqual(
                 prefix?.toHexString(), view.cumulativeWork(of: hash).hex,
                 "\(event): cumulativeWork of \(hash)", file: file, line: line
@@ -182,37 +181,37 @@ final class ForkChoiceOracleTests: XCTestCase {
         let genesis = block("g", parent: nil, height: 0, work: 1)
         let located = block("a", parent: "g", height: 1, grind: "shared", work: 3)
         let other = block("b", parent: "g", height: 1, work: 2)
-        let chain = try await ChainState.restoreWithoutContext(replaying: [genesis])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [genesis])
         var oracle = ForkChoiceOracle()
         for batch in [genesis, located, other] {
-            _ = try await chain.replay(batch)
+            _ = try chain.replay(batch)
             oracle.apply(batch)
         }
         try await assertAgreement(chain, oracle, "before the conflict")
 
         // Live path: a stronger observation of the grind at another block.
-        let live = await chain.addWorkContribution(
+        let live = chain.addWorkContribution(
             VerifiedWorkContribution(id: cid("shared"), work: UInt256(9)), to: cid("b")
         )
         XCTAssertFalse(live.addedContribution, "the live path discards a second location")
         XCTAssertFalse(live.addedBlock)
-        let location = await chain.workContribution(id: cid("shared"))?.blockHash
+        let location = chain.workContribution(id: cid("shared"))?.blockHash
         XCTAssertEqual(location, cid("a"), "the grind stays where it was first located")
 
         // Replay reducer: the same work-only fact is a corrupt graph.
         let relocated = work("b", grind: "shared", work: 9)
         do {
-            _ = try await chain.replay(relocated)
+            _ = try chain.replay(relocated)
             XCTFail("replay must refuse a second location")
-        } catch let error as ChainStateRestoreError {
+        } catch let error as ChainTreeRestoreError {
             XCTAssertEqual(error, .corruptConsensusGraph)
         }
         // And so is a block fact whose own grind is already located elsewhere.
         let stolen = block("c", parent: "b", height: 2, grind: "shared", work: 9)
         do {
-            _ = try await chain.replay(stolen)
+            _ = try chain.replay(stolen)
             XCTFail("replay must refuse a block carrying a grind located elsewhere")
-        } catch let error as ChainStateRestoreError {
+        } catch let error as ChainTreeRestoreError {
             XCTAssertEqual(error, .corruptConsensusGraph)
         }
 
@@ -227,29 +226,29 @@ final class ForkChoiceOracleTests: XCTestCase {
         // inserted it, so compare only the blocks both hold.)
         let view = oracle.view()
         for name in ["g", "a", "b"] {
-            let subtree = await chain.subtreeWeight(forHash: cid(name))
+            let subtree = chain.subtreeWeight(forHash: cid(name))
             XCTAssertEqual(subtree?.toHexString(), view.trueCumWork(of: cid(name)).hex, name)
         }
-        let tip = await chain.canonicalTip
+        let tip = chain.canonicalTip
         XCTAssertEqual(tip, cid("a"))
-        let contains = await chain.contains(blockHash: cid("c"))
+        let contains = chain.contains(blockHash: cid("c"))
         XCTAssertFalse(contains)
     }
 
     func testOracleAgreesWithChainStateOnTheGoldenGraph() async throws {
         let graph = ForkChoiceGoldenGraph.generate()
-        let chain = try await ChainState.restoreWithoutContext(replaying: [graph.events[0].batch])
+        var chain = try ChainTree.restoreWithoutContext(replaying: [graph.events[0].batch])
         var oracle = ForkChoiceOracle()
         oracle.apply(graph.events[0].batch)
         for event in graph.events.dropFirst() {
-            _ = try await chain.replay(event.batch)
+            _ = try chain.replay(event.batch)
             oracle.apply(event.batch)
             if event.index % 25 == 0 {
                 try await assertAgreement(chain, oracle, "event \(event.index)")
             }
         }
         try await assertAgreement(chain, oracle, "final")
-        let restored = try await ChainState.restoreWithoutContext(replaying: graph.events.map(\.batch).reversed())
+        let restored = try ChainTree.restoreWithoutContext(replaying: graph.events.map(\.batch).reversed())
         try await assertAgreement(restored, oracle, "reversed restore")
     }
 
@@ -259,14 +258,14 @@ final class ForkChoiceOracleTests: XCTestCase {
             0x1234_5678, 0x8765_4321, 0x0DDC_0FFE, 0x51DE_CAFE,
         ] {
             let planned = SegmentBaseDifferentialFixtures.planned(seed: seed)
-            let chain = try await ChainState.restoreWithoutContext(replaying: [planned[0].batch])
+            var chain = try ChainTree.restoreWithoutContext(replaying: [planned[0].batch])
             var oracle = ForkChoiceOracle()
             oracle.apply(planned[0].batch)
             // Descendants before ancestors, as the differential test delivers
             // them, then the rest in index order.
             let order = [4, 3, 1, 2, 5] + Array(6..<planned.count)
             for index in order {
-                _ = try await chain.replay(planned[index].batch)
+                _ = try chain.replay(planned[index].batch)
                 oracle.apply(planned[index].batch)
                 try await assertAgreement(chain, oracle, "seed \(seed) block \(index)")
             }
@@ -275,13 +274,13 @@ final class ForkChoiceOracleTests: XCTestCase {
                 let batch = SegmentBaseDifferentialFixtures.work(
                     blockHash: planned[4].hash, id: shared, work: UInt64(strength)
                 )
-                _ = try await chain.replay(batch)
+                _ = try chain.replay(batch)
                 oracle.apply(batch)
                 try await assertAgreement(chain, oracle, "seed \(seed) strengthening \(step)")
             }
             for index in stride(from: 2, to: planned.count, by: 3) where planned[index].parentHash != nil {
                 let batch = SegmentBaseDifferentialFixtures.exclusion(of: planned[index].hash)
-                _ = try await chain.replay(batch)
+                _ = try chain.replay(batch)
                 oracle.apply(batch)
                 try await assertAgreement(chain, oracle, "seed \(seed) exclusion \(index)")
             }
@@ -292,7 +291,7 @@ final class ForkChoiceOracleTests: XCTestCase {
         let (batches, _) = ReplayProjectionDeferralTests.bushyBatches()
         var oracle = ForkChoiceOracle()
         for batch in batches { oracle.apply(batch) }
-        let restored = try await ChainState.restoreWithoutContext(replaying: Array(batches.reversed()))
+        let restored = try ChainTree.restoreWithoutContext(replaying: Array(batches.reversed()))
         try await assertAgreement(restored, oracle, "bushy reversed restore")
     }
 }
