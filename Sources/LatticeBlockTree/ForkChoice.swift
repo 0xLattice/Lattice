@@ -40,13 +40,13 @@ struct WorkContributionRecord: Sendable, Equatable {
     }
 }
 
-public struct ForkChoiceSnapshot: Sendable, Equatable {
-    public let startingHash: String
-    public let subtreeWork: WorkSum
-    public let tipHash: String
-    public let canonicalPath: Set<String>
+package struct ForkChoiceSnapshot: Sendable, Equatable {
+    package let startingHash: String
+    package let subtreeWork: WorkSum
+    package let tipHash: String
+    package let canonicalPath: Set<String>
 
-    public init(startingHash: String, subtreeWork: WorkSum, tipHash: String, canonicalPath: Set<String>) {
+    package init(startingHash: String, subtreeWork: WorkSum, tipHash: String, canonicalPath: Set<String>) {
         self.startingHash = startingHash
         self.subtreeWork = subtreeWork
         self.tipHash = tipHash
@@ -320,7 +320,7 @@ extension ChainTree {
     }
 
     /// Exact total proof-of-work from genesis to the current chain tip.
-    public func getTipCumulativeWork() -> WorkSum {
+    package func getTipCumulativeWork() -> WorkSum {
         getCumulativeWork(forHash: canonicalTip) ?? .zero
     }
 
@@ -365,8 +365,8 @@ extension ChainTree {
         graph.handle(hash).flatMap(graph.weight(of:))
     }
 
-    /// Public simulator/test view of the real local fork-choice descent.
-    public func forkChoiceSnapshot(startingAt hash: String) -> ForkChoiceSnapshot? {
+    /// Simulator/test view of the real local fork-choice descent.
+    package func forkChoiceSnapshot(startingAt hash: String) -> ForkChoiceSnapshot? {
         guard let block = graph.handle(hash), graph.isRouted(block) else { return nil }
         let choice = chainWithMostWork(startingAt: hash)
         return ForkChoiceSnapshot(

@@ -107,7 +107,7 @@ the `maxBlockSize` bound in `resolveBoundedContent`), and the node fetches and
 keeps it.
 
 A candidate is admitted in two steps, each emitting the facts it applies
-(`ChainTree+Admission.swift`):
+(`Sources/LatticeImport/ChainTree+Admission.swift`):
 
 ```text
 acquire (node)

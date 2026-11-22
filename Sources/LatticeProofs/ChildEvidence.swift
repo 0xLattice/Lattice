@@ -3,8 +3,8 @@ import UInt256
 import LatticePrimitives
 import LatticePoW
 
-/// A local fact derived from one chain's validated, connected block graph.
-/// Equality is reflexive and needs no fact.
+/// A local fact derived from one chain's executed set (§5.3 step 6). Equal
+/// states need one too: equality is never evidence on its own.
 public struct ParentStateContinuityLink: Hashable, Sendable {
     public let parentPath: [String]
     public let fromStateCID: String

@@ -90,8 +90,8 @@ public struct ChainTreeUpdate: Sendable {
 
 public enum ChainTreeAdmission: Sendable {
     case applied(ChainTreeUpdate)
-    /// Nothing new: no fact was emitted. A re-projection that promoted a
-    /// candidate is carried. (Re-connecting an executed block is not this: it
+    /// Nothing new: no fact was emitted, and the projection, always current,
+    /// did not move, so `promotedCommit` is nil. (Re-connecting an executed block is not this: it
     /// re-emits its validation batch, as the actor path re-stages it, and
     /// replaying that batch is a no-op.)
     case duplicate(promotedCommit: ChainCommit?)
@@ -261,7 +261,7 @@ extension ChainTree {
     /// whose bytes match but are not a well-formed block (a non-standard
     /// link included), or a child `parentState` that is not its carrier's
     /// `prevState`, is structural (drop, no blame; spec §9.9).
-    public static func headerFailure(
+    package static func headerFailure(
         _ failure: ChildProofVerificationFailure
     ) -> BlockImportError {
         switch failure {
@@ -386,7 +386,7 @@ extension ChainTree {
         }
         if let existing = workContribution(id: contribution.id, at: hash),
            existing.work >= contribution.work {
-            return .duplicate(promotedCommit: reevaluateForkChoice())
+            return .duplicate(promotedCommit: nil)
         }
         guard acceptsWorkLocation(of: contribution.id, at: hash) else {
             return .rejected(.providerMalformedEvidence)
@@ -685,8 +685,9 @@ extension ChainTree {
 
     /// Apply the batches this API derived, in order, reporting what they
     /// emitted and the net canonical change. A batch that changed no weight
-    /// (a validation of a held block) still re-projects, since execution can
-    /// make a heavier candidate selectable.
+    /// (a validation of a held block) moves nothing: the projection reads
+    /// weights and excluded roots only, and every mutation of either already
+    /// brought it current.
     private mutating func applyAdmission(
         _ batches: [BlockImportBatch],
         of blockHash: String,
@@ -707,8 +708,7 @@ extension ChainTree {
             } catch {
                 return .rejected(.localVerificationFailure)
             }
-            let next = submission == nil ? reevaluateForkChoice() : submission?.commit
-            commit = ChainCommit.composing(commit, then: next)
+            commit = ChainCommit.composing(commit, then: submission?.commit)
             weighed += submission?.weighed ?? []
         }
         return .applied(ChainTreeUpdate(

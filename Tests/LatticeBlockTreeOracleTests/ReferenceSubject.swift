@@ -116,10 +116,6 @@ struct ReferenceSubject: OracleSubject {
         )
     }
 
-    mutating func reevaluate() -> OracleOutcome {
-        OracleOutcome(rendered: Self.describe(tree.reevaluateForkChoice()))
-    }
-
     mutating func observeTip() -> [String: String] {
         ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
     }
@@ -210,7 +206,6 @@ struct ReferenceSubject: OracleSubject {
             for to in probe.states {
                 let key = "state \(from)→\(to)"
                 seen["\(key) advanced"] = "\(tree.executedSetAdvanced(from: from, to: to))"
-                seen["\(key) continuity"] = "\(tree.hasStateContinuity(from: from, to: to))"
             }
         }
         return seen

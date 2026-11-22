@@ -82,10 +82,8 @@ final class ParentAnchorMonotonicityTests: XCTestCase {
             previous = block
         }
         let tree = try ChainTree.restoreWithoutContext(replaying: batches)
-        let before = tree.stateContinuityBlockVisitCount
         XCTAssertTrue(tree.executedSetAdvanced(from: testCID("deep-state-1"), to: testCID("deep-state-\(depth)")))
         XCTAssertFalse(tree.executedSetAdvanced(from: testCID("deep-state-\(depth)"), to: testCID("deep-state-1")))
-        XCTAssertEqual(tree.stateContinuityBlockVisitCount, before, "an ancestry test, not a search")
     }
 
     // MARK: - Admission

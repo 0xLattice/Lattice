@@ -83,18 +83,19 @@ For a non-genesis child candidate `C` with predecessor `P`, Lattice therefore
 requires:
 
 ```text
-P.parentState == C.parentState
-or
-P.parentState -> ... -> C.parentState
-through connected accepted blocks in the immediate parent
+some block of the immediate parent's executed set produced C.parentState,
+and is or descends from a block that produced P.parentState
 ```
 
-This is reflexive, transitive state reachability—not direct adjacency. Without
-it, mined bytes could jump a child backward or sideways to a parent state that
-does not continue its prior dependency. The immediate-parent process answers
-the exact state-pair question from its accepted graph. A connected
-noncanonical branch is sufficient; canonicity cannot revoke the immutable
-fact. The node authenticates and may cache or relay the answer.
+This is forward movement through executed parent history—not direct
+adjacency, and not equality: `P.parentState == C.parentState` still requires
+that the executed set produced the state, since equality is never evidence
+(spec §5.3 step 6). Without it, mined bytes could jump a child backward or
+sideways to a parent state that does not continue its prior dependency, or
+carry along an unproven one. The immediate-parent process answers the exact
+state-pair question from its executed set. An executed noncanonical branch is
+sufficient; canonicity cannot revoke the immutable fact. The node authenticates
+and may cache or relay the answer.
 
 The state proof itself remains content-addressed rather than becoming another
 parent assertion. Receipt-state keys are fixed-depth, domain-separated hashes,
@@ -180,8 +181,8 @@ A change preserves the architecture only if all of these remain true:
 2. Securing work depends on a content-bound directory commitment and target
    hit, not carrier validity or canonicity.
 3. Work is joined by grind identity before quantities are totaled.
-4. Non-genesis parent-state movement is reflexive or transitively forward
-   through the immediate parent's connected accepted graph.
+4. Non-genesis parent-state movement is forward through the immediate
+   parent's executed set, and equality is no exemption.
 5. Fork choice compares effective `trueCumWork`, then same-chain child block CID.
 6. External ingress uses one import boundary; recovery replays durable facts.
 7. Durable facts precede visible mutation.

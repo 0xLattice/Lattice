@@ -36,7 +36,7 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
             canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2"), blockCID("M3")])
         )
         // subtreeWeight(F1) = {F1,F2a,F2b,F3a} = 4 > subtreeWeight(M1) = {M1,M2,M3} = 3.
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg, "fork's branching subtree (4) outweighs main's single path (3)")
         // GHOST descent picks the heaviest leaf under F1 — the F2a→F3a branch.
         let tip = chain.canonicalTip
@@ -52,7 +52,7 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let f2 = makeBlockMeta(hash: blockCID("F2"), previousHash: blockCID("F1"), height: 2)
 
         var chain = makeChain(blocks: [g, m1, m2, f1, f2], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg, "equal work and target choose the smaller segment-base hash")
         let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("F2"))
@@ -69,7 +69,7 @@ final class GhostReorgEdgeCaseTests: XCTestCase {
         let f3 = makeBlockMeta(hash: blockCID("F3"), previousHash: blockCID("F2"), height: 3)
 
         var chain = makeChain(blocks: [g, m1, m2, f1, f2, f3], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         XCTAssertEqual(reorg?.canonicalBlocksRemoved, Set([blockCID("M1"), blockCID("M2")]), "entire old suffix removed")
         XCTAssertEqual(Set(reorg!.canonicalBlocksAdded.keys), Set([blockCID("F1"), blockCID("F2"), blockCID("F3")]), "winning path installed")

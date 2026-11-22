@@ -296,7 +296,7 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         do {
             _ = try live.replay(exclusion("g"))
             XCTFail("excluding the only root must be refused")
-        } catch ChainStateRestoreError.corruptConsensusGraph {}
+        } catch ChainTreeRestoreError.corruptConsensusGraph {}
         let roots = live.excludedRootsForTesting
         XCTAssertTrue(roots.isEmpty, "a refused exclusion records nothing")
         let tip = live.canonicalTip
@@ -312,7 +312,7 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         do {
             _ = try live.replay(exclusion("g"))
             XCTFail("an unexecuted second root is not a chain to stand on")
-        } catch ChainStateRestoreError.corruptConsensusGraph {}
+        } catch ChainTreeRestoreError.corruptConsensusGraph {}
         _ = try live.replay(BlockImportBatch.validation(blockHash: h("z")))
         _ = try live.replay(exclusion("g"))
         let moved = live.canonicalTip
@@ -345,7 +345,7 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
             do {
                 _ = try ChainTree.restoreWithoutContext(replaying: unexecuted.shuffled(using: &rng))
                 XCTFail("order \(trial): a root exclusion with no executed root to stand on cannot replay")
-            } catch ChainStateRestoreError.corruptConsensusGraph {}
+            } catch ChainTreeRestoreError.corruptConsensusGraph {}
         }
     }
 
@@ -380,9 +380,9 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
         XCTAssertEqual(weightA, WorkSum(UInt256(4)), "and its weight is untouched too")
         // Attestation between two states never passes through an excluded
         // block — the withdrawal-settlement gate — even though a2 was executed.
-        let through = live.hasStateContinuity(from: testCID("wv-post:g"), to: testCID("wv-post:a2"))
+        let through = live.executedSetAdvanced(from: testCID("wv-post:g"), to: testCID("wv-post:a2"))
         XCTAssertFalse(through, "no continuity through a proven-invalid block")
-        let valid = live.hasStateContinuity(from: testCID("wv-post:g"), to: testCID("wv-post:b"))
+        let valid = live.executedSetAdvanced(from: testCID("wv-post:g"), to: testCID("wv-post:b"))
         XCTAssertTrue(valid, "continuity along the valid branch is untouched")
     }
 

@@ -203,7 +203,7 @@ final class FactStoreRestoreTests: XCTestCase {
             childCommitments: block.childCommitments
         ))
         XCTAssertThrowsError(try ChainTree.restore(facts: facts + [conflicting], context: context)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .corruptConsensusGraph)
         }
     }
 
@@ -216,10 +216,10 @@ final class FactStoreRestoreTests: XCTestCase {
         let journal = graph.events.map(\.batch)
         let facts = FactStore(journal).facts
         XCTAssertThrowsError(try ChainTree.restore(replaying: journal, context: root)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
         XCTAssertThrowsError(try ChainTree.restore(facts: facts, context: root)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
 
         var pinned = Set<String>()
@@ -257,7 +257,7 @@ final class FactStoreRestoreTests: XCTestCase {
         }
         for corrupt in [withoutWork, withoutGenesis] {
             XCTAssertThrowsError(try ChainTree.restore(facts: corrupt, context: context)) {
-                XCTAssertEqual($0 as? ChainStateRestoreError, .corruptConsensusGraph)
+                XCTAssertEqual($0 as? ChainTreeRestoreError, .corruptConsensusGraph)
             }
         }
     }

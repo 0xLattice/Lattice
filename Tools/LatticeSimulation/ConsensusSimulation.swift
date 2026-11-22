@@ -147,7 +147,7 @@ public enum LatticeConsensusSimulator {
             let visibleBlocks = spec.blocks.compactMap { visibleHashes.contains($0.hash) ? allBlocks[$0.hash] : nil }
             var chain = simChain(blocks: visibleBlocks, main: currentMain)
             let candidateRoot = forkRoot(for: release.blockHash, visible: visibleHashes, currentMain: currentMain, blocksByHash: blocksByHash)
-            let commit = chain.reevaluateForkChoice()
+            let commit = chain.projectCanonicalChain()
             if let commit {
                 currentMain.subtract(commit.canonicalBlocksRemoved.map(name))
                 currentMain.formUnion(commit.canonicalBlocksAdded.keys.map(name))
@@ -194,7 +194,7 @@ public enum LatticeConsensusSimulator {
         func name(_ cid: String) -> String { names[cid] ?? cid }
         let candidate = chain.forkChoiceSnapshot(startingAt: simCID("F1")).map { named($0, name) }
         let main = chain.forkChoiceSnapshot(startingAt: simCID("M1")).map { named($0, name) }
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         let tip = name(chain.canonicalTip)
 
         return ConsensusSimTrace(

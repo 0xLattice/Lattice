@@ -40,7 +40,7 @@ final class FinalityFloorTests: XCTestCase {
     /// A strictly-heavier fork always reorgs — no depth floor can refuse it.
     func testHeavierForkAlwaysReorgs() async {
         var chain = forkedChain()
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg, "heavier fork reorgs — there is no finality floor")
         let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("B5"), "tip moves to the heavier fork")
@@ -52,7 +52,7 @@ final class FinalityFloorTests: XCTestCase {
     /// have refused this. Pure heaviest-chain must follow it.
     func testDeepStrictlyHeavierForkIsAccepted() async {
         var chain = forkedChain()
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg, "deep but strictly-heavier fork must NOT be refused for being too deep")
         let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("B5"))
@@ -76,7 +76,7 @@ final class FinalityFloorTests: XCTestCase {
             blocks: [g, a1, a2, a3, b2],
             canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2"), blockCID("A3")])
         )
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNil(reorg, "lighter fork must be rejected (heaviest-chain only)")
         let tip = chain.canonicalTip
         XCTAssertEqual(tip, blockCID("A3"), "tip stays on the heavier original chain")

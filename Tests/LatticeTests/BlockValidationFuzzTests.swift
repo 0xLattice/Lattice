@@ -240,7 +240,7 @@ final class ForkChoiceFuzzTests: XCTestCase {
             var chain = makeChain(blocks: blocks, canonicalHashes: mainHashes)
             let forkTipHash = blockCID("F\(forkLen)")
 
-            let reorg = chain.reevaluateForkChoice()
+            let reorg = chain.projectCanonicalChain()
 
             XCTAssertNotNil(reorg, "Longer fork should trigger reorg")
 

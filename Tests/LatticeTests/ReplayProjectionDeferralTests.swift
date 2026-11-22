@@ -139,20 +139,13 @@ final class ReplayProjectionDeferralTests: XCTestCase {
         XCTAssertEqual(projections, 1, "restore-replay must project exactly once")
     }
 
-    func testReevaluationIsFreeWhenNoFactChangedAndStillPromotesAfterMutation() async throws {
+    func testWeightMutationAfterRestorePromotes() async throws {
         let (batches, _) = Self.bushyBatches()
         var chain = try ChainTree.restoreWithoutContext(replaying: batches)
 
-        // A duplicate delivery that added nothing must not pay a projection.
-        chain.resetFullCanonicalProjectionCount()
-        let unchanged = chain.reevaluateForkChoice()
-        XCTAssertNil(unchanged, "no mutation since last projection ⇒ no promotion possible")
-        let free = chain.fullCanonicalProjectionCount
-        XCTAssertEqual(free, 0, "provably-current re-evaluation must not project")
-
-        // A real weight mutation must still re-evaluate and be able to promote:
-        // outweigh the height-30 canonical tip via the height-30 side fork's
-        // ancestor at height 27 (side-27 exists; give it decisive work).
+        // A weight mutation after restore must still promote: outweigh the
+        // height-30 canonical tip via the height-30 side fork's ancestor at
+        // height 27 (side-27 exists; give it decisive work).
         let sideTip = testCID("replay-defer:side-27")
         _ = try chain.applyStaged(BlockImportBatch(facts: [
             .work(ChainWorkFact(
@@ -165,11 +158,5 @@ final class ReplayProjectionDeferralTests: XCTestCase {
         ]))
         let tip = chain.canonicalTip
         XCTAssertEqual(tip, sideTip, "a decisive weight mutation must still promote")
-        // And immediately after that projection, re-evaluation is free again.
-        chain.resetFullCanonicalProjectionCount()
-        let settled = chain.reevaluateForkChoice()
-        XCTAssertNil(settled)
-        let settledCount = chain.fullCanonicalProjectionCount
-        XCTAssertEqual(settledCount, 0)
     }
 }

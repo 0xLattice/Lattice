@@ -212,7 +212,7 @@ extension TransactionBody {
 
     /// Funds `owner` must afford for this body alone, as a non-negative outflow.
     /// Returns 0 when the owner's net position is non-negative.
-    public func netOutflow(of owner: String) throws -> UInt64 {
+    package func netOutflow(of owner: String) throws -> UInt64 {
         guard !owner.isEmpty else { return 0 }
         return try netOutflows()[owner] ?? 0
     }

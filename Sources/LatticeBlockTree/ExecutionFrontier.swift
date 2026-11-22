@@ -116,37 +116,6 @@ extension BlockGraph {
         }
     }
 
-    /// Whether a run of executed-from-genesis blocks carries state `from` to
-    /// state `to`, for distinct states: a block whose transition is
-    /// `from → …` and, through anchored parents whose post-state is each
-    /// block's pre-state, a block producing `to`. Only a transition on the
-    /// executed-from-genesis frontier may be attested: the weighed tier records
-    /// a block's declared post-state without running it, so an unverified
-    /// claim would otherwise stay attestable forever; and a child chain
-    /// settles cross-chain withdrawals against an attested parent state.
-    /// `visits` counts the blocks the search read: the caller's own counter,
-    /// so the search writes nothing a shared graph's other holders see.
-    func continuity(from: UInt32, to: UInt32, visits: inout UInt64) -> Bool {
-        let candidates = anchoredProducers(of: to)
-        if candidates.contains(where: { self[$0].prevState == from }) {
-            return true
-        }
-        var pending = candidates
-        var visited = Set<UInt32>()
-        while let block = pending.popLast() {
-            guard visited.insert(block).inserted else { continue }
-            let entry = self[block]
-            visits &+= 1
-            if entry.prevState == from { return true }
-            let parent = entry.parent
-            guard parent != Self.none, isAnchored(parent),
-                  self[parent].flags.contains(.hasSnapshot),
-                  self[parent].postState == entry.prevState else { continue }
-            pending.append(parent)
-        }
-        return false
-    }
-
     // MARK: Selection
 
     /// Project the canonical path after one fork-choice mutation.
@@ -394,24 +363,6 @@ extension ChainTree {
     var canonicalProjectionSegmentVisitCount: UInt64 { graph.canonicalProjectionSegmentVisitCount }
 #endif
 
-    /// Recompute canonical projection after local simulation/test mutation.
-    @discardableResult
-    public mutating func reevaluateForkChoice() -> ChainCommit? {
-        guard hasMutationCapacity(for: 1) else { return nil }
-        // No graph or weight fact has changed since the projection was last
-        // brought current, so re-projection is provably a no-op: a duplicate
-        // delivery that added nothing cannot promote anything.
-        guard mutationGeneration != graph.projectedGeneration else { return nil }
-        let canonicalChange = projectCanonicalChain()
-        guard canonicalChange != nil else { return nil }
-        // This bump carries no graph mutation, so the projection just computed
-        // stays exact for the new generation.
-        mutationGeneration += 1
-        mutableGraph.projectedGeneration = mutationGeneration
-        return (canonicalChange ?? ChainCommit(tipHash: canonicalTip))
-            .atRevision(mutationGeneration)
-    }
-
     /// One coherent context for transaction preflight: the named block (the
     /// canonical tip when nil) and its snapshot. Keeping the two in one actor
     /// read lets callers reject a result if the tip changes while content is
@@ -455,8 +406,10 @@ extension ChainTree {
 #endif
 
     /// Project the canonical path after one fork-choice mutation; see
-    /// `BlockGraph.project`.
-    mutating func projectCanonicalChain(
+    /// `BlockGraph.project`. With no arguments, a whole-chain projection: what
+    /// a tree built wholesale from fixtures needs before its canonical path
+    /// means anything.
+    package mutating func projectCanonicalChain(
         forceFull: Bool = false,
         monotoneIncreaseAt mutatedAt: String? = nil
     ) -> ChainCommit? {
@@ -496,44 +449,15 @@ extension ChainTree {
     /// never stepped into: it weighs, and is taken once it executes. Up to the
     /// executed prefix of the canonical chain this is fork choice's own
     /// descent, so when the canonical root is executed the walk starts there.
-    ///
-    /// With `avoided` blocks, they and all they lead to are left out: from
-    /// the parent of the deepest avoided block on the act-on chain, the
-    /// heaviest executed step at each fork that is not avoided — at the
-    /// genesis fork when that block is a root. The act-on tip when none of
-    /// them is on its chain, or no other root is executed.
-    public func heaviestExecutedTip(avoiding avoided: Set<String> = []) -> String {
+    public func heaviestExecutedTip() -> String {
         let graph = self.graph
-        let skipped = Set(avoided.compactMap(graph.handle))
-        func descend(from start: UInt32, skipping skipped: Set<UInt32>) -> UInt32 {
-            var tip = start
-            while let next = graph.preferred(among: graph.children(of: tip).filter {
-                graph.isValidated($0) && !skipped.contains($0)
-            }) {
-                tip = next
-            }
-            return tip
-        }
         // The genesis fork: a root is anchored when executed and not excluded.
-        func root(skipping skipped: Set<UInt32>) -> UInt32? {
-            graph.preferred(among: graph.roots.filter { graph.isAnchored($0) && !skipped.contains($0) })
+        guard var tip = executedPrefix()
+                ?? graph.preferred(among: graph.roots.filter(graph.isAnchored)) else { return "" }
+        while let next = graph.preferred(among: graph.children(of: tip).filter(graph.isValidated)) {
+            tip = next
         }
-        guard let start = executedPrefix() ?? root(skipping: []) else { return "" }
-        let tip = descend(from: start, skipping: [])
-        guard let floor = skipped.map({ graph[$0].height }).min() else { return graph.hash(tip) }
-        var deepest: UInt32?
-        var block = tip
-        while graph.isHeld(block), graph[block].height >= floor {
-            if skipped.contains(block) { deepest = block }
-            block = graph[block].parent
-            guard block != BlockGraph.none else { break }
-        }
-        guard let deepest else { return graph.hash(tip) }
-        let parent = graph[deepest].parent
-        guard parent != BlockGraph.none else {
-            return root(skipping: skipped).map { graph.hash(descend(from: $0, skipping: skipped)) } ?? graph.hash(tip)
-        }
-        return graph.hash(descend(from: parent, skipping: skipped))
+        return graph.hash(tip)
     }
 
     /// The deepest block on the canonical chain whose ancestry is executed
@@ -555,43 +479,6 @@ extension ChainTree {
             }
         }
         return graph.canonicalBlock(atHeight: low) ?? genesis
-    }
-
-    /// Whether `toStateCID` is reachable from `fromStateCID` through the
-    /// connected accepted state-transition graph. Fork choice is irrelevant.
-    /// Continuity is a property of the graph, not of how hard a node is willing
-    /// to look: a visit budget would make the same question answerable on one
-    /// node and unanswerable on another from identical data, splitting honest
-    /// nodes by local policy. Serving RATE is a node's choice; the ANSWER is
-    /// not. The block-1 shape — the one whose cost grew with chain height — is
-    /// answered from the anchored frontier in O(1).
-    public mutating func hasStateContinuity(
-        from fromStateCID: String,
-        to toStateCID: String
-    ) -> Bool {
-        guard let from = CIDIdentity.canonicalString(fromStateCID),
-              let to = CIDIdentity.canonicalString(toStateCID) else {
-            return false
-        }
-        if from == to { return true }
-        // A child's block 1 anchors against `emptyHeader`, which is reachable
-        // only at this chain's genesis — so the question is exactly "did this
-        // chain produce that state", which the executed-from-genesis frontier
-        // answers outright.
-        if from == LatticeState.emptyHeader.rawCID {
-            return graph.stateHandle(to).map(graph.chainProduced) ?? false
-        }
-        // A state no block declares produces nothing; one no block declares
-        // as pre-state matches none (`none` is no block's state).
-        guard let toState = graph.stateHandle(to) else { return false }
-        // A query: the graph is only read; the visit count is this tree's own.
-        var visits: UInt64 = 0
-        defer {
-#if DEBUG
-            stateContinuityBlockVisitCount &+= visits
-#endif
-        }
-        return graph.continuity(from: graph.stateHandle(from) ?? BlockGraph.none, to: toState, visits: &visits)
     }
 
     /// Record that a held block's transition was executed.

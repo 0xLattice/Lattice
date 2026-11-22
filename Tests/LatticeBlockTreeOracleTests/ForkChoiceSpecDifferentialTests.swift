@@ -653,12 +653,6 @@ struct SpecDifferential {
                     if raised > 0 { coverage["attributed run raised", default: 0] += 1 }
                     expected[.child]! += UInt64(raised)
                 }
-            case .reevaluate(let side):
-                // The projection is always current, so this changes nothing.
-                let commit = side == .parent
-                    ? world.parent.tree.reevaluateForkChoice() : world.child.tree.reevaluateForkChoice()
-                if commit != nil { return report(step: step, "reevaluate moved the projection") }
-                expected = before
             case .serve(let directory):
                 world.parent.tree.serveRuns(for: directory)
                 expected = before

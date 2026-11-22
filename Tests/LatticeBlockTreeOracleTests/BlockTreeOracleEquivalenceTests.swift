@@ -75,7 +75,6 @@ enum OracleSide: String {
 
 enum OracleAction {
     case apply(OracleSide, OracleBatch)
-    case reevaluate(OracleSide)
     case serve(String)
     case deriveAllRuns
     /// Restore both chains from these logs (a prefix of what was applied,
@@ -479,7 +478,7 @@ final class OracleRun {
                 .block(block), .work(blockHash: block.hash, grindID: freshCID("grind"), work: work()),
             ]))
         case 96:
-            return chance(50) ? .reevaluate(side) : .deriveAllRuns
+            return .deriveAllRuns
         case 97:
             if !served.contains(otherDirectory) {
                 return .serve(otherDirectory)
@@ -527,9 +526,6 @@ final class OracleRun {
                 lines.append("runs \(derived.rendered)")
             }
             return (lines, outcome, false)
-        case .reevaluate(let side):
-            let outcome = side == .parent ? world.parent.reevaluate() : world.child.reevaluate()
-            return (["reevaluate \(outcome.rendered)"], nil, false)
         case .serve(let directory):
             world.parent.serveRuns(directory)
             return ([], nil, false)
@@ -592,7 +588,6 @@ final class OracleRun {
         case .idle: return "idle"
         case .apply(let side, let batch):
             return "\(side.rawValue) [\(batch.facts.map(fact).joined(separator: ", "))]"
-        case .reevaluate(let side): return "reevaluate \(side.rawValue)"
         case .serve(let directory): return "serve \(directory)"
         case .deriveAllRuns: return "derive all runs"
         case .restart(let parentLog, let childLog):

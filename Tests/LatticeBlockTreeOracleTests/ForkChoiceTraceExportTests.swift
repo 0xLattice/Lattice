@@ -209,7 +209,7 @@ private final class ForkChoiceTrace {
         let result: SubmissionResult?
         do {
             result = try subject!.tree.apply(LiveSubject.batch(batch))
-        } catch ChainStateRestoreError.corruptConsensusGraph where mayRefuse {
+        } catch ChainTreeRestoreError.corruptConsensusGraph where mayRefuse {
             return false
         } catch {
             unexpectedRefusals.append("\(batch.facts): \(error)")

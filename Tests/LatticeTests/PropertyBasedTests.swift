@@ -192,7 +192,7 @@ final class ForkChoicePropertyTests: XCTestCase {
                 }
 
                 var chain = makeChain(blocks: blocks, canonicalHashes: Set([blockCID("G")] + (1...mainLen).map { blockCID("M\($0)") }))
-                let _ = chain.reevaluateForkChoice()
+                let _ = chain.projectCanonicalChain()
 
                 let tip = chain.canonicalTip
                 let onMain = chain.isCanonical(hash: tip)
@@ -209,7 +209,7 @@ final class ForkChoicePropertyTests: XCTestCase {
         let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2)
 
         var chain = makeChain(blocks: [g, a1, b1, b2], canonicalHashes: Set([blockCID("G"), blockCID("A1")]))
-        let _ = chain.reevaluateForkChoice()
+        let _ = chain.projectCanonicalChain()
 
         let gOnMain = chain.isCanonical(hash: blockCID("G"))
         XCTAssertTrue(gOnMain, "Genesis must always remain on main chain")
@@ -225,7 +225,7 @@ final class ForkChoicePropertyTests: XCTestCase {
         let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
         var chain = makeChain(blocks: [g, a1, a2, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
 
         XCTAssertNotNil(reorg)
         if let reorg = reorg {

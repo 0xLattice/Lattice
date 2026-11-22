@@ -98,7 +98,6 @@ protocol OracleSubject {
         parentBlocks: Set<String>?,
         held: Set<String>
     ) -> OracleOutcome
-    mutating func reevaluate() -> OracleOutcome
     /// The cheap read, which materializes no cache: what most steps compare,
     /// so a stale cache can carry across several unobserved mutations.
     mutating func observeTip() -> [String: String]

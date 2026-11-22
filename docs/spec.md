@@ -1231,10 +1231,12 @@ when, is the node's. A target miss never makes a predecessor worth fetching:
 connectivity cannot make that grind satisfy the current chain's target.
 Missing cross-chain input instead
 identifies the child proof or immediate-parent state-continuity fact that the
-node must obtain from an authenticated source. For a non-genesis candidate with predecessor `P`, continuity is
-reflexive when `P.parentState == B.parentState`; otherwise the immediate
-parent's connected accepted graph must contain a transitive same-chain state
-path from `P.parentState` to `B.parentState`. Parent canonicity is irrelevant.
+node must obtain from an authenticated source. For a non-genesis candidate with predecessor `P`, the immediate
+parent's executed set must have produced `B.parentState` at or below a block
+that produced `P.parentState` (§5.3 step 6). `P.parentState == B.parentState`
+is no exemption: the link must still show that the executed set produced
+`B.parentState`, since equality is never evidence. Parent canonicity is
+irrelevant.
 `parentState` is a state CID, not a parent-block lookup key. Consensus derives
 no relationship by inversion. A target-hit candidate can likewise be rejected
 by its local import rules while still proving real work for a descendant;
@@ -1654,8 +1656,9 @@ state); withdrawals return it.
 6. Equal-work same-chain child blocks prefer the lexicographically smaller
    canonical block CID; `nextTarget` is not a comparator
 7. Parent canonicity alone cannot change child validity, weight, or fork choice
-8. A non-genesis child keeps the same parent-state reference or moves
-   transitively forward through the immediate parent's connected accepted graph
+8. A non-genesis child's `parentState` was produced by the immediate parent's
+   executed set at or below a block that produced its predecessor's
+   `parentState` (§5.3 step 6); keeping the same reference is no exemption
 9. Lattice never prunes accepted graph or verified local-work facts
 10. There is no finality threshold; a strictly heavier effective subtree may reorg at any depth
 11. Every successful consensus mutation has a monotonically increasing revision

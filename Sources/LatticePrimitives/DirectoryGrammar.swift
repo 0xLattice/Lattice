@@ -123,5 +123,4 @@ public struct ChainRuntimeContext: Sendable, Equatable {
     }
 
     public var isRoot: Bool { path.count == 1 }
-    var proofPath: [String] { Array(path.dropFirst()) }
 }

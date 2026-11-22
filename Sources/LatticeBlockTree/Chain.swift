@@ -4,7 +4,7 @@ import UInt256
 import LatticePrimitives
 import LatticePoW
 
-public enum ChainStateRestoreError: Error, Sendable, Equatable {
+public enum ChainTreeRestoreError: Error, Sendable, Equatable {
     case corruptConsensusGraph
     case missingBlockFact
     /// The facts both execute and exclude one block. Execution and exclusion
@@ -109,16 +109,16 @@ public struct BlockMeta: Sendable {
     }
 }
 
-public struct SubmissionResult: Sendable {
-    public let addedBlock: Bool
-    public let addedContribution: Bool
-    public let extendsCanonical: Bool
-    public let commit: ChainCommit?
+package struct SubmissionResult: Sendable {
+    package let addedBlock: Bool
+    package let addedContribution: Bool
+    package let extendsCanonical: Bool
+    package let commit: ChainCommit?
     /// Every block whose credited work this mutation added or raised, plus
     /// every block it CONNECTED: a block inserted under a connected parent
     /// connects with the whole orphan component it grafts. What a run
     /// (§9.10) can have moved by, reported by the code that moved it.
-    public let weighed: [String]
+    package let weighed: [String]
 
     init(
         addedBlock: Bool,
@@ -134,7 +134,7 @@ public struct SubmissionResult: Sendable {
         self.weighed = weighed
     }
 
-    public static func discarded() -> Self {
+    package static func discarded() -> Self {
         SubmissionResult(
             addedBlock: false,
             addedContribution: false,
@@ -161,7 +161,7 @@ public struct ChainCommit: Sendable, Equatable {
         self.canonicalBlocksRemoved = canonicalBlocksRemoved
     }
 
-    public var canonicalChanged: Bool {
+    package var canonicalChanged: Bool {
         !canonicalBlocksAdded.isEmpty || !canonicalBlocksRemoved.isEmpty
     }
 
@@ -401,10 +401,6 @@ public struct ChainTree: Sendable {
     /// replay step reads the projection — so it is computed exactly once at
     /// the end of replay instead of per event.
     var deferProjectionForReplay = false
-#if DEBUG
-    /// Blocks read by `hasStateContinuity` searches on this tree.
-    internal(set) var stateContinuityBlockVisitCount: UInt64 = 0
-#endif
     /// Advances for every successful consensus mutation.
     var mutationGeneration: UInt64
 
@@ -498,7 +494,7 @@ public struct ChainTree: Sendable {
                 && meta.blockHeight == expectedHeight
                 && parent.childHashes.contains(meta.blockHash)
         }) else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         // The tree holds only standard CIDs (spec §3.1).
         let snapshots = tipSnapshotsByHash.values + (tipSnapshot.map { [$0] } ?? [])
@@ -508,7 +504,7 @@ public struct ChainTree: Sendable {
                       && $0.childCommitments.values.allSatisfy { BlockID($0) != nil }
               }),
               snapshots.allSatisfy(\.namesStandardCIDs) else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         self.context = nil
         self.mutationGeneration = mutationGeneration
@@ -530,13 +526,13 @@ public struct ChainTree: Sendable {
             // Every block, genesis included, carries positive work, and a
             // grind has one location in a chain.
             guard !contributions.isEmpty else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+                throw ChainTreeRestoreError.corruptConsensusGraph
             }
             for contribution in contributions {
                 guard contribution.work > .zero,
                       let id = GrindID(contribution.id),
                       graph.acceptsLocation(of: id, at: block) else {
-                    throw ChainStateRestoreError.corruptConsensusGraph
+                    throw ChainTreeRestoreError.corruptConsensusGraph
                 }
                 graph.setWork(
                     id, WorkSum(contribution.work),
@@ -558,18 +554,18 @@ public struct ChainTree: Sendable {
         var canonical: [UInt32] = []
         for hash in canonicalHashes {
             guard let block = graph.handle(hash) else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+                throw ChainTreeRestoreError.corruptConsensusGraph
             }
             canonical.append(block)
         }
         canonical.sort { graph[$0].height < graph[$1].height }
         guard zip(canonical, canonical.dropFirst()).allSatisfy({ graph[$0].height < graph[$1].height }) else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         graph.canonical = canonical
         if !canonicalTip.isEmpty {
             guard let tip = graph.handle(canonicalTip) else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+                throw ChainTreeRestoreError.corruptConsensusGraph
             }
             graph.canonicalTip = tip
         }
@@ -601,7 +597,7 @@ public struct ChainTree: Sendable {
         spec: ChainSpec
     ) throws -> ChainTree {
         guard binds(spec, to: block.spec.rawCID) else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         var tree = fromGenesis(block: block)
         tree.context = context
@@ -792,7 +788,7 @@ public struct ChainTree: Sendable {
         parent: ChainTree?
     ) throws -> ChainTree {
         guard batches.contains(where: decodesAsGenesis) else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         var chain = try ChainTree(
             canonicalTip: "",
@@ -816,7 +812,7 @@ public struct ChainTree: Sendable {
         chain.sealRecovery(revisionFloor: revisionFloor)
         for spec in specs {
             guard let cid = try? VolumeImpl<ChainSpec>(node: spec).rawCID else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+                throw ChainTreeRestoreError.corruptConsensusGraph
             }
             chain.specs[cid] = spec
         }
@@ -867,15 +863,15 @@ public struct ChainTree: Sendable {
                 do {
                     _ = try chain.applyStaged(entry.batch, authenticated: entry.key)
                     completed = true
-                } catch ChainStateRestoreError.missingBlockFact {
+                } catch ChainTreeRestoreError.missingBlockFact {
                     deferred.append(entry)
-                } catch ChainStateRestoreError.nonStandardLink {
+                } catch ChainTreeRestoreError.nonStandardLink {
                     // No live chain holds one; a store that does fails loudly.
-                    throw ChainStateRestoreError.corruptConsensusGraph
+                    throw ChainTreeRestoreError.corruptConsensusGraph
                 }
             }
             guard completed else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+                throw ChainTreeRestoreError.corruptConsensusGraph
             }
             pending = deferred
         }
@@ -1314,14 +1310,14 @@ public struct ChainTree: Sendable {
             guard case .validation(let validation) = fact,
                   let hash = CIDIdentity.canonicalString(validation.blockHash),
                   let block = graph.handle(hash), graph.isExcludedRoot(block) else { continue }
-            throw ChainStateRestoreError.executedVerdictContradiction
+            throw ChainTreeRestoreError.executedVerdictContradiction
         }
         if let validated = Self.validationTarget(of: batch) {
             // A validation for a block this chain does not hold is deferred by
             // the caller's replay loop exactly as a work fact would be, not an
             // error: possession and execution arrive independently.
             guard graph.handle(validated) != nil else {
-                throw ChainStateRestoreError.missingBlockFact
+                throw ChainTreeRestoreError.missingBlockFact
             }
             markValidated(blockHash: validated)
             return nil
@@ -1332,8 +1328,8 @@ public struct ChainTree: Sendable {
                 return false
             }
             throw malformed
-                ? ChainStateRestoreError.nonStandardLink
-                : ChainStateRestoreError.corruptConsensusGraph
+                ? ChainTreeRestoreError.nonStandardLink
+                : ChainTreeRestoreError.corruptConsensusGraph
         }
         // Applied only once the batch has landed: `defer` would also run on the
         // throw paths, marking a block executed out of a batch that was rejected
@@ -1351,14 +1347,14 @@ public struct ChainTree: Sendable {
             // through: no root genesis but the configured one, live or replayed.
             if input.parentBlockHash == nil, let context,
                !context.admitsGenesis(input.blockHash) {
-                throw ChainStateRestoreError.unpinnedRootGenesis
+                throw ChainTreeRestoreError.unpinnedRootGenesis
             }
             if let existing = graph.handle(input.blockHash) {
                 guard matchesGraph(existing, input: input),
                       graph.snapshot(of: existing).map({
                           $0 == input.snapshot
                       }) ?? true else {
-                    throw ChainStateRestoreError.corruptConsensusGraph
+                    throw ChainTreeRestoreError.corruptConsensusGraph
                 }
                 let contribution = trusted.contribution
                 if let existing = workContribution(
@@ -1370,19 +1366,19 @@ public struct ChainTree: Sendable {
                     return nil
                 }
                 guard hasMutationCapacity(for: 1) else {
-                    throw ChainStateRestoreError.corruptConsensusGraph
+                    throw ChainTreeRestoreError.corruptConsensusGraph
                 }
                 hydrateMetadata(from: input)
                 let submission = addWorkContribution(contribution, to: existing)
                 guard submission.addedContribution else {
-                    throw ChainStateRestoreError.corruptConsensusGraph
+                    throw ChainTreeRestoreError.corruptConsensusGraph
                 }
                 applyValidations()
                 return submission
             }
             let submission = submitBlock(input: input, contribution: trusted.contribution)
             guard submission.addedBlock, submission.addedContribution else {
-                throw ChainStateRestoreError.corruptConsensusGraph
+                throw ChainTreeRestoreError.corruptConsensusGraph
             }
             applyValidations()
             return submission
@@ -1391,7 +1387,7 @@ public struct ChainTree: Sendable {
         let blockHash = trusted.workBlockHash
         let contribution = trusted.contribution
         guard graph.handle(blockHash) != nil else {
-            throw ChainStateRestoreError.missingBlockFact
+            throw ChainTreeRestoreError.missingBlockFact
         }
         if let existing = workContribution(
             id: contribution.id,
@@ -1401,7 +1397,7 @@ public struct ChainTree: Sendable {
         }
         let submission = addWorkContribution(contribution, to: blockHash)
         guard submission.addedContribution else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         return submission
     }
@@ -1427,7 +1423,7 @@ public struct ChainTree: Sendable {
     /// has not arrived, so replay retries it once the subtree exists.
     private mutating func applyExclusion(blockHash: String) throws -> SubmissionResult? {
         guard let block = graph.handle(blockHash) else {
-            throw ChainStateRestoreError.missingBlockFact
+            throw ChainTreeRestoreError.missingBlockFact
         }
         // Idempotent: a duplicate exclusion adds nothing and cannot reorg.
         if graph.isExcludedRoot(block) { return nil }
@@ -1436,10 +1432,10 @@ public struct ChainTree: Sendable {
         // this reducer is the fail-closed twin, and replay orders validations
         // first, so the contradiction is found whatever the enumeration order.
         guard !graph.isValidated(block) else {
-            throw ChainStateRestoreError.executedVerdictContradiction
+            throw ChainTreeRestoreError.executedVerdictContradiction
         }
         guard hasMutationCapacity(for: 1) else {
-            throw ChainStateRestoreError.corruptConsensusGraph
+            throw ChainTreeRestoreError.corruptConsensusGraph
         }
         // A chain whose every root is proven invalid has no history to stand
         // on, so a root may be excluded only while another root this chain has
@@ -1452,8 +1448,8 @@ public struct ChainTree: Sendable {
         if graph.parentHash(of: block) == nil,
            !hasExecutedRoot(besides: blockHash) {
             throw deferProjectionForReplay
-                ? ChainStateRestoreError.missingBlockFact
-                : ChainStateRestoreError.corruptConsensusGraph
+                ? ChainTreeRestoreError.missingBlockFact
+                : ChainTreeRestoreError.corruptConsensusGraph
         }
         // The block is not executed (above), so nothing at or below it is
         // anchored: the executed set is untouched.

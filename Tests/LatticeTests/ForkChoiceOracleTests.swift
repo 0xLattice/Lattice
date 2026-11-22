@@ -204,7 +204,7 @@ final class ForkChoiceOracleTests: XCTestCase {
         do {
             _ = try chain.replay(relocated)
             XCTFail("replay must refuse a second location")
-        } catch let error as ChainStateRestoreError {
+        } catch let error as ChainTreeRestoreError {
             XCTAssertEqual(error, .corruptConsensusGraph)
         }
         // And so is a block fact whose own grind is already located elsewhere.
@@ -212,7 +212,7 @@ final class ForkChoiceOracleTests: XCTestCase {
         do {
             _ = try chain.replay(stolen)
             XCTFail("replay must refuse a block carrying a grind located elsewhere")
-        } catch let error as ChainStateRestoreError {
+        } catch let error as ChainTreeRestoreError {
             XCTAssertEqual(error, .corruptConsensusGraph)
         }
 

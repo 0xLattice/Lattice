@@ -157,14 +157,10 @@ final class ForkChoiceTests: XCTestCase {
             canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2"), blockCID("A3")])
         )
 
-        let revisionBefore = chain.currentRevision()
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         XCTAssertTrue(reorg!.canonicalBlocksAdded.keys.contains(blockCID("B4")))
         XCTAssertTrue(reorg!.canonicalBlocksRemoved.contains(blockCID("A3")))
-        XCTAssertEqual(reorg!.revision, revisionBefore + 1)
-        let revisionAfter = chain.currentRevision()
-        XCTAssertEqual(revisionAfter, reorg!.revision)
 
         let newTip = chain.canonicalTip
         XCTAssertEqual(newTip, blockCID("B4"))
@@ -183,7 +179,7 @@ final class ForkChoiceTests: XCTestCase {
             canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2"), blockCID("A3")])
         )
 
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNil(reorg)
     }
 
@@ -199,7 +195,7 @@ final class ForkChoiceTests: XCTestCase {
             canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")])
         )
 
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNil(reorg, "A1 is the smaller segment-base hash")
     }
 
@@ -283,7 +279,7 @@ final class ChainInvariantTests: XCTestCase {
         let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
         var chain = makeChain(blocks: [g, a1, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1")]))
-        let _ = chain.reevaluateForkChoice()
+        let _ = chain.projectCanonicalChain()
 
         let tip = chain.canonicalTip
         let tipBlock = chain.getConsensusBlock(hash: tip)!
@@ -300,7 +296,7 @@ final class ChainInvariantTests: XCTestCase {
         let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
         var chain = makeChain(blocks: [g, a1, a2, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")]))
-        let _ = chain.reevaluateForkChoice()
+        let _ = chain.projectCanonicalChain()
 
         let a1OnMain = chain.isCanonical(hash: blockCID("A1"))
         XCTAssertFalse(a1OnMain)
@@ -317,7 +313,7 @@ final class ChainInvariantTests: XCTestCase {
         let b2 = makeBlockMeta(hash: blockCID("B2"), previousHash: blockCID("B1"), height: 2)
 
         var chain = makeChain(blocks: [g, a1, b1, b2], canonicalHashes: Set([blockCID("G"), blockCID("A1")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
 
         XCTAssertNotNil(reorg)
         XCTAssertTrue(reorg!.canonicalBlocksAdded.keys.contains(blockCID("B1")))
@@ -354,7 +350,7 @@ final class NakamotoConsensusTests: XCTestCase {
         let h4 = makeBlockMeta(hash: blockCID("H4"), previousHash: blockCID("H3"), height: 4)
 
         var chain = makeChain(blocks: [g, p1, p2, p3, h1, h2, h3, h4], canonicalHashes: Set([blockCID("G"), blockCID("P1"), blockCID("P2"), blockCID("P3")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         let selfishTip = chain.canonicalTip
         XCTAssertEqual(selfishTip, blockCID("H4"))
@@ -381,7 +377,7 @@ final class NakamotoConsensusTests: XCTestCase {
         let b3 = makeBlockMeta(hash: blockCID("B3"), previousHash: blockCID("B2"), height: 3)
 
         var chain = makeChain(blocks: [g, a1, a2, a3, b1, b2, b3], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2"), blockCID("A3")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNil(reorg, "The smaller segment-base hash is already canonical")
         let tieTip = chain.canonicalTip
         XCTAssertEqual(tieTip, blockCID("A3"))
@@ -398,7 +394,7 @@ final class NakamotoConsensusTests: XCTestCase {
         let f5 = makeBlockMeta(hash: blockCID("F5"), previousHash: blockCID("F4"), height: 5)
 
         var chain = makeChain(blocks: [g, m1, m2, f1, f2, f3, f4, f5], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         let deepTip = chain.canonicalTip
         XCTAssertEqual(deepTip, blockCID("F5"))
@@ -416,7 +412,7 @@ final class NakamotoConsensusTests: XCTestCase {
         let c1 = makeBlockMeta(hash: blockCID("C1"), previousHash: blockCID("G"), height: 1)
 
         var chain = makeChain(blocks: [g, a1, a2, b1, b2, b3, c1], canonicalHashes: Set([blockCID("G"), blockCID("A1"), blockCID("A2")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         let concurrentTip = chain.canonicalTip
         XCTAssertEqual(concurrentTip, blockCID("B3"))
@@ -432,7 +428,7 @@ final class NakamotoConsensusTests: XCTestCase {
         let f3 = makeBlockMeta(hash: blockCID("F3"), previousHash: blockCID("F2"), height: 5)
 
         var chain = makeChain(blocks: [g, m1, m2, m3, f1, f2, f3], canonicalHashes: Set([blockCID("G"), blockCID("M1"), blockCID("M2"), blockCID("M3")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         let midTip = chain.canonicalTip
         XCTAssertEqual(midTip, blockCID("F3"))
@@ -485,7 +481,7 @@ final class EdgeCaseTests: XCTestCase {
         allBlocks.insert(g, at: 0)
 
         var chain = makeChain(blocks: allBlocks, canonicalHashes: Set([blockCID("G"), blockCID("F0_1")]))
-        let reorg = chain.reevaluateForkChoice()
+        let reorg = chain.projectCanonicalChain()
         XCTAssertNotNil(reorg)
         let manyForksTip = chain.canonicalTip
         XCTAssertEqual(manyForksTip, blockCID("F5_3"))

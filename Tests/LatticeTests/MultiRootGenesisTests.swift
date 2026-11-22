@@ -391,18 +391,18 @@ final class MultiRootGenesisTests: XCTestCase {
         let pinned = testChainContext(genesis: pinnedGenesis)
         let preFlagDay = [try testAdmissionBatch(for: old)]
         XCTAssertThrowsError(try ChainTree.restore(replaying: preFlagDay, context: pinned)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
         // The pin sits at the reducer: replay onto a tree on the root chain
         // refuses a foreign genesis too, empty or restored.
         var empty = ChainTree.empty(context: pinned)
         XCTAssertThrowsError(try empty.replay(preFlagDay[0])) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
         XCTAssertFalse(empty.contains(blockHash: try cid(old)))
         var restored = try ChainTree.restore(replaying: [try testAdmissionBatch(for: pinnedGenesis)], context: pinned)
         XCTAssertThrowsError(try restored.replay(preFlagDay[0])) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
 
         XCTAssertEqual(restored.canonicalTip, try cid(pinnedGenesis))
@@ -488,11 +488,11 @@ final class MultiRootGenesisTests: XCTestCase {
         XCTAssertEqual(tree.applyConnect(verdict).failure, .executedVerdictContradiction)
         XCTAssertFalse(tree.isExecuted(blockHash: try cid(block)))
         XCTAssertThrowsError(try tree.replay(BlockImportBatch.validation(blockHash: try cid(block)))) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .executedVerdictContradiction)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .executedVerdictContradiction)
         }
         let contradiction = [facts] + inserted.update!.batches + [BlockImportBatch.validation(blockHash: try cid(block)), exclusion]
         XCTAssertThrowsError(try ChainTree.restore(replaying: contradiction.reversed(), context: childContext)) {
-            XCTAssertEqual($0 as? ChainStateRestoreError, .executedVerdictContradiction)
+            XCTAssertEqual($0 as? ChainTreeRestoreError, .executedVerdictContradiction)
         }
     }
 

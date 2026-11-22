@@ -150,7 +150,7 @@ public struct Block: Hashable {
         rewardRecipient.map(CryptoUtils.isValidAddress) ?? true
     }
 
-    public static func getTotalDeposited(_ allDepositActions: [DepositAction]) -> (total: UInt64, overflow: Bool) {
+    package static func getTotalDeposited(_ allDepositActions: [DepositAction]) -> (total: UInt64, overflow: Bool) {
         var total: UInt64 = 0
         for action in allDepositActions {
             let (result, overflow) = total.addingReportingOverflow(action.amountDeposited)
@@ -160,7 +160,7 @@ public struct Block: Hashable {
         return (total, false)
     }
 
-    public static func getTotalWithdrawn(_ allWithdrawalActions: [WithdrawalAction]) -> (total: UInt64, overflow: Bool) {
+    package static func getTotalWithdrawn(_ allWithdrawalActions: [WithdrawalAction]) -> (total: UInt64, overflow: Bool) {
         var total: UInt64 = 0
         for action in allWithdrawalActions {
             let (result, overflow) = total.addingReportingOverflow(action.amountWithdrawn)

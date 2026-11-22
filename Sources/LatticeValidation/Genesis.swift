@@ -27,11 +27,11 @@ public struct GenesisResult: Sendable {
     }
 }
 
-public enum GenesisCeremony {
+package enum GenesisCeremony {
 
     /// Build a deterministic root-genesis candidate. A chain is made from it
     /// by `ChainTree.bootstrap`.
-    public static func create(
+    package static func create(
         config: GenesisConfig,
         fetcher: Fetcher
     ) async throws -> GenesisResult {
@@ -49,7 +49,7 @@ public enum GenesisCeremony {
         return GenesisResult(block: block, blockHash: blockHash)
     }
 
-    public static func verify(block: Block, config: GenesisConfig) -> Bool {
+    package static func verify(block: Block, config: GenesisConfig) -> Bool {
         guard block.hasGenesisShape(isRoot: true) else { return false }
         guard block.timestamp == config.timestamp else { return false }
         guard block.spec.node != nil else { return false }

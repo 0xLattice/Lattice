@@ -298,7 +298,7 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
             )
             XCTFail("a root restore must refuse a genesis other than the pinned one")
         } catch {
-            XCTAssertEqual(error as? ChainStateRestoreError, .unpinnedRootGenesis)
+            XCTAssertEqual(error as? ChainTreeRestoreError, .unpinnedRootGenesis)
         }
         // …and a child context cannot pin one at all.
         XCTAssertThrowsError(try ChainRuntimeContext(path: childPath, genesisCID: g1CID)) {

@@ -107,10 +107,6 @@ struct LiveSubject: OracleSubject {
         )
     }
 
-    mutating func reevaluate() -> OracleOutcome {
-        OracleOutcome(rendered: Self.describe(tree.reevaluateForkChoice()))
-    }
-
     mutating func observeTip() -> [String: String] {
         ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
     }
@@ -196,7 +192,6 @@ struct LiveSubject: OracleSubject {
             for to in probe.states {
                 let key = "state \(from)→\(to)"
                 seen["\(key) advanced"] = "\(tree.executedSetAdvanced(from: from, to: to))"
-                seen["\(key) continuity"] = "\(tree.hasStateContinuity(from: from, to: to))"
             }
         }
         return seen
@@ -235,7 +230,8 @@ extension LiveSubject {
     /// descent, so these are the one place the twins differ.
     mutating func observeGraphQueries(_ probe: OracleProbe) -> [String: String] {
         var seen: [String: String] = [:]
-        // The node's retry loop: each tip refused is avoided in turn.
+        // The node's retry loop: each tip refused is avoided in turn
+        // (`ActOnRetryDescent.swift`, over public API).
         var avoided: Set<String> = []
         var tips: [String] = []
         for _ in 0..<4 {

@@ -700,7 +700,7 @@ private final class HierarchyTrace {
         let result: SubmissionResult?
         do {
             result = try trees[chain]!.apply(LiveSubject.batch(batch))
-        } catch ChainStateRestoreError.corruptConsensusGraph where mayRefuse {
+        } catch ChainTreeRestoreError.corruptConsensusGraph where mayRefuse {
             return (false, [], true)
         } catch {
             unexpectedRefusals.append("\(chain.rawValue) \(batch.facts): \(error)")
