@@ -20,7 +20,7 @@ import UInt256
 /// - `transaction-encoding-differential.json` was written by 57.0.0 itself: a
 ///   corpus of transactions with valid, mutated, and invalid signatures, keys,
 ///   and bodies, and what that release concluded about each one, through
-///   decode, signature checks, preflight, and the validation of a block
+///   decode, signature checks, and the validation of a block
 ///   carrying it. Ed25519 signatures on Apple hosts are randomized, so the
 ///   signatures are part of the file: the test reads them back and recomputes
 ///   every conclusion.
@@ -261,9 +261,7 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
         let decodedCID: String?
         let decodedSignaturesValid: Bool?
         let decodedSignaturesMatchSigners: Bool?
-        // Admission and execution.
-        let preflight: String
-        let preflightWithoutPolicies: String
+        // Execution.
         /// The block carrying the constructed transaction, and its verdict.
         let block: String
         /// The block carrying the raw encoding, and its verdict.
@@ -469,18 +467,6 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
         let rawData = try XCTUnwrap(raw.toData())
         let decoded = Transaction(data: rawData)
 
-        let chain = try await testChain(genesis: genesis, fetcher: fetcher)
-        let preflight = await chain.preflightTransaction(constructed, fetcher: fetcher)
-        let tip = chain.transactionPreflightTip(at: nil)
-        let unpoliced = await TransactionPreflight.classify(
-            constructed,
-            tipCID: tip.cid,
-            snapshot: tip.snapshot,
-            chainPath: [DEFAULT_ROOT_DIRECTORY],
-            fetcher: fetcher,
-            checksPolicies: false
-        )
-
         // Each encoding goes into the store under its own CID, as a peer
         // would serve it.
         let constructedHeader = try VolumeImpl<Transaction>(node: constructed)
@@ -517,8 +503,6 @@ final class TransactionEncodingDifferentialTests: XCTestCase {
             decodedCID: try decoded.map { try VolumeImpl<Transaction>(node: $0).rawCID },
             decodedSignaturesValid: decoded.map { Transaction(signatures: $0.signatures, body: body).signaturesAreValid() },
             decodedSignaturesMatchSigners: decoded.map { Transaction(signatures: $0.signatures, body: body).signaturesMatchSigners() },
-            preflight: "\(preflight.disposition)",
-            preflightWithoutPolicies: "\(unpoliced.disposition)",
             block: try await verdict(block, fetcher: fetcher),
             rawBlock: try await verdict(rawBlock, fetcher: fetcher)
         )

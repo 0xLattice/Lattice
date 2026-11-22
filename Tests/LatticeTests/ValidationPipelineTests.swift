@@ -492,14 +492,9 @@ final class OutOfOrderSubmissionTests: XCTestCase {
             blockHeader: try! VolumeImpl<Block>(node: block2),
             block: block2
         )
-        let requirements = chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(
-            requirements,
-            [SameChainPredecessorRequirement(
-                descendantCID: try VolumeImpl<Block>(node: block2).rawCID,
-                predecessorCID: try VolumeImpl<Block>(node: block1).rawCID
-            )]
-        )
+        let orphan = try VolumeImpl<Block>(node: block2).rawCID
+        XCTAssertFalse(chain.hasConnectedAncestry(blockHash: orphan))
+        XCTAssertEqual(chain.parentHash(of: orphan), try VolumeImpl<Block>(node: block1).rawCID)
     }
 
     func testParentArrivalConnectsQueuedDescendant() async throws {
@@ -513,8 +508,8 @@ final class OutOfOrderSubmissionTests: XCTestCase {
             blockHeader: try! VolumeImpl<Block>(node: block2),
             block: block2
         )
-        let orphanRequirements = chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(orphanRequirements.count, 1)
+        let orphan = try VolumeImpl<Block>(node: block2).rawCID
+        XCTAssertFalse(chain.hasConnectedAncestry(blockHash: orphan))
 
         let _ = chain.submitTestBlock(
             blockHeader: try! VolumeImpl<Block>(node: block1),
@@ -522,9 +517,8 @@ final class OutOfOrderSubmissionTests: XCTestCase {
         )
 
         let tip = chain.canonicalTip
-        let remainingRequirements = chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(tip, try! VolumeImpl<Block>(node: block2).rawCID)
-        XCTAssertTrue(remainingRequirements.isEmpty)
+        XCTAssertEqual(tip, orphan)
+        XCTAssertTrue(chain.hasConnectedAncestry(blockHash: orphan))
     }
 }
 

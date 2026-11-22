@@ -122,9 +122,6 @@ struct LiveSubject: OracleSubject {
         seen["tipCumulativeWork"] = hex(tree.getTipCumulativeWork().toHexString())
         seen["specs"] = tree.specs.keys.sorted().joined(separator: ",")
         seen["preflight"] = Self.describe(tree.transactionPreflightTip())
-        seen["unresolved"] = tree.unresolvedSameChainPredecessors()
-            .map { "\($0.descendantCID)←\($0.predecessorCID)" }
-            .joined(separator: ",")
         for height in 0...probe.maxHeight {
             seen["canonical@\(height)"] = tree.canonicalBlockHash(atHeight: height) ?? "nil"
         }
@@ -138,8 +135,6 @@ struct LiveSubject: OracleSubject {
             seen["\(key) excludedRoot"] = "\(tree.isExcludedRoot(hash))"
             seen["\(key) connected"] = "\(tree.hasConnectedAncestry(blockHash: hash))"
             seen["\(key) parentHash"] = tree.parentHash(of: hash) ?? "nil"
-            seen["\(key) needs"] = tree.sameChainPredecessorRequirement(for: hash)
-                .map { "\($0.descendantCID)←\($0.predecessorCID)" } ?? "nil"
             seen["\(key) weight"] = tree.forkChoiceWeight(of: hash).map { hex($0.toHexString()) } ?? "nil"
             let meta = tree.getConsensusBlock(hash: hash)
             seen["\(key) meta"] = meta == nil ? "nil" : "present"

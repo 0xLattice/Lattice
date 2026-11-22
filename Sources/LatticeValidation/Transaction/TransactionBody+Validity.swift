@@ -119,7 +119,7 @@ extension TransactionBody {
         return destroyed.subtracting(created)
     }
 
-    package func withdrawalsAreValid(directory: String, prevState: LatticeState, parentState: LatticeState, fetcher: Fetcher) async throws -> Bool {
+    public func withdrawalsAreValid(directory: String, prevState: LatticeState, parentState: LatticeState, fetcher: Fetcher) async throws -> Bool {
         if withdrawalActions.isEmpty { return true }
         // Both proofs THROW on a missing or mismatched deposit/receipt (a
         // missing key surfaces as cashew's ProofErrors.invalidProofType, a
@@ -253,7 +253,7 @@ extension TransactionBody {
     /// deltas, less the most account removals could free. Only an owner whose
     /// balance nets to a debit can be removed; entries are never otherwise
     /// freed. A floor over the limit is over it from any starting state.
-    package static func stateGrowthFloor(of bodies: [TransactionBody]) throws -> Int? {
+    public static func stateGrowthFloor(of bodies: [TransactionBody]) throws -> Int? {
         let deltas = try netBalanceDeltas(
             accountActions: bodies.flatMap(\.accountActions),
             receiptActions: bodies.flatMap(\.receiptActions)

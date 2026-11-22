@@ -258,14 +258,10 @@ final class ChildRootForestTests: XCTestCase {
         submitChildForestBlock(sideChild, to: &parentFirst)
 
         submitChildForestBlock(sideChild, to: &childFirst)
-        let requirements = childFirst.unresolvedSameChainPredecessors()
-        XCTAssertEqual(
-            requirements,
-            [SameChainPredecessorRequirement(
-                descendantCID: childForestHash(sideChild),
-                predecessorCID: childForestHash(sideRoot)
-            )]
-        )
+        // Held, unconnected, awaiting exactly its parent.
+        XCTAssertFalse(childFirst.hasConnectedAncestry(blockHash: childForestHash(sideChild)))
+        XCTAssertEqual(childFirst.parentHash(of: childForestHash(sideChild)), childForestHash(sideRoot))
+        XCTAssertFalse(childFirst.contains(blockHash: childForestHash(sideRoot)))
         submitChildForestBlock(sideRoot, to: &childFirst)
 
         let parentFirstTip = parentFirst.canonicalTip

@@ -993,60 +993,6 @@ public struct ChainTree: Sendable {
         mutationGeneration
     }
 
-    /// Same-chain acquisition needs are every unresolved immediate edge:
-    /// absent predecessors and accepted-but-unconnected predecessors alike.
-    /// Height order makes this linear after the deterministic sort, rather
-    /// than walking the same orphan suffix once per descendant.
-    public func unresolvedSameChainPredecessors() -> [SameChainPredecessorRequirement] {
-        let graph = self.graph
-        let ordered = graph.held.sorted { graph[$0].height < graph[$1].height }
-        var connected = Set<UInt32>()
-        connected.reserveCapacity(ordered.count)
-        for block in ordered {
-            let entry = graph[block]
-            guard entry.parent != BlockGraph.none else {
-                if entry.height == 0 {
-                    connected.insert(block)
-                }
-                continue
-            }
-            guard graph.isHeld(entry.parent) else { continue }
-            let (expectedHeight, overflow) = graph[entry.parent].height
-                .addingReportingOverflow(1)
-            if !overflow,
-               expectedHeight == entry.height,
-               connected.contains(entry.parent)
-            {
-                connected.insert(block)
-            }
-        }
-        return graph.held.compactMap { block in
-            guard let predecessor = graph.parentHash(of: block),
-                  !connected.contains(graph[block].parent) else { return nil }
-            return SameChainPredecessorRequirement(
-                descendantCID: graph.hash(block),
-                predecessorCID: predecessor
-            )
-        }.sorted {
-            if $0.descendantCID != $1.descendantCID {
-                return $0.descendantCID < $1.descendantCID
-            }
-            return $0.predecessorCID < $1.predecessorCID
-        }
-    }
-
-    package func sameChainPredecessorRequirement(
-        for descendantCID: String
-    ) -> SameChainPredecessorRequirement? {
-        guard let block = graph.handle(descendantCID),
-              let parent = graph.parentHash(of: block),
-              !hasConnectedAncestry(blockHash: parent) else { return nil }
-        return SameChainPredecessorRequirement(
-            descendantCID: descendantCID,
-            predecessorCID: parent
-        )
-    }
-
     /// The public read view of one block. Its cumulative work and subtree
     /// weight are derived on demand (`getCumulativeWork(forHash:)`,
     /// `subtreeWeight(forHash:)`).

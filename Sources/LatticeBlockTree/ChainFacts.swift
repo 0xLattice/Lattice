@@ -3,16 +3,6 @@ import cashew
 import LatticePrimitives
 import LatticePoW
 
-public struct SameChainPredecessorRequirement: Sendable, Equatable {
-    public let descendantCID: String
-    public let predecessorCID: String
-
-    public init(descendantCID: String, predecessorCID: String) {
-        self.descendantCID = descendantCID
-        self.predecessorCID = predecessorCID
-    }
-}
-
 public struct ChainBlockFact: Codable, Sendable, Equatable {
     public let blockHash: String
     public let parentBlockHash: String?

@@ -630,8 +630,8 @@ final class ForkChoiceReplayGoldenTests: XCTestCase {
                 ))
             }
         }
-        let unresolved = chain.unresolvedSameChainPredecessors()
-        XCTAssertTrue(unresolved.isEmpty, "every block must connect once all have arrived")
+        let unconnected = chain.hashToBlock.keys.filter { !chain.hasConnectedAncestry(blockHash: $0) }
+        XCTAssertTrue(unconnected.isEmpty, "every block must connect once all have arrived")
         return (chain, ForkChoiceTraceGolden.OrderTrace(
             reorgCommits: reorgCommits,
             reorgCommitsAfterDecisiveExclusion: reorgCommitsAfterDecisiveExclusion,

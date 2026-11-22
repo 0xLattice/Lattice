@@ -121,36 +121,25 @@ terminal child is accepted and connected. See
 
 ## Import And Recovery
 
-Every external candidate follows one boundary:
+Every external candidate follows one boundary, all of it on the `ChainTree`
+value:
 
 ```text
-acquire
-  -> verify
-  -> targeted store
-  -> atomically stage one immutable batch
-  -> apply that exact batch
-  -> project one chain
+insert header (weigh)
+  -> connect (execute, off the tree)
+  -> apply the connect's batch
 ```
 
-The node's single stage callback receives `BlockImportStagingContext`, so the
-consensus batch and its verified hierarchy links cross one atomic durability
-boundary. Returning means the whole context is durable; throwing means none of
-its facts became visible. An existing runtime reserves one
-commit revision before staging so another actor mutation cannot consume the last
-available revision while the batch is becoming durable.
-
-Live import does not reacquire or rebuild a candidate after staging. Recovery
-replays already-authenticated staged batches through the same reducer. Replaying
-an identical batch is a no-op; conflicting immutable metadata fails closed.
-Root and child bootstrap expose no runtime until the genesis batch has been
-stored, staged, and restored.
+Each step returns the immutable facts it adds (`ChainTreeUpdate.batches`). The
+node persists them, with whatever block content and state it keeps, in one
+transaction of its own; Lattice stores nothing. Recovery replays the persisted
+batches through the same reducer (`ChainTree.restore`). Replaying an identical
+batch is a no-op; conflicting immutable metadata fails closed.
 
 A target miss is a proof-of-work failure. It creates no local consensus
 fact, executes no local transition, and causes no implicit Lattice retention.
-When an explicit predecessor is not connected, duplicate and non-verdict
-rejected outcomes expose that exact typed backfill requirement so the node can
-retry. The node may retain an exact child path when its availability policy
-calls for it.
+A held block whose ancestry is not connected names its parent; fetching that
+parent, and retaining any exact child path, is node availability policy.
 
 ## Ownership
 

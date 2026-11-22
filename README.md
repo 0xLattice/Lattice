@@ -171,7 +171,7 @@ Sources/
 |- LatticeValidation/  block, transaction, state-transition and spec validity, genesis
 |- LatticeProofs/      ChildBlockProof and verified child evidence
 |- LatticeBlockTree/   ChainTree: block graph, fork choice, execution frontier, run attribution
-|- LatticeImport/      ChainTree admission (weigh, connect), transaction preflight
+|- LatticeImport/      ChainTree admission (weigh, connect)
 `- Lattice/            umbrella module that re-exports the six above
 ```
 

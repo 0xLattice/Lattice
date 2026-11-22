@@ -881,14 +881,8 @@ final class ConsensusStressTests: XCTestCase {
         var chain = ChainTree.fromGenesis(block: blocks[0])
 
         _ = chain.submitTestBlock(blockHeader: header(blocks[3]), block: blocks[3])
-        let requirements = chain.unresolvedSameChainPredecessors()
-        XCTAssertEqual(
-            requirements,
-            [SameChainPredecessorRequirement(
-                descendantCID: header(blocks[3]).rawCID,
-                predecessorCID: header(blocks[2]).rawCID
-            )]
-        )
+        XCTAssertFalse(chain.hasConnectedAncestry(blockHash: header(blocks[3]).rawCID))
+        XCTAssertEqual(chain.parentHash(of: header(blocks[3]).rawCID), header(blocks[2]).rawCID)
 
         let r1 = chain.submitTestBlock(blockHeader: header(blocks[1]), block: blocks[1])
         XCTAssertTrue(r1.extendsCanonical)

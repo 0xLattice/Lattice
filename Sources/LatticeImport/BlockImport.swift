@@ -377,6 +377,13 @@ func classifyResolutionFailure(_ error: Error) -> BlockImportError {
     return .unavailableEvidence
 }
 
+/// Whether a validation error is a verdict on what was validated: one block
+/// import records as a deterministic invalidity (an exclusion). Every other
+/// error is missing or unverifiable evidence, retried rather than recorded.
+public func validationErrorProvesInvalid(_ error: Error) -> Bool {
+    BlockImport.isDeterministicInvalidity(classifyValidationFailure(error))
+}
+
 func classifyValidationFailure(_ error: Error) -> BlockImportError {
     if error is BlockValidationError { return .notYetValid }
     // The difficulty anchor is not resolvable from the graph: the block parks

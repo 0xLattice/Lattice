@@ -70,7 +70,7 @@ extension Transaction {
 
     /// `checksSignatures: false` leaves out the two signature rules, for a
     /// caller that has already judged this transaction by them.
-    package func validateTransactionForNexus(fetcher: Fetcher, checksSignatures: Bool = true) async throws -> Bool {
+    public func validateTransactionForNexus(fetcher: Fetcher, checksSignatures: Bool = true) async throws -> Bool {
         guard let bodyNode = try await validateSignaturesAndResolve(
             fetcher: fetcher, checksSignatures: checksSignatures
         ) else { return false }
