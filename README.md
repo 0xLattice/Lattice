@@ -173,9 +173,11 @@ Sources/
 |- LatticeBlockTree/   ChainTree: block graph, fork choice, execution frontier, run attribution
 |- LatticeImport/      ChainTree admission (weigh, connect)
 `- Lattice/            umbrella module that re-exports the six above
+Tools/                 consensus simulator (`swift run LatticeSim`), not a product
 ```
 
-`import Lattice` brings in all six modules.
+`import Lattice` brings in all six modules. `DeterminismGoldens` and
+`lattice-determinism-check` pin results byte-for-byte across macOS and Linux.
 
 Important dependencies are
 [`cashew`](https://github.com/0xLattice/cashew) for content-addressed structures,
