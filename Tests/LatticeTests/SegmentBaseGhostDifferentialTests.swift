@@ -791,8 +791,7 @@ private func admission(for block: PlannedDifferentialBlock) -> BlockImportBatch 
             specCID: testCID("segment-base-differential-spec-\(block.index)"),
             target: "1",
             nextTarget: "1",
-            timestamp: Int64(block.index),
-            stateDiff: .empty
+            timestamp: Int64(block.index)
         )),
         .work(ChainWorkFact(blockHash: block.hash, contribution: contribution)),
     ])

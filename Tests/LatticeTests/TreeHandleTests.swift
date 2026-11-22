@@ -13,7 +13,7 @@ final class TreeHandleTests: XCTestCase {
         return .block(ChainBlockFact(
             blockHash: hash, parentBlockHash: parent, blockHeight: height,
             postStateCID: state, prevStateCID: state, specCID: testCID("handles:spec"),
-            target: "ff", nextTarget: "ff", timestamp: Int64(height), stateDiff: .empty
+            target: "ff", nextTarget: "ff", timestamp: Int64(height)
         ))
     }
 

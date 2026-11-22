@@ -117,7 +117,7 @@ struct ReferenceSubject: OracleSubject {
     }
 
     mutating func observeTip() -> [String: String] {
-        ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
+        ["tip": tree.canonicalTip]
     }
 
     mutating func observe(_ probe: OracleProbe) -> [String: String] {
@@ -218,7 +218,7 @@ struct ReferenceSubject: OracleSubject {
         let added = commit.canonicalBlocksAdded
             .sorted { $0.key < $1.key }
             .map { "\($0.key)@\($0.value)" }
-        return "r\(commit.revision) tip=\(commit.tipHash)"
+        return "tip=\(commit.tipHash)"
             + " added=\(added.joined(separator: ","))"
             + " removed=\(commit.canonicalBlocksRemoved.sorted().joined(separator: ","))"
     }

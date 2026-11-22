@@ -40,7 +40,7 @@ final class WorkWeighsValiditySelectsTests: XCTestCase {
                 postStateCID: testCID("wv-post:\(b.name)"),
                 prevStateCID: b.parent.map { testCID("wv-post:\($0)") } ?? testCID("wv-prev:genesis"),
                 specCID: testCID("wv-spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(1_000 + height), stateDiff: .empty
+                timestamp: Int64(1_000 + height)
             )),
             .work(ChainWorkFact(
                 blockHash: h(b.name),

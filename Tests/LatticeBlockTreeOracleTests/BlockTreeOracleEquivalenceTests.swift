@@ -639,8 +639,8 @@ final class OracleRun {
             tally(liveResult.lines)
 
             // Full observation reads caches into being, so it runs on about
-            // one step in four (and the last); the rest compare the tip and
-            // revision alone, letting a stale cache ride several mutations.
+            // one step in four (and the last); the rest compare the tip
+            // alone, letting a stale cache ride several mutations.
             let full = observationRNG.next() % 4 == 0 || step == steps - 1
             if full { coverage["fully observed steps", default: 0] += 1 }
             let liveSeen = full ? observe(&live) : observeTip(&live)

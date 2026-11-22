@@ -120,7 +120,7 @@ final class ParentForkAttributionTests: XCTestCase {
                 blockHash: h(b.name), parentBlockHash: b.parent.map(h), blockHeight: height,
                 postStateCID: testCID("post:\(b.name)"), prevStateCID: testCID("prev:\(b.state)"),
                 specCID: testCID("spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(1_000 + height), stateDiff: .empty,
+                timestamp: Int64(1_000 + height),
                 childCommitments: b.commits.mapValues(h)
             )),
             .work(ChainWorkFact(
@@ -509,7 +509,7 @@ final class ParentForkAttributionTests: XCTestCase {
                     postStateCID: testCID("cpost:\(name)"), prevStateCID: testCID("cprev:\(name)"),
                     parentStateCID: testCID("prev:s"),
                     specCID: testCID("cspec"), target: "1", nextTarget: "1",
-                    timestamp: Int64(height), stateDiff: .empty
+                    timestamp: Int64(height)
                 )),
                 .work(ChainWorkFact(blockHash: h(name), contribution: VerifiedWorkContribution(id: grindID, work: UInt256(price)))),
             ])

@@ -73,11 +73,14 @@ final class FactReplayRecoveryTests: XCTestCase {
             replaying: decoded + Array(decoded.reversed())
         )
 
+        let once = try ChainTree.restoreWithoutContext(replaying: decoded)
+
         let restoredTip = restored.canonicalTip
-        let revision = restored.currentRevision()
         XCTAssertEqual(restoredTip, try BlockHeader(node: block).rawCID)
-        // The genesis insert and the block: two mutations, replayed once.
-        XCTAssertEqual(revision, 2)
+        // The genesis insert and the block, replayed once: the repeats add
+        // no work.
+        XCTAssertEqual(restored.blockCount, 2)
+        XCTAssertEqual(restored.getTipCumulativeWork(), once.getTipCumulativeWork())
     }
 
     func testFactReplayRejectsMissingGenesisAndConflictingImmutableFacts() async throws {
@@ -114,8 +117,7 @@ final class FactReplayRecoveryTests: XCTestCase {
                 specCID: fact.specCID,
                 target: fact.target,
                 nextTarget: fact.nextTarget,
-                timestamp: fact.timestamp + 1,
-                stateDiff: fact.stateDiff
+                timestamp: fact.timestamp + 1
             )),
             blockBatch.facts[1],
         ])
@@ -151,39 +153,6 @@ final class FactReplayRecoveryTests: XCTestCase {
         } catch {
             // expected: zero-work genesis is not a valid consensus graph
         }
-    }
-
-    func testRevisionFloorIsFinalAndStableAcrossRepeatedRecovery() async throws {
-        let fetcher = StorableFetcher()
-        let genesis = try await buildAndStoreGenesis(
-            spec: recoverySpec(),
-            timestamp: 1,
-            target: UInt256.max,
-            fetcher: fetcher
-        )
-        let block = try await buildAndStoreBlock(
-            previous: genesis,
-            timestamp: 2,
-            target: UInt256.max,
-            fetcher: fetcher
-        )
-        let batches = try [genesis, block].map {
-            try testAdmissionBatch(for: $0)
-        }
-
-        let first = try ChainTree.restoreWithoutContext(
-            replaying: batches,
-            revisionFloor: 100
-        )
-        let second = try ChainTree.restoreWithoutContext(
-            replaying: batches,
-            revisionFloor: first.currentRevision()
-        )
-
-        let firstRevision = first.currentRevision()
-        let secondRevision = second.currentRevision()
-        XCTAssertEqual(firstRevision, 100)
-        XCTAssertEqual(secondRevision, 100)
     }
 
 }

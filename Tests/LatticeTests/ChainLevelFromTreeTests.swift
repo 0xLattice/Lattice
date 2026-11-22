@@ -22,8 +22,7 @@ final class ChainLevelFromTreeTests: XCTestCase {
                 specCID: testCID("level-copy:spec"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: hash,

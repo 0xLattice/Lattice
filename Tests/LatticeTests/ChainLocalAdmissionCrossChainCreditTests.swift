@@ -322,7 +322,6 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
         let package = TestChildPackage(proof: proof)
         var level = try childChain(childGenesis, path: [DEFAULT_ROOT_DIRECTORY, "Child"])
         let candidateHeader = try BlockHeader(node: candidate)
-        let revision = level.currentRevision()
 
         let result = try await level.admit(
             candidateHeader,
@@ -332,7 +331,6 @@ final class ChainLocalAdmissionCrossChainCreditTests: XCTestCase {
 
         XCTAssertEqual(result.failure, .proofOfWorkInvalid)
         XCTAssertFalse(level.contains(blockHash: candidateHeader.rawCID))
-        XCTAssertEqual(level.currentRevision(), revision, "no mutation")
     }
 
     func testDisconnectedTargetMissRelaysWithoutAcquiringPredecessor() async throws {

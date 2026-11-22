@@ -146,7 +146,6 @@ final class ChainLocalAdmissionBootstrapTests: XCTestCase {
         XCTAssertEqual(rootChain.canonicalTip, header.rawCID)
         let restored = try ChainTree.restoreWithoutContext(replaying: [result.facts])
         XCTAssertEqual(restored.canonicalTip, rootChain.canonicalTip)
-        XCTAssertEqual(restored.currentRevision(), rootChain.currentRevision())
     }
 
     func testGenesisPolicyDeclaringMemoryAboveTwoMiBIsAdmitted() async throws {

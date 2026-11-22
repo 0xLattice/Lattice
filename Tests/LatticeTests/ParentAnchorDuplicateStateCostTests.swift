@@ -22,7 +22,7 @@ final class ParentAnchorDuplicateStateCostTests: XCTestCase {
                     blockHash: hash, parentBlockHash: parent, blockHeight: height,
                     postStateCID: to, prevStateCID: from, specCID: AnchorCIDPool.spec,
                     target: UInt256.max.toHexString(), nextTarget: UInt256.max.toHexString(),
-                    timestamp: Int64(next), stateDiff: .empty
+                    timestamp: Int64(next)
                 )),
                 .work(ChainWorkFact(blockHash: hash, contribution: VerifiedWorkContribution(
                     id: testCID("dup-cost-grind-\(next)"), work: 1

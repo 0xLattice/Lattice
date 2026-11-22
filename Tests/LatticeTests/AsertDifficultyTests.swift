@@ -692,7 +692,7 @@ final class UnlinkedAnchorTests: XCTestCase {
                 blockHash: blockCID(name), parentBlockHash: parent.map(blockCID), blockHeight: height,
                 postStateCID: testCID("unlinked:post:\(name)"), prevStateCID: testCID("unlinked:prev:\(name)"),
                 specCID: testCID("unlinked:spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(height), stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: blockCID(name),

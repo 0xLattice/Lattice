@@ -141,7 +141,7 @@ final class ParentAnchorDifferentialTests: XCTestCase {
                 blockHash: block, parentBlockHash: parent, blockHeight: height,
                 postStateCID: to, prevStateCID: from, specCID: AnchorCIDPool.spec,
                 target: UInt256.max.toHexString(), nextTarget: UInt256.max.toHexString(),
-                timestamp: Int64(height), stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(blockHash: block, contribution: VerifiedWorkContribution(id: AnchorCIDPool.grinds[grind], work: 1))),
             .validation(ChainValidationFact(blockHash: block)),

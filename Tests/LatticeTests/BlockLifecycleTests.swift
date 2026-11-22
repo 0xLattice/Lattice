@@ -170,7 +170,6 @@ final class BlockMintingTests: XCTestCase {
         let block1Hash = try BlockHeader(node: block1).rawCID
         let live = try XCTUnwrap(chain.getConsensusBlock(hash: block1Hash))
         XCTAssertEqual(live.workContributions.count, 1)
-        let revision = chain.currentRevision()
 
         XCTAssertEqual(acceptance.batches.count, 1)
         // block + work + validation, atomically: execution is recorded with
@@ -184,15 +183,15 @@ final class BlockMintingTests: XCTestCase {
             return XCTFail("execution should emit block, work then validation facts in one batch")
         }
         XCTAssertEqual(validationFact.blockHash, block1Hash)
+        // The diff is an execution output, not part of the block fact.
+        XCTAssertEqual(acceptance.stateDiff, built1.stateDiff)
         XCTAssertEqual(blockFact.blockHash, block1Hash)
-        XCTAssertEqual(blockFact.stateDiff, built1.stateDiff)
         XCTAssertEqual(workFact.blockHash, block1Hash)
 
         let duplicate = try await chain.admit(try BlockHeader(node: block1), fetcher: fetcher)
         guard case .duplicate = duplicate else {
             return XCTFail("duplicate contribution should not replay admission facts")
         }
-        XCTAssertEqual(chain.currentRevision(), revision)
         XCTAssertEqual(chain.getConsensusBlock(hash: block1Hash)?.workContributions.count, 1)
     }
 

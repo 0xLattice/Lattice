@@ -22,7 +22,7 @@ final class OnDemandWorkTotalsTests: XCTestCase {
             .block(ChainBlockFact(
                 blockHash: genesis, parentBlockHash: nil, blockHeight: 0,
                 postStateCID: state, prevStateCID: state, specCID: testCID("linear-add:spec"),
-                target: "ff", nextTarget: "ff", timestamp: 0, stateDiff: .empty
+                target: "ff", nextTarget: "ff", timestamp: 0
             )),
             .work(ChainWorkFact(
                 blockHash: genesis,
@@ -191,8 +191,7 @@ private func lazyCacheFork(
                 specCID: testCID("lazy-local-cache-spec"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(blockHash: hash, contribution: VerifiedWorkContribution(
                 id: testCID("lazy-local-cache-work-\(hash)"),
@@ -265,8 +264,7 @@ private func lazyCacheAdmission(
             specCID: testCID("lazy-local-cache-spec-\(index)"),
             target: "1",
             nextTarget: "1",
-            timestamp: Int64(index),
-            stateDiff: .empty
+            timestamp: Int64(index)
         )),
         .work(ChainWorkFact(blockHash: hash, contribution: contribution)),
     ])

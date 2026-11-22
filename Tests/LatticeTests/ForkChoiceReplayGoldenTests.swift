@@ -218,7 +218,6 @@ struct ForkChoiceGoldenGraph {
                     target: UInt256(UInt64(1_000 + block.index)).toHexString(),
                     nextTarget: UInt256(UInt64(1_000 + block.index)).toHexString(),
                     timestamp: Int64(block.index) * 1_000,
-                    stateDiff: .empty,
                     childCommitments: block.commitsChild
                         ? [directory: cid(seed, "child-block", block.index)]
                         : [:]

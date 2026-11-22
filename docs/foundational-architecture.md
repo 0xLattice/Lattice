@@ -170,8 +170,9 @@ coverage. It does not prune consensus inputs according to a node storage budget.
 
 The node decides how long to retain block bodies, materialized state,
 `StateDiff` payloads, proof Volumes, and CAS pins. `StateDiff` is local
-lifecycle metadata carried by the durable block fact; it is not committed in a
-block or stored in `BlockMeta`.
+lifecycle metadata: an execution output (`ConnectVerdict.stateDiff`,
+`ChainTreeUpdate.stateDiff`), not committed in a block, carried by the block
+fact, or stored in `BlockMeta`.
 
 ## Review Contract
 

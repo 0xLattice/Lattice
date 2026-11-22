@@ -53,8 +53,7 @@ final class DeferredExecutionExclusionTests: XCTestCase {
                 specCID: testCID("exclusion-spec-\(block.hash)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(block.height),
-                stateDiff: .empty
+                timestamp: Int64(block.height)
             )),
             .work(ChainWorkFact(blockHash: block.hash, contribution: contribution)),
         ])

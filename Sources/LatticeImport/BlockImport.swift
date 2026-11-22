@@ -18,7 +18,6 @@ public enum BlockImportError: Error, Sendable, Equatable {
     case localVerificationFailure
     case notYetValid
     case notAcceptedAtCurrentChain
-    case revisionExhausted
     /// A verdict contradicting an execution fact this chain already holds:
     /// an executed block proven invalid, or a proven-invalid block proven
     /// valid. Execution and exclusion are never revoked, so the verdict is a
@@ -38,7 +37,7 @@ enum BlockImport {
         /// per tier rather than inferred from the materialized state, because a
         /// nil state is not a reliable proxy and this flag gates parent-state
         /// attestation.
-        case block(StateDiff, LatticeState?, validated: Bool)
+        case block(LatticeState?, validated: Bool)
         case evidence
         /// Validated tier: execution of a previously-weighed block completed and
         /// FAILED deterministically. Stage a single `.exclusion` fact; the block
@@ -170,7 +169,7 @@ enum BlockImport {
         }
         var facts: [ChainFact] = []
         switch kind {
-        case .block(let stateDiff, _, _):
+        case .block:
             facts.append(.block(ChainBlockFact(
                 blockHash: blockHash,
                 parentBlockHash: block.parent?.rawCID,
@@ -185,7 +184,6 @@ enum BlockImport {
                 target: block.target.toHexString(),
                 nextTarget: block.nextTarget.toHexString(),
                 timestamp: block.timestamp,
-                stateDiff: stateDiff,
                 childCommitments: childCommitments
             )))
         case .evidence, .exclusion:
@@ -198,7 +196,7 @@ enum BlockImport {
         // Last: execution is the newest judgment in the batch, and keeping the
         // block/work prefix stable leaves existing batch-shape expectations
         // positionally intact.
-        if case .block(_, _, true) = kind {
+        if case .block(_, true) = kind {
             facts.append(.validation(ChainValidationFact(
                 blockHash: blockHash
             )))
@@ -237,7 +235,7 @@ enum BlockImport {
             return true
         case .unavailableEvidence, .providerMalformedEvidence,
              .crossChainEvidenceRequired, .localVerificationFailure,
-             .notYetValid, .notAcceptedAtCurrentChain, .revisionExhausted,
+             .notYetValid, .notAcceptedAtCurrentChain,
              .executedVerdictContradiction:
             return false
         }

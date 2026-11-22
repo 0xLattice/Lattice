@@ -17,7 +17,7 @@ final class SiblingFloodProjectionTests: XCTestCase {
                 blockHash: h(name), parentBlockHash: parent.map(h), blockHeight: height,
                 postStateCID: testCID("post:\(name)"), prevStateCID: testCID("prev:\(name)"),
                 specCID: testCID("spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(height), stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: h(name),
@@ -103,7 +103,7 @@ final class SiblingFloodProjectionTests: XCTestCase {
                             blockHash: parentName, parentBlockHash: h(orphan.parent), blockHeight: orphan.height,
                             postStateCID: testCID("post:\(parentName)"), prevStateCID: testCID("prev:\(parentName)"),
                             specCID: testCID("spec"), target: "1", nextTarget: "1",
-                            timestamp: Int64(orphan.height), stateDiff: .empty
+                            timestamp: Int64(orphan.height)
                         )),
                         .work(ChainWorkFact(
                             blockHash: parentName,

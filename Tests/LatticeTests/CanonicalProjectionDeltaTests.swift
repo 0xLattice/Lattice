@@ -47,8 +47,7 @@ final class CanonicalProjectionDeltaTests: XCTestCase {
                 specCID: testCID("projection-delta:spec:\(n.name)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(n.height),
-                stateDiff: .empty
+                timestamp: Int64(n.height)
             )),
             .work(ChainWorkFact(
                 blockHash: n.hash,

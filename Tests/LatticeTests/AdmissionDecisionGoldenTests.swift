@@ -45,7 +45,6 @@ struct AdmissionDecisionGolden: Codable, Equatable {
         let excluded: Bool
         let materializedPostState: Bool
         let commitTip: String?
-        let commitRevision: UInt64?
         let commitAdded: [String]
         let commitRemoved: [String]
         /// The applied batches, in order.
@@ -81,7 +80,6 @@ struct AdmissionDecisionGolden: Codable, Equatable {
                 ("excluded", "\(step.excluded)", "\(other.excluded)"),
                 ("materializedPostState", "\(step.materializedPostState)", "\(other.materializedPostState)"),
                 ("commitTip", step.commitTip ?? "nil", other.commitTip ?? "nil"),
-                ("commitRevision", step.commitRevision.map(String.init) ?? "nil", other.commitRevision.map(String.init) ?? "nil"),
                 ("commitAdded", "\(step.commitAdded)", "\(other.commitAdded)"),
                 ("commitRemoved", "\(step.commitRemoved)", "\(other.commitRemoved)"),
                 ("batches", "\(step.batches)", "\(other.batches)"),
@@ -383,7 +381,6 @@ private struct AdmissionFixtures {
         case .localVerificationFailure: return ("localVerificationFailure", nil, nil)
         case .notYetValid: return ("notYetAdmissible", nil, nil)
         case .notAcceptedAtCurrentChain: return ("notAcceptedAtCurrentChain", nil, nil)
-        case .revisionExhausted: return ("revisionExhausted", nil, nil)
         case .executedVerdictContradiction: return ("executedVerdictContradiction", nil, nil)
         case .proofOfWorkInvalid: return ("proofOfWorkInvalid", nil, nil)
         case .crossChainEvidenceRequired(let requirement):
@@ -584,7 +581,6 @@ final class AdmissionDecisionGoldenTests: XCTestCase {
                 excluded: result.update?.excluded ?? false,
                 materializedPostState: result.update?.materializedPostState != nil,
                 commitTip: commit.map { fixtures.name($0.tipHash) },
-                commitRevision: commit?.revision,
                 commitAdded: commit.map { $0.canonicalBlocksAdded.keys.map(fixtures.name).sorted() } ?? [],
                 commitRemoved: commit.map { $0.canonicalBlocksRemoved.map(fixtures.name).sorted() } ?? [],
                 batches: (result.update?.batches ?? []).map { $0.facts.map { fact($0, fixtures) } },

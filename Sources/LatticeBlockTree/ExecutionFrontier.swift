@@ -135,14 +135,13 @@ extension BlockGraph {
     /// canonical exclusion forces a whole-chain projection, as do restore-replay
     /// and a never-projected state.
     func project(
-        generation: UInt64,
         forceFull: Bool = false,
         monotoneIncreaseAt mutatedAt: UInt32? = nil
     ) -> ChainCommit? {
-        defer { projectedGeneration = generation }
+        defer { isProjected = true }
         // A never-projected state has no trustworthy canonical path to truncate
         // against, and `forceFull` means the caller knows it cannot be trusted.
-        if !forceFull, projectedGeneration != nil, let mutatedAt,
+        if !forceFull, isProjected, let mutatedAt,
            let outcome = truncatedProjection(monotoneIncreaseAt: mutatedAt) {
             return outcome.commit
         }
@@ -421,7 +420,6 @@ extension ChainTree {
         increasedAt mutatedAt: UInt32?
     ) -> ChainCommit? {
         mutableGraph.project(
-            generation: mutationGeneration,
             forceFull: forceFull,
             monotoneIncreaseAt: mutatedAt
         )

@@ -530,8 +530,7 @@ func testAdmissionBatch(
             specCID: block.spec.rawCID,
             target: block.target.toHexString(),
             nextTarget: block.nextTarget.toHexString(),
-            timestamp: block.timestamp,
-            stateDiff: .empty
+            timestamp: block.timestamp
         )),
         .work(ChainWorkFact(blockHash: header.rawCID, contribution: work)),
     ] + executedGenesisFacts(block, blockHash: header.rawCID))
@@ -545,8 +544,7 @@ private func executedGenesisFacts(_ block: Block, blockHash: String) -> [ChainFa
 
 func testAdmissionBatch(
     block: Block,
-    contribution: VerifiedWorkContribution,
-    stateDiff: StateDiff = .empty
+    contribution: VerifiedWorkContribution
 ) throws -> BlockImportBatch {
     let header = try BlockHeader(node: block)
     return BlockImportBatch(facts: [
@@ -559,8 +557,7 @@ func testAdmissionBatch(
             specCID: block.spec.rawCID,
             target: block.target.toHexString(),
             nextTarget: block.nextTarget.toHexString(),
-            timestamp: block.timestamp,
-            stateDiff: stateDiff
+            timestamp: block.timestamp
         )),
         .work(ChainWorkFact(blockHash: header.rawCID, contribution: contribution))
     ] + executedGenesisFacts(block, blockHash: header.rawCID))

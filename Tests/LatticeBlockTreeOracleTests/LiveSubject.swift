@@ -28,7 +28,6 @@ struct LiveSubject: OracleSubject {
                     target: block.target,
                     nextTarget: block.nextTarget,
                     timestamp: block.timestamp,
-                    stateDiff: .empty,
                     childCommitments: block.childCommitments
                 ))
             case .work(let blockHash, let grindID, let work):
@@ -108,7 +107,7 @@ struct LiveSubject: OracleSubject {
     }
 
     mutating func observeTip() -> [String: String] {
-        ["tip": tree.canonicalTip, "revision": "\(tree.currentRevision())"]
+        ["tip": tree.canonicalTip]
     }
 
     mutating func observe(_ probe: OracleProbe) -> [String: String] {
@@ -204,7 +203,7 @@ struct LiveSubject: OracleSubject {
         let added = commit.canonicalBlocksAdded
             .sorted { $0.key < $1.key }
             .map { "\($0.key)@\($0.value)" }
-        return "r\(commit.revision) tip=\(commit.tipHash)"
+        return "tip=\(commit.tipHash)"
             + " added=\(added.joined(separator: ","))"
             + " removed=\(commit.canonicalBlocksRemoved.sorted().joined(separator: ","))"
     }

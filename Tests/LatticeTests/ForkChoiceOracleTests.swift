@@ -31,8 +31,7 @@ final class ForkChoiceOracleTests: XCTestCase {
                 specCID: cid("spec"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: cid(name),

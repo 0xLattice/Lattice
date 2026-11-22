@@ -16,7 +16,6 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
     public let target: String
     public let nextTarget: String
     public let timestamp: Int64
-    public let stateDiff: StateDiff
     /// Directory → child block CID this block commits, from its PoW-bound
     /// `children` index (§9.10). Absent means it commits nothing.
     public let childCommitments: [String: String]?
@@ -35,7 +34,6 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
         target: String,
         nextTarget: String,
         timestamp: Int64,
-        stateDiff: StateDiff,
         childCommitments: [String: String]? = nil
     ) {
         self.blockHash = blockHash
@@ -48,7 +46,6 @@ public struct ChainBlockFact: Codable, Sendable, Equatable {
         self.target = target
         self.nextTarget = nextTarget
         self.timestamp = timestamp
-        self.stateDiff = stateDiff
         self.childCommitments = childCommitments
     }
 }

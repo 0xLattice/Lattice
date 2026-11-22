@@ -102,7 +102,6 @@ final class ParentRunAttributionTests: XCTestCase {
             specCID: testCID("spec"),
             target: "1", nextTarget: "1",
             timestamp: Int64(1_000 + height),
-            stateDiff: .empty,
             childCommitments: commits
         )
         return BlockImportBatch(facts: [
@@ -937,7 +936,7 @@ final class ParentRunAttributionTests: XCTestCase {
                 blockHash: h("a1"), parentBlockHash: genesisCID, blockHeight: 1,
                 postStateCID: testCID("post:a1"), prevStateCID: testCID("prev:a1"),
                 specCID: testCID("spec"), target: "1", nextTarget: "1",
-                timestamp: 2_000, stateDiff: .empty
+                timestamp: 2_000
             )),
             .work(ChainWorkFact(blockHash: h("a1"), contribution: VerifiedWorkContribution(id: grind("a1"), work: UInt256(7)))),
         ])
@@ -991,7 +990,7 @@ final class ParentRunAttributionTests: XCTestCase {
                     postStateCID: testCID("post:\(name)"), prevStateCID: prev(name),
                     parentStateCID: anchor.map(prev),
                     specCID: testCID("spec"), target: "1", nextTarget: "1",
-                    timestamp: Int64(1_000 + height), stateDiff: .empty, childCommitments: commits
+                    timestamp: Int64(1_000 + height), childCommitments: commits
                 )),
                 .work(ChainWorkFact(
                     blockHash: h(name), contribution: VerifiedWorkContribution(id: grindID, work: UInt256(work))

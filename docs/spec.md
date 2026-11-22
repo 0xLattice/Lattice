@@ -1344,9 +1344,8 @@ projections, archival, and garbage collection.
 
 ### 9.8 Persistence
 
-The node durably preserves every accepted block's consensus fields, every
-distinct location fact and strengthening observation, and a monotone mutation
-order. A crash may occur after durable staging and before in-memory mutation;
+The node durably preserves every accepted block's consensus fields and every
+distinct location fact and strengthening observation. A crash may occur after durable staging and before in-memory mutation;
 recovery therefore replays those already-authenticated facts idempotently through
 Lattice's graph and fork-choice reducer. The node does not reconstruct weights,
 ancestry, or canonical choice itself.
@@ -1661,8 +1660,7 @@ state); withdrawals return it.
    `parentState` (§5.3 step 6); keeping the same reference is no exemption
 9. Lattice never prunes accepted graph or verified local-work facts
 10. There is no finality threshold; a strictly heavier effective subtree may reorg at any depth
-11. Every successful consensus mutation has a monotonically increasing revision
-12. One explicit validation-time context governs one import attempt
+11. One explicit validation-time context governs one import attempt
 
 ## 13. Constants
 

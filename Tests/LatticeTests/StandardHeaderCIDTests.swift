@@ -149,7 +149,6 @@ final class StandardHeaderCIDTests: XCTestCase {
                     target: fact.target,
                     nextTarget: fact.nextTarget,
                     timestamp: fact.timestamp,
-                    stateDiff: fact.stateDiff,
                     childCommitments: children ?? fact.childCommitments
                 ))
             })

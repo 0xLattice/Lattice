@@ -43,8 +43,7 @@ final class QuotientDeletionCostTests: XCTestCase {
                 specCID: testCID("quotient-cost:spec:\(name)"),
                 target: "1",
                 nextTarget: "1",
-                timestamp: Int64(height),
-                stateDiff: .empty
+                timestamp: Int64(height)
             )),
             .work(ChainWorkFact(
                 blockHash: hash,

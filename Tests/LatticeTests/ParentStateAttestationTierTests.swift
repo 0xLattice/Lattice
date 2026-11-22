@@ -241,7 +241,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("legacy-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: nonce, stateDiff: .empty
+                timestamp: nonce
             )),
             .work(ChainWorkFact(
                 blockHash: block,
@@ -311,7 +311,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                     specCID: testCID("cascade-spec"),
                     target: UInt256.max.toHexString(),
                     nextTarget: UInt256.max.toHexString(),
-                    timestamp: n, stateDiff: .empty
+                    timestamp: n
                 )),
                 .work(ChainWorkFact(
                     blockHash: block,
@@ -368,7 +368,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("excl-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: n, stateDiff: .empty
+                timestamp: n
             )),
             .work(ChainWorkFact(
                 blockHash: block,
@@ -456,7 +456,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("naming-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: 1, stateDiff: .empty
+                timestamp: 1
             )),
             .work(ChainWorkFact(
                 blockHash: g,
@@ -487,7 +487,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                 specCID: testCID("reorg-spec"),
                 target: UInt256.max.toHexString(),
                 nextTarget: UInt256.max.toHexString(),
-                timestamp: n, stateDiff: .empty
+                timestamp: n
             )),
             .work(ChainWorkFact(
                 blockHash: block,
@@ -666,7 +666,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                         prevStateCID: prev, specCID: testCID("depth-spec"),
                         target: UInt256.max.toHexString(),
                         nextTarget: UInt256.max.toHexString(),
-                        timestamp: Int64(i + 1), stateDiff: .empty
+                        timestamp: Int64(i + 1)
                     )),
                     .work(ChainWorkFact(
                         blockHash: block,
@@ -711,7 +711,7 @@ final class ParentStateAttestationTierTests: XCTestCase {
                     prevStateCID: prev, specCID: testCID("mix-spec"),
                     target: UInt256.max.toHexString(),
                     nextTarget: UInt256.max.toHexString(),
-                    timestamp: Int64(i + 1), stateDiff: .empty
+                    timestamp: Int64(i + 1)
                 )),
                 .work(ChainWorkFact(
                     blockHash: block,

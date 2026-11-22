@@ -245,10 +245,7 @@ final class ChainLocalAdmissionChildProofTests: XCTestCase {
             return XCTFail("expected second child root execution, got \(result)")
         }
         XCTAssertFalse(update.excluded)
-        let diff = try XCTUnwrap(update.batches.flatMap(\.facts).lazy.compactMap { fact -> StateDiff? in
-            if case .block(let block) = fact { return block.stateDiff }
-            return nil
-        }.first)
+        let diff = try XCTUnwrap(update.stateDiff)
         let materialized = try XCTUnwrap(update.materializedPostState)
         XCTAssertEqual(try LatticeStateHeader(node: materialized).rawCID, secondRoot.postState.rawCID)
         XCTAssertFalse(diff.created.isEmpty)

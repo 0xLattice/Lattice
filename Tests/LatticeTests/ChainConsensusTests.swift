@@ -499,25 +499,4 @@ final class EdgeCaseTests: XCTestCase {
         let containsLast = chain.contains(blockHash: blockCID("block_\(length - 1)"))
         XCTAssertTrue(containsLast)
     }
-
-    func testRevisionExhaustionFailsClosedBeforeMutation() async throws {
-        let genesis = makeBlockMeta(hash: blockCID("G"), height: 0)
-        var chain = try ChainTree(
-            canonicalTip: blockCID("G"),
-            canonicalHashes: [blockCID("G")],
-            indexToBlockHash: [0: [blockCID("G")]],
-            hashToBlock: [blockCID("G"): genesis],
-            mutationGeneration: .max
-        )
-        let extra = VerifiedWorkContribution(
-            id: testCID("revision-exhaustion"),
-            work: UInt256(2)
-        )
-
-        let result = chain.addWorkContribution(extra, to: blockCID("G"))
-        let revision = chain.currentRevision()
-
-        XCTAssertFalse(result.addedContribution)
-        XCTAssertEqual(revision, .max)
-    }
 }

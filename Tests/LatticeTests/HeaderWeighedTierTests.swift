@@ -18,8 +18,7 @@ final class HeaderWeighedTierTests: XCTestCase {
     func testWeighedAdmissionMatchesEagerForkChoiceWithoutMaterializedState() async throws {
         // Deferred execution (weight-first-acquisition): a header admission
         // possesses the block and verifies its PoW, so its work enters fork
-        // choice with exactly the eager path's weight — the consensus graph
-        // never reads `stateDiff` — while it executes no state transition and
+        // choice with exactly the eager path's weight — while it executes no state transition and
         // materializes no post-state. Header-then-execution is the control.
         let genesisTimestamp: Int64 = 1_000
 
@@ -76,9 +75,8 @@ final class HeaderWeighedTierTests: XCTestCase {
         XCTAssertTrue(eagerTree.isExecuted(blockHash: candidateHash))
 
         // Both tiers record the same declared block fact — same block hash, the
-        // same declared `postStateCID` claim, height, and target — differing
-        // only in the (materialized) stateDiff. Header claim identical; only
-        // execution is deferred.
+        // same declared `postStateCID` claim, height, and target. Header claim
+        // identical; only execution is deferred, and only it yields a diff.
         func blockFact(_ update: ChainTreeUpdate) -> ChainBlockFact? {
             for batch in update.batches {
                 for case .block(let fact) in batch.facts { return fact }
@@ -92,7 +90,9 @@ final class HeaderWeighedTierTests: XCTestCase {
         XCTAssertEqual(weighedBlockFact.blockHeight, eagerBlockFact.blockHeight)
         XCTAssertEqual(weighedBlockFact.target, eagerBlockFact.target)
         XCTAssertEqual(weighedBlockFact.prevStateCID, eagerBlockFact.prevStateCID)
-        XCTAssertEqual(weighedBlockFact.stateDiff, StateDiff.empty)
+        XCTAssertEqual(weighedBlockFact, eagerBlockFact)
+        XCTAssertNil(weighedUpdate.stateDiff)
+        XCTAssertNotNil(eagerUpdate.stateDiff)
     }
 
     func testWeighedCompletesWithBodylessFetcherWhileExecutionWaits() async throws {

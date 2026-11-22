@@ -121,7 +121,6 @@ final class ChainLocalAdmissionContextTests: XCTestCase {
             .crossChainEvidenceRequired(.childProof(chainPath: [], childCID: "x")),
             .notYetValid,
             .notAcceptedAtCurrentChain,
-            .revisionExhausted,
         ] {
             XCTAssertFalse(
                 BlockImport.isDeterministicInvalidity(failure),

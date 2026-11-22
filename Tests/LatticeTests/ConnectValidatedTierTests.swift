@@ -23,9 +23,9 @@ final class ConnectValidatedTierTests: XCTestCase {
         // Validated tier (deferred execution): `connect` executes a block
         // already weighed and records the validity verdict. On a valid block
         // it does exactly what admitting header and execution together does —
-        // runs the transition, materializes the post-state, emits the block
-        // fact carrying the real `stateDiff` — the durable "validated" marker
-        // that upgrades a weighed claim. Proven here against the eager
+        // runs the transition, materializes the post-state and its
+        // `stateDiff`, and emits the block fact with its validation — the
+        // durable "validated" marker that upgrades a weighed claim. Proven here against the eager
         // control on an identical, independent tree.
         let genesisTimestamp: Int64 = 1_000
 
@@ -75,6 +75,9 @@ final class ConnectValidatedTierTests: XCTestCase {
         XCTAssertNil(weighed.update?.materializedPostState)
         XCTAssertNotNil(validatedUpdate.materializedPostState)
         XCTAssertNotNil(eagerUpdate.materializedPostState)
+        XCTAssertNil(weighed.update?.stateDiff)
+        XCTAssertNotNil(validatedUpdate.stateDiff)
+        XCTAssertEqual(validatedUpdate.stateDiff, eagerUpdate.stateDiff)
 
         let eagerBlockFact = try XCTUnwrap(blockFact(eagerUpdate))
         let validatedBlockFact = try XCTUnwrap(blockFact(validatedUpdate))
@@ -101,7 +104,7 @@ final class ConnectValidatedTierTests: XCTestCase {
                 blockHash: b.blockHash, parentBlockHash: b.parentBlockHash, blockHeight: b.blockHeight,
                 postStateCID: b.postStateCID, prevStateCID: b.prevStateCID, specCID: b.specCID,
                 target: b.target, nextTarget: b.nextTarget, timestamp: b.timestamp,
-                stateDiff: b.stateDiff, childCommitments: recordedMap
+                childCommitments: recordedMap
             ))
         }
         _ = try tree.replay(BlockImportBatch(facts: facts))

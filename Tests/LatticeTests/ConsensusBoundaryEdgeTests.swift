@@ -32,7 +32,7 @@ final class ConsensusBoundaryEdgeTests: XCTestCase {
                 postStateCID: testCID("edge-c-post:\(name)"),
                 prevStateCID: parent.map { testCID("edge-c-post:\($0)") } ?? testCID("edge-c-prev:genesis"),
                 specCID: testCID("edge-c-spec"), target: "1", nextTarget: "1",
-                timestamp: Int64(1_000 + height), stateDiff: .empty
+                timestamp: Int64(1_000 + height)
             )),
             .work(ChainWorkFact(
                 blockHash: h(name),

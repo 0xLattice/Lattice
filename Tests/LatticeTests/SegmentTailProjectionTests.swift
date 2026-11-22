@@ -312,8 +312,7 @@ private func segmentTailAdmission(_ block: SegmentTailBlock) -> BlockImportBatch
             specCID: testCID("segment-tail:spec:\(block.name)"),
             target: "1",
             nextTarget: "1",
-            timestamp: Int64(block.height),
-            stateDiff: .empty
+            timestamp: Int64(block.height)
         )),
         .work(ChainWorkFact(
             blockHash: block.hash,

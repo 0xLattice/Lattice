@@ -48,7 +48,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "valid",
       "excluded" : false,
       "excludedAfter" : false,
@@ -118,7 +117,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "valid",
       "excluded" : false,
       "excludedAfter" : false,
@@ -173,7 +171,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "valid",
       "excluded" : false,
       "excludedAfter" : false,
@@ -207,7 +204,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 2,
       "commitTip" : "valid",
       "excluded" : false,
       "excludedAfter" : false,
@@ -269,7 +265,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 2,
       "commitTip" : "genesis",
       "excluded" : true,
       "excludedAfter" : true,
@@ -357,7 +352,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 2,
       "commitTip" : "genesis",
       "excluded" : true,
       "excludedAfter" : true,
@@ -435,7 +429,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "forgedPostState",
       "excluded" : false,
       "excludedAfter" : false,
@@ -463,7 +456,6 @@
       "commitRemoved" : [
         "forgedPostState"
       ],
-      "commitRevision" : 2,
       "commitTip" : "genesis",
       "excluded" : true,
       "excludedAfter" : true,
@@ -541,7 +533,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "childCandidate",
       "excluded" : false,
       "excludedAfter" : false,
@@ -626,7 +617,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "valid",
       "excluded" : false,
       "excludedAfter" : false,
@@ -682,7 +672,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 1,
       "commitTip" : "valid",
       "excluded" : false,
       "excludedAfter" : false,
@@ -716,7 +705,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 2,
       "commitTip" : "grandchild",
       "excluded" : false,
       "excludedAfter" : false,
@@ -801,7 +789,6 @@
       "commitRemoved" : [
         "childGenesis"
       ],
-      "commitRevision" : 2,
       "commitTip" : "rivalChildGenesis",
       "excluded" : false,
       "excludedAfter" : false,
@@ -892,7 +879,6 @@
       "commitRemoved" : [
         "childGenesis"
       ],
-      "commitRevision" : 2,
       "commitTip" : "rivalChildGenesis",
       "excluded" : false,
       "excludedAfter" : false,
@@ -926,7 +912,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 3,
       "commitTip" : "rivalChildBlock",
       "excluded" : false,
       "excludedAfter" : false,
@@ -996,7 +981,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 2,
       "commitTip" : "childCandidate",
       "excluded" : false,
       "excludedAfter" : false,
@@ -1030,7 +1014,6 @@
       "commitRemoved" : [
 
       ],
-      "commitRevision" : 3,
       "commitTip" : "childCandidate",
       "excluded" : false,
       "excludedAfter" : false,
@@ -1066,7 +1049,6 @@
         "childCandidate",
         "childGenesis"
       ],
-      "commitRevision" : 4,
       "commitTip" : "rivalChildBlock",
       "excluded" : false,
       "excludedAfter" : false,

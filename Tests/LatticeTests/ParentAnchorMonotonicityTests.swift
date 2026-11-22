@@ -21,7 +21,7 @@ final class ParentAnchorMonotonicityTests: XCTestCase {
                 blockHash: block, parentBlockHash: parent, blockHeight: height,
                 postStateCID: to, prevStateCID: from, specCID: testCID("anchor-spec"),
                 target: UInt256.max.toHexString(), nextTarget: UInt256.max.toHexString(),
-                timestamp: nonce, stateDiff: .empty
+                timestamp: nonce
             )),
             .work(ChainWorkFact(
                 blockHash: block,
