@@ -153,6 +153,24 @@ final class TransactionChildCommitmentTests: XCTestCase {
         XCTAssertTrue(valid, "a delete needs no children entry")
     }
 
+    func testAssertCommitsNothing() async throws {
+        let fetcher = StorableFetcher()
+        let g = try await genesis(fetcher)
+        let kp = CryptoUtils.generateKeyPair()
+        let c = child(1)
+        let committed = try await buildAndStoreBlock(
+            previous: g, transactions: [commitTransaction(oldValue: nil, newValue: value(c.cid, after: g), nonce: 0, by: kp)],
+            children: [directory: c.block], timestamp: g.timestamp + 1_000, fetcher: fetcher
+        )
+        let asserted = try await buildAndStoreBlock(
+            previous: committed,
+            transactions: [commitTransaction(oldValue: value(c.cid, after: g), newValue: value(c.cid, after: g), nonce: 1, by: kp)],
+            timestamp: g.timestamp + 2_000, fetcher: fetcher
+        )
+        let valid = try await asserted.validateNexus(fetcher: fetcher).0
+        XCTAssertTrue(valid, "an assert needs no children entry")
+    }
+
     func testAnotherParentStateIsInvalid() async throws {
         let fetcher = StorableFetcher()
         let g = try await genesis(fetcher)

@@ -5,10 +5,14 @@ public extension GeneralStateHeader {
     func proveAndUpdateState(allActions: [Action], fetcher: Fetcher) async throws -> (GeneralStateHeader, StateDiff) {
         if allActions.isEmpty { return (self, .empty) }
 
-        // Determine proof types and build transforms from action semantics
+        // Determine proof types and build transforms from action semantics.
+        // An assert (`isAssert`) writes nothing, so it takes no proof or
+        // transform and never conflicts: any number share a key with each
+        // other and with the key's one write. Every action is checked below
+        // against the state before the block, so their order is irrelevant.
         var proofs = [[String]: SparseMerkleProof]()
         var transforms = [[String]: Transform]()
-        for action in allActions {
+        for action in allActions where !action.isAssert {
             if proofs[[action.key]] != nil { throw StateErrors.conflictingActions }
             if action.newValue == nil {
                 proofs[[action.key]] = .deletion
@@ -46,6 +50,8 @@ public extension GeneralStateHeader {
                 }
             }
         }
+
+        if proofs.isEmpty { return (self, .empty) }
 
         let proven = try await resolved.proof(paths: proofs, fetcher: fetcher)
         guard let result = try proven.transform(transforms: transforms) else {
