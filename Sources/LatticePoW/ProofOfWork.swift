@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 import cashew
 import UInt256
@@ -161,5 +162,38 @@ public extension Block {
         // rejects). Without the `target > .zero` guard, the degenerate
         // (target 0, hash 0) case would pass here yet fail on restore.
         return target > .zero && target >= nexusHash
+    }
+}
+
+/// The SHA-256 state after a block's proof-of-work preimage prefix
+/// (`Block.makeProofOfWorkPreimagePrefix`): hashed once per template, then
+/// resumed for each nonce, so a nonce costs only the hash of its own bytes.
+/// `hash(nonce:)` equals `Block.proofOfWorkHash()` of the block with that
+/// nonce. A searcher, not consensus: validation hashes the whole preimage.
+public struct ProofOfWorkMidstate {
+    private let state: SHA256
+
+    /// The midstate of a preimage prefix, as a template or work assignment
+    /// carries it.
+    public init(prefix: Data) {
+        var state = SHA256()
+        state.update(data: prefix)
+        self.state = state
+    }
+
+    public init(block: Block) {
+        self.init(prefix: Block.makeProofOfWorkPreimagePrefix(block: block))
+    }
+
+    /// The proof-of-work hash of `nonce`, appended as
+    /// `Block.proofOfWorkNonceBytes` encodes it; read as `UInt256.hash` reads
+    /// a digest (big-endian).
+    public func hash(nonce: UInt64) -> UInt256 {
+        var state = state
+        state.update(data: Block.proofOfWorkNonceBytes(nonce))
+        let digest = Array(state.finalize())
+        return UInt256((0..<4).map { word in
+            digest[(word * 8)..<(word * 8 + 8)].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
+        })
     }
 }
