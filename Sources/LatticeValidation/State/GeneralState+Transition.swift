@@ -7,12 +7,14 @@ public extension GeneralStateHeader {
 
         // Determine proof types and build transforms from action semantics.
         // An assert (`isAssert`) writes nothing, so it takes no proof or
-        // transform and never conflicts: any number share a key with each
-        // other and with the key's one write. Every action is checked below
-        // against the state before the block, so their order is irrelevant.
+        // transform. Asserts never conflict with each other; a key written in
+        // the block may not also be asserted, so every assert still holds
+        // after the block (no write skew), and order is irrelevant.
         var proofs = [[String]: SparseMerkleProof]()
         var transforms = [[String]: Transform]()
-        for action in allActions where !action.isAssert {
+        var asserted = Set<String>()
+        for action in allActions {
+            if action.isAssert { asserted.insert(action.key); continue }
             if proofs[[action.key]] != nil { throw StateErrors.conflictingActions }
             if action.newValue == nil {
                 proofs[[action.key]] = .deletion
@@ -25,6 +27,8 @@ public extension GeneralStateHeader {
                 transforms[[action.key]] = .update(action.newValue!)
             }
         }
+
+        if asserted.contains(where: { proofs[[$0]] != nil }) { throw StateErrors.conflictingActions }
 
         // Resolve targeted paths to validate current values against declared oldValues
         var resolvePaths = [[String]: ResolutionStrategy]()

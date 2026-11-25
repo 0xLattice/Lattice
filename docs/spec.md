@@ -718,8 +718,10 @@ is irrelevant. A block may write a key at most once: two writes (insert,
 update or delete) to one key conflict and the block is invalid. An **assert**
 is an action whose `oldValue` and `newValue` are both present and the same
 bytes: it is checked like any action and writes nothing (its delta is `0`).
-Asserts never conflict: any number of them may name one key in a block,
-beside that key's one write, and each reads the value before the block.
+Asserts are serializable: any number of them may name one key in a block,
+but an assert and a write of that key, in the same transaction or another,
+conflict. Every assert therefore still holds after the block, so its
+transactions have the effect of running one after another.
 
 **Child commitment.** An action with key `child/X` and `newValue` `C@P`
 commits child block `C`, built on parent state `P`, into directory `X`. The

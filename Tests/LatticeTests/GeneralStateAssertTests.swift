@@ -8,7 +8,7 @@ import Foundation
 
 /// An action whose oldValue and newValue are the same bytes asserts the key's
 /// value before the block and writes nothing. Asserts never conflict with
-/// each other or with the key's one write; two writes still conflict.
+/// each other; an assert and a write of one key conflict, as two writes do.
 final class GeneralStateAssertTests: XCTestCase {
 
     private func base(_ fetcher: StorableFetcher) async throws -> GeneralStateHeader {
@@ -47,7 +47,9 @@ final class GeneralStateAssertTests: XCTestCase {
         XCTAssertTrue(diff.isEmpty)
     }
 
-    func testAssertsCoexistWithOneWriteAndReadThePreBlockValue() async throws {
+    /// An assert and a write of one key cannot share a block, whichever
+    /// transactions carry them, so a block's asserts all hold after it.
+    func testAssertAndAWriteOfTheKeyConflict() async throws {
         let fetcher = StorableFetcher()
         let state = try await base(fetcher)
         let assert = Action(key: "offer", oldValue: "v", newValue: "v")
@@ -55,16 +57,34 @@ final class GeneralStateAssertTests: XCTestCase {
             Action(key: "offer", oldValue: "v", newValue: "w"),
             Action(key: "offer", oldValue: "v", newValue: nil),
         ] {
-            for actions in [[assert, write, assert], [write, assert]] {
-                let (after, _) = try await state.proveAndUpdateState(allActions: actions, fetcher: fetcher)
-                XCTAssertEqual(try after.node?.get(key: "offer"), write.newValue)
-                XCTAssertEqual(try after.node?.get(key: "other"), "o")
+            for actions in [[assert, write], [write, assert], [assert, assert, write]] {
+                await assertConflict(actions, on: state, fetcher: fetcher, "an assert and a write of one key must conflict")
             }
         }
-        await assertConflict(
-            [Action(key: "offer", oldValue: "v", newValue: "w"), Action(key: "offer", oldValue: "w", newValue: "w")],
-            on: state, fetcher: fetcher, "an assert reads the value before the block, not the block's write"
+    }
+
+    /// Write skew: each transaction asserts the claim the other closes. Run
+    /// one after the other, the second's assert would fail; together they
+    /// must not land.
+    func testWriteSkewIsRefused() async throws {
+        let fetcher = StorableFetcher()
+        let empty = try GeneralStateHeader(node: GeneralState())
+        try await empty.storeRecursively(storer: fetcher)
+        let (state, _) = try await empty.proveAndUpdateState(
+            allActions: [
+                Action(key: "claimA", oldValue: nil, newValue: "open"),
+                Action(key: "claimB", oldValue: nil, newValue: "open"),
+            ],
+            fetcher: fetcher
         )
+        try await state.storeRecursively(storer: fetcher)
+        let tx1 = [Action(key: "claimB", oldValue: "open", newValue: "open"), Action(key: "claimA", oldValue: "open", newValue: "closed")]
+        let tx2 = [Action(key: "claimA", oldValue: "open", newValue: "open"), Action(key: "claimB", oldValue: "open", newValue: "closed")]
+        await assertConflict(tx1 + tx2, on: state, fetcher: fetcher, "the write-skew pair must not share a block")
+        for tx in [tx1, tx2] {
+            let (after, _) = try await state.proveAndUpdateState(allActions: tx, fetcher: fetcher)
+            XCTAssertNotEqual(after.rawCID, state.rawCID)
+        }
     }
 
     func testAssertOfAnotherValueIsRefused() async throws {
@@ -124,34 +144,42 @@ final class GeneralStateAssertTests: XCTestCase {
         await assertConflict([respell, respell], on: state, fetcher: fetcher, "two writes of one key must conflict")
     }
 
-    /// Through a whole block: many transactions assert the same key beside
-    /// one that writes it.
-    func testBlockWithManyAssertsAndOneWriteIsValid() async throws {
+    func transaction(_ actions: [Action], nonce: UInt64, by keyPair: (privateKey: String, publicKey: String)) -> Transaction {
+        signedTestTransaction(TransactionBody(
+            accountActions: [], actions: actions,
+            depositActions: [], receiptActions: [], withdrawalActions: [],
+            signers: [testAddress(publicKey: keyPair.publicKey)], nonce: nonce, chainPath: ["Nexus"]
+        ), by: keyPair)
+    }
+
+    /// Through a whole block: many transactions assert one key; another
+    /// transaction's write of it cannot join them.
+    func testBlockOfManyAssertsIsValidAndRefusesAWriteOfTheKey() async throws {
         let fetcher = StorableFetcher()
         let g = try await buildAndStoreGenesis(
             spec: ChainSpec.test(), timestamp: Int64(Date().timeIntervalSince1970 * 1000) - 20_000,
             target: UInt256.max, fetcher: fetcher
         )
-        func transaction(_ action: Action, nonce: UInt64, by keyPair: (privateKey: String, publicKey: String)) -> Transaction {
-            signedTestTransaction(TransactionBody(
-                accountActions: [], actions: [action],
-                depositActions: [], receiptActions: [], withdrawalActions: [],
-                signers: [testAddress(publicKey: keyPair.publicKey)], nonce: nonce, chainPath: ["Nexus"]
-            ), by: keyPair)
-        }
         let seller = CryptoUtils.generateKeyPair()
         let listed = try await buildAndStoreBlock(
-            previous: g, transactions: [transaction(Action(key: "offer", oldValue: nil, newValue: "v"), nonce: 0, by: seller)],
+            previous: g, transactions: [transaction([Action(key: "offer", oldValue: nil, newValue: "v")], nonce: 0, by: seller)],
             timestamp: g.timestamp + 1_000, fetcher: fetcher
         )
         let assert = Action(key: "offer", oldValue: "v", newValue: "v")
-        let orders = (0..<3).map { _ in transaction(assert, nonce: 0, by: CryptoUtils.generateKeyPair()) }
+        let orders = (0..<3).map { _ in transaction([assert, assert], nonce: 0, by: CryptoUtils.generateKeyPair()) }
         let block = try await buildAndStoreBlock(
-            previous: listed,
-            transactions: orders + [transaction(Action(key: "offer", oldValue: "v", newValue: "w"), nonce: 1, by: seller)],
-            timestamp: g.timestamp + 2_000, fetcher: fetcher
+            previous: listed, transactions: orders, timestamp: g.timestamp + 2_000, fetcher: fetcher
         )
         let valid = try await block.validateNexus(fetcher: fetcher).0
         XCTAssertTrue(valid)
+
+        do {
+            _ = try await buildAndStoreBlock(
+                previous: listed,
+                transactions: orders + [transaction([Action(key: "offer", oldValue: "v", newValue: "w")], nonce: 1, by: seller)],
+                timestamp: g.timestamp + 2_000, fetcher: fetcher
+            )
+            XCTFail("built a block where an assert and another transaction's write share a key")
+        } catch StateErrors.conflictingActions {}
     }
 }
