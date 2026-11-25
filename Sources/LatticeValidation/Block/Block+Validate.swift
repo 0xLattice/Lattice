@@ -694,9 +694,9 @@ public extension Block {
     /// hold exactly C at `children[X]` and enter exactly P (`prevState`), so a
     /// commitment lands only on the state its child was built on. Only
     /// `children` weighs, so the action asks the miner for a commitment and can
-    /// never be a second, competing one. A delete (`newValue == nil`) commits
-    /// nothing. Two writes to one key in a block are already a state conflict,
-    /// so one directory has at most one action.
+    /// never be a second, competing one. A delete (`newValue == nil`) or an
+    /// assert (`isAssert`) commits nothing. Two writes to one key in a block
+    /// are already a state conflict, so one directory has at most one write.
     func validateChildCommitments(transactionBodies: [TransactionBody], fetcher: Fetcher) async throws -> Bool {
         let committed = Block.childCommitments(in: transactionBodies)
         if committed.isEmpty { return true }
@@ -709,14 +709,14 @@ public extension Block {
         }
     }
 
-    /// The `child/X` commitments the bodies make, deletes excluded: the one
+    /// The `child/X` commitments the bodies make, deletes and asserts excluded: the one
     /// reading of the key, shared by validation and the builder.
     static func childCommitments(in transactionBodies: [TransactionBody]) -> [(directory: String, value: String)] {
         let prefix = CHILD_COMMITMENT_KEY_PREFIX.utf8
         var committed: [(directory: String, value: String)] = []
         for body in transactionBodies {
             for action in body.actions {
-                guard let value = action.newValue, action.key.utf8.starts(with: prefix) else { continue }
+                guard let value = action.newValue, !action.isAssert, action.key.utf8.starts(with: prefix) else { continue }
                 committed.append((String(decoding: action.key.utf8.dropFirst(prefix.count), as: UTF8.self), value))
             }
         }

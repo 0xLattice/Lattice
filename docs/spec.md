@@ -713,13 +713,23 @@ For each `Action(key, oldValue, newValue)`:
   - If `newValue != nil`: set `generalState[key] = newValue`
   - If `newValue == nil`: delete `generalState[key]`
 
+Every action is checked against `prevState`, so the order of a block's actions
+is irrelevant. A block may write a key at most once: two writes (insert,
+update or delete) to one key conflict and the block is invalid. An **assert**
+is an action whose `oldValue` and `newValue` are both present and the same
+bytes: it is checked like any action and writes nothing (its delta is `0`).
+Asserts are serializable: any number of them may name one key in a block,
+but an assert and a write of that key, in the same transaction or another,
+conflict. Every assert therefore still holds after the block, so its
+transactions have the effect of running one after another.
+
 **Child commitment.** An action with key `child/X` and `newValue` `C@P`
 commits child block `C`, built on parent state `P`, into directory `X`. The
 block carrying it is valid only if its `children[X]` is exactly `C` and its
 `prevState` is exactly `P`. The value splits at its one `@` byte (bytes, not
 characters); a value with no `@`, more than one, or an empty side is invalid.
 `C` and `P` compare byte-exactly with the CID strings the block commits. A
-delete (`newValue == nil`) commits nothing. A `children[X]` entry with no
+delete (`newValue == nil`) or an assert commits nothing. A `children[X]` entry with no
 action stays valid. Two commitments to one directory in a block are already a
 conflicting write to one key. Otherwise the action is an ordinary general-state
 write.

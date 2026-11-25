@@ -23,4 +23,13 @@ public struct Action: Codable, Sendable {
         return newValue!.utf8.count - oldValue!.utf8.count
     }
 
+    /// An assert names a value the key holds and keeps it: oldValue and
+    /// newValue are the same bytes. It checks the key and writes nothing.
+    /// Bytes, not String ==: canonical equivalence depends on the runtime's
+    /// Unicode tables, which differ across nodes.
+    public var isAssert: Bool {
+        guard let oldValue, let newValue else { return false }
+        return oldValue.utf8.elementsEqual(newValue.utf8)
+    }
+
 }
