@@ -170,7 +170,7 @@ public extension Block {
 /// resumed for each nonce, so a nonce costs only the hash of its own bytes.
 /// `hash(nonce:)` equals `Block.proofOfWorkHash()` of the block with that
 /// nonce. A searcher, not consensus: validation hashes the whole preimage.
-public struct ProofOfWorkMidstate: Sendable {
+public struct ProofOfWorkMidstate {
     private let state: SHA256
 
     /// The midstate of a preimage prefix, as a template or work assignment
