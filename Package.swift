@@ -54,6 +54,7 @@ let package = Package(
             name: "LatticePoW",
             dependencies: [
                 "LatticePrimitives",
+                .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "cashew", package: "cashew"),
                 .product(name: "UInt256", package: "UInt256"),
             ]),

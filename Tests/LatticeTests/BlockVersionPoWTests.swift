@@ -163,6 +163,35 @@ final class BlockVersionPoWTests: XCTestCase {
         XCTAssertTrue(full.starts(with: prefix), "full preimage must begin with the prefix")
     }
 
+    func test_midstateHash_equalsConsensusHash() async throws {
+        let block = try await deterministicGenesis()
+        let midstate = ProofOfWorkMidstate(block: block)
+        let fromPrefix = ProofOfWorkMidstate(prefix: Block.makeProofOfWorkPreimagePrefix(block: block))
+
+        for nonce: UInt64 in [0, 1, 42, 1_000_000, UInt64.max] {
+            let consensus = copy(block, nonce: nonce).proofOfWorkHash()
+            XCTAssertEqual(midstate.hash(nonce: nonce), consensus, "nonce=\(nonce)")
+            XCTAssertEqual(fromPrefix.hash(nonce: nonce), consensus, "nonce=\(nonce)")
+        }
+        XCTAssertEqual(
+            midstate.hash(nonce: 0).toHexString(),
+            "7338ebe21969647356e63731a9b4ea5f48654aa655ebbc671189590e23fa7b8c"
+        )
+    }
+
+    func test_midstateHash_commitsRewardRecipient() async throws {
+        let block = try await deterministicGenesis()
+        let paid = Block(
+            version: block.version, parent: block.parent, transactions: block.transactions,
+            target: block.target, nextTarget: block.nextTarget, spec: block.spec,
+            parentState: block.parentState, prevState: block.prevState, postState: block.postState,
+            children: block.children, height: block.height, timestamp: block.timestamp,
+            rewardRecipient: "recipient", nonce: 7
+        )
+        XCTAssertEqual(ProofOfWorkMidstate(block: paid).hash(nonce: 7), paid.proofOfWorkHash())
+        XCTAssertNotEqual(ProofOfWorkMidstate(block: paid).hash(nonce: 7), ProofOfWorkMidstate(block: block).hash(nonce: 7))
+    }
+
     func test_makeProofOfWorkPreimage_containsVersionBytes() async throws {
         let block = try await deterministicGenesis(version: 1)
         let forged = copy(block, version: 7)

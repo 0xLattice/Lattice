@@ -167,7 +167,7 @@ not tell Lattice to retain the carrier.
 ```text
 Sources/
 |- LatticePrimitives/  blocks, ChainSpec, transactions, actions, state, CIDs
-|- LatticePoW/         proof-of-work preimage, work, ASERT schedule, WorkSum
+|- LatticePoW/         proof-of-work preimage and midstate, work, ASERT schedule, WorkSum
 |- LatticeValidation/  block, transaction, state-transition and spec validity, genesis
 |- LatticeProofs/      ChildBlockProof and verified child evidence
 |- LatticeBlockTree/   ChainTree: block graph, fork choice, execution frontier, run attribution
