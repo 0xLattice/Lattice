@@ -1,5 +1,5 @@
 {
-  "originHash" : "212af63bd6e999995c892561a86b44daaff1e182a57dceba4772e5a6ba0ac595",
+  "originHash" : "f2070683d0c148c40dcbef820dcf857e4a9f8e0e162dc5e00f32b7991101e6a9",
   "pins" : [
     {
       "identity" : "arraytrie",
@@ -15,7 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/0xLattice/cashew.git",
       "state" : {
-        "revision" : "27dfadd0c09dc87c8c3b0c1321724ec082334c19"
+        "revision" : "6fd683690c44ae4875c201f6188d93290bec5b28",
+        "version" : "5.1.0"
       }
     },
     {
