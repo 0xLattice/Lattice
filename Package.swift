@@ -25,7 +25,7 @@ let package = Package(
         // decide validity.
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1"),
         .package(url: "https://github.com/0xLattice/Multikey.git", exact: "1.0.0"),
-        .package(url: "https://github.com/0xLattice/cashew.git", exact: "5.0.7"),
+        .package(url: "https://github.com/0xLattice/cashew.git", revision: "27dfadd0c09dc87c8c3b0c1321724ec082334c19"),
         // Exact: UInt256's hex encoding is in the proof-of-work preimage, and
         // swift-cid and swift-multicodec fix the CID bytes that identity and
         // tie-breaks compare.

@@ -209,6 +209,92 @@ extension Block: Node {
     }
 }
 
+/// `Block`'s DAG-CBOR, read and written in one pass: the bytes `Codable`
+/// writes, with `init(from:)`'s verdicts (cashew's `DagCBORCodable`).
+extension Block: DagCBORCodable {
+    /// Reads the fields in the order `writeDagCBOR` writes them.
+    public init(dagCBOR reader: inout DagCBORReader) throws {
+        func readUInt256() throws -> UInt256 {
+            guard let value = UInt256.fromHexString(try reader.readText()) else { throw DagCBORError.invalidCBOR }
+            return value
+        }
+        _ = try reader.readMapCount()
+        try reader.readKey("spec")
+        let spec = try VolumeImpl<ChainSpec>(dagCBOR: &reader)
+        try reader.readKey("nonce")
+        let nonce = try reader.readUInt64()
+        try reader.readKey("height")
+        let height = try reader.readUInt64()
+        let parent = reader.consumeKey("parent") ? try VolumeImpl<Block>(dagCBOR: &reader) : nil
+        try reader.readKey("target")
+        let target = try readUInt256()
+        try reader.readKey("version")
+        let version = try reader.readUInt64()
+        guard version <= UInt64(UInt16.max) else { throw DagCBORError.integerOverflow }
+        try reader.readKey("children")
+        let children = try HeaderImpl<FlatDictionary<BlockHeader>>(dagCBOR: &reader)
+        try reader.readKey("postState")
+        let postState = try LatticeStateHeader(dagCBOR: &reader)
+        try reader.readKey("prevState")
+        let prevState = try LatticeStateHeader(dagCBOR: &reader)
+        try reader.readKey("timestamp")
+        let timestamp = try reader.readInt64()
+        try reader.readKey("nextTarget")
+        let nextTarget = try readUInt256()
+        try reader.readKey("parentState")
+        let parentState = try LatticeStateHeader(dagCBOR: &reader)
+        try reader.readKey("transactions")
+        let transactions = try HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>(dagCBOR: &reader)
+        let rewardRecipient = reader.consumeKey("rewardRecipient") ? try reader.readText() : nil
+        self.init(
+            version: UInt16(version), parent: parent, transactions: transactions,
+            target: target, nextTarget: nextTarget, spec: spec,
+            parentState: parentState, prevState: prevState, postState: postState,
+            children: children, height: height, timestamp: timestamp,
+            rewardRecipient: rewardRecipient, nonce: nonce
+        )
+        guard hasStandardLinks else { throw DagCBORError.invalidCBOR }
+    }
+
+    /// The fields in DAG-CBOR's map key order (shorter first, then bytewise);
+    /// `parent` and `rewardRecipient` only when present.
+    public func writeDagCBOR(to writer: inout DagCBORWriter) throws {
+        try writer.writeMapHeader(count: 12 + (parent == nil ? 0 : 1) + (rewardRecipient == nil ? 0 : 1))
+        writer.writeText("spec")
+        try spec.writeDagCBOR(to: &writer)
+        writer.writeText("nonce")
+        writer.writeUInt64(nonce)
+        writer.writeText("height")
+        writer.writeUInt64(height)
+        if let parent {
+            writer.writeText("parent")
+            try parent.writeDagCBOR(to: &writer)
+        }
+        writer.writeText("target")
+        writer.writeText(target.toPrefixedHexString())
+        writer.writeText("version")
+        writer.writeUInt64(UInt64(version))
+        writer.writeText("children")
+        try children.writeDagCBOR(to: &writer)
+        writer.writeText("postState")
+        try postState.writeDagCBOR(to: &writer)
+        writer.writeText("prevState")
+        try prevState.writeDagCBOR(to: &writer)
+        writer.writeText("timestamp")
+        writer.writeInt64(timestamp)
+        writer.writeText("nextTarget")
+        writer.writeText(nextTarget.toPrefixedHexString())
+        writer.writeText("parentState")
+        try parentState.writeDagCBOR(to: &writer)
+        writer.writeText("transactions")
+        try transactions.writeDagCBOR(to: &writer)
+        if let rewardRecipient {
+            writer.writeText("rewardRecipient")
+            writer.writeText(rewardRecipient)
+        }
+    }
+}
+
 public typealias BlockHeader = VolumeImpl<Block>
 
 /// A header link in its one standard form: the standard CID
