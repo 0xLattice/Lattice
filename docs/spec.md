@@ -460,11 +460,12 @@ this order:
    unchecked claim would otherwise be imported with no evidence at all.
 
    Anchors therefore advance monotonically along the parent's history and
-   never move backward or sideways. That is what makes a parent
-   reorganization reorganize the child: a miner on the canonical parent
-   anchors at its canonical state, which does not descend from an abandoned
-   branch, so it cannot extend a child block anchored there (§8.1, "Receipt
-   canonicity"). An ancestry test answers the link in time logarithmic in the
+   never move backward or sideways. A miner on the canonical parent anchors
+   at its canonical state, which does not descend from an abandoned branch,
+   so it cannot extend a child block anchored there. A parent reorganization
+   does not by itself reorganize the child, whose fork choice reads no parent
+   canonicity (§9); the child keeps that block until a branch built from
+   below it is heavier (§8.1, "Receipt canonicity"). An ancestry test answers the link in time logarithmic in the
    parent's size, whatever the distance between the two states.
 7. Apply the ordinary genesis or non-genesis transition rules to `B`, including
    withdrawal proofs against `B.parentState`.

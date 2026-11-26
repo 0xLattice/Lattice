@@ -74,9 +74,11 @@ and nor can backward or sideways movement.
 
 So child anchors only advance along the parent's history. A miner on the
 canonical parent anchors at its canonical state, which cannot advance from a
-branch the parent abandoned, so it cannot extend a child block anchored there:
-a parent reorganization reorganizes the child, and a withdrawal settled
-against a receipt only an abandoned parent branch holds stands only with a
+branch the parent abandoned, so it cannot extend a child block anchored there.
+A parent reorganization does not reorganize the child: child fork choice reads
+no parent canonicity, so the child keeps its tip until a competing branch,
+built from below that block, outweighs it. A withdrawal settled against a
+receipt only an abandoned parent branch holds therefore stands only with a
 majority of child hashrate (spec §8.1, "Receipt canonicity"). The fact is an
 ancestry test on the parent's fork-choice tour, logarithmic in the parent's
 size whatever the distance between `old` and `new`.
