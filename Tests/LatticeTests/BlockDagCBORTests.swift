@@ -51,6 +51,52 @@ final class BlockDagCBORTests: XCTestCase {
         XCTAssertGreaterThan(accepted, 30)
     }
 
+    /// The other types written field by field: specs with and without
+    /// policies, the corpus blocks' states, and targets.
+    func test_specsStatesAndTargetsGetCodablesBytesVerdictsAndValues() throws {
+        let policy = WasmPolicyRef(moduleCID: "bafy-module", sourceCID: "bafy-source", scope: .action)
+        let specs = [
+            ChainSpec(maxNumberOfTransactionsPerBlock: 100, maxStateGrowth: -1, premine: 0, targetBlockTime: 1_000,
+                      initialReward: 50, halvingInterval: 210_000, halfLife: 120),
+            ChainSpec(maxNumberOfTransactionsPerBlock: .max, maxStateGrowth: .max, maxBlockSize: 24, premine: .max,
+                      targetBlockTime: 0, initialReward: .max, halvingInterval: 0, halfLife: .max,
+                      wasmPolicies: [policy, WasmPolicyRef(moduleCID: "m", abiVersion: .max, scope: .transaction, entrypoint: "é")]),
+        ]
+        let states = try corpusBlocks().prefix(4).compactMap { block -> LatticeState? in
+            LatticeState(
+                accountState: AccountStateHeader(rawCID: block.prevState.rawCID),
+                generalState: GeneralStateHeader(rawCID: block.postState.rawCID),
+                depositState: DepositStateHeader(rawCID: block.parentState.rawCID),
+                receiptState: ReceiptStateHeader(rawCID: block.spec.rawCID)
+            )
+        } + [LatticeState.empty]
+        let targets: [UInt256] = [.zero, UInt256(1), UInt256.max, try corpusBlocks()[0].target]
+
+        for spec in specs { XCTAssertEqual(try DagCBOR.encode(spec), try DagCBOR.encodeThroughCodable(spec)) }
+        XCTAssertEqual(try DagCBOR.encode(policy), try DagCBOR.encodeThroughCodable(policy))
+        for state in states { XCTAssertEqual(try DagCBOR.encode(state), try DagCBOR.encodeThroughCodable(state)) }
+        for target in targets { XCTAssertEqual(try DagCBOR.encode(target), try DagCBOR.encodeThroughCodable(target)) }
+
+        var compared = 0
+        func check<T: Codable>(_ type: T.Type, _ value: T) throws {
+            for input in mutants(of: try DagCBOR.encodeThroughCodable(value)) {
+                let own = try? DagCBOR.decode(type, from: input)
+                let codable = try? DagCBOR.decodeThroughCodable(type, from: input)
+                XCTAssertEqual(
+                    own.map { try? DagCBOR.encodeThroughCodable($0) },
+                    codable.map { try? DagCBOR.encodeThroughCodable($0) },
+                    "\(T.self): \(input.base64EncodedString())"
+                )
+                compared += 1
+            }
+        }
+        for spec in specs { try check(ChainSpec.self, spec) }
+        try check(WasmPolicyRef.self, policy)
+        for state in states.prefix(2) { try check(LatticeState.self, state) }
+        for target in targets { try check(UInt256.self, target) }
+        XCTAssertGreaterThan(compared, 10_000)
+    }
+
     // MARK: - Inputs
 
     /// Every child block and proof entry of the corpus.

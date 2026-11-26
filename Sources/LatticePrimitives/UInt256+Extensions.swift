@@ -1,6 +1,19 @@
 import Foundation
 import UInt256
 import Crypto
+import cashew
+
+/// The prefixed hex text its `Codable` conformance writes.
+extension UInt256: DagCBORCodable {
+    public init(dagCBOR reader: inout DagCBORReader) throws {
+        guard let value = UInt256.fromHexString(try reader.readText()) else { throw DagCBORError.invalidCBOR }
+        self = value
+    }
+
+    public func writeDagCBOR(to writer: inout DagCBORWriter) throws {
+        writer.writeText(toPrefixedHexString())
+    }
+}
 
 public extension UInt256 {
 

@@ -1,4 +1,5 @@
 import cashew
+import DagCBORMacro
 import Foundation
 import UInt256
 
@@ -10,6 +11,7 @@ import UInt256
 /// which is the root case; the node always supplies its configured chainPath.
 public let DEFAULT_ROOT_DIRECTORY = "Nexus"
 
+@DagCBORCodable
 public struct ChainSpec: Scalar {
     public let maxNumberOfTransactionsPerBlock: UInt64
     public let maxStateGrowth: Int
@@ -35,7 +37,7 @@ public struct ChainSpec: Scalar {
         case wasmPolicies
     }
 
-    enum LegacyCodingKeys: String, CodingKey {
+    enum LegacyCodingKeys: String, CaseIterable {
         case transactionFilters
         case actionFilters
     }
@@ -62,26 +64,9 @@ public struct ChainSpec: Scalar {
         self.wasmPolicies = wasmPolicies
     }
 
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
-        maxNumberOfTransactionsPerBlock = try container.decode(UInt64.self, forKey: .maxNumberOfTransactionsPerBlock)
-        maxStateGrowth = try container.decode(Int.self, forKey: .maxStateGrowth)
-        maxBlockSize = try container.decode(Int.self, forKey: .maxBlockSize)
-        premine = try container.decode(UInt64.self, forKey: .premine)
-        targetBlockTime = try container.decode(UInt64.self, forKey: .targetBlockTime)
-        initialReward = try container.decode(UInt64.self, forKey: .initialReward)
-        halvingInterval = try container.decode(UInt64.self, forKey: .halvingInterval)
-        halfLife = try container.decode(UInt64.self, forKey: .halfLife)
-        if legacyContainer.contains(.transactionFilters) || legacyContainer.contains(.actionFilters) {
-            throw DecodingError.dataCorruptedError(
-                forKey: legacyContainer.contains(.transactionFilters) ? .transactionFilters : .actionFilters,
-                in: legacyContainer,
-                debugDescription: "Legacy JavaScript filters are not supported; migrate to wasmPolicies"
-            )
-        }
-        wasmPolicies = try container.decode([WasmPolicyRef].self, forKey: .wasmPolicies)
-    }
+    /// A spec carrying the legacy JavaScript filters is refused rather than
+    /// read without them.
+    public static var refusedKeys: [String] { LegacyCodingKeys.allCases.map(\.rawValue) }
 }
 
 // MARK: - Reward Calculations
