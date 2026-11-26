@@ -64,25 +64,17 @@ public struct ChainSpec: Scalar {
         self.wasmPolicies = wasmPolicies
     }
 
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
+    /// A spec carrying the legacy JavaScript filters is refused rather than
+    /// read without them.
+    public static func checkDecoding(from decoder: any Decoder) throws {
         let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
-        maxNumberOfTransactionsPerBlock = try container.decode(UInt64.self, forKey: .maxNumberOfTransactionsPerBlock)
-        maxStateGrowth = try container.decode(Int.self, forKey: .maxStateGrowth)
-        maxBlockSize = try container.decode(Int.self, forKey: .maxBlockSize)
-        premine = try container.decode(UInt64.self, forKey: .premine)
-        targetBlockTime = try container.decode(UInt64.self, forKey: .targetBlockTime)
-        initialReward = try container.decode(UInt64.self, forKey: .initialReward)
-        halvingInterval = try container.decode(UInt64.self, forKey: .halvingInterval)
-        halfLife = try container.decode(UInt64.self, forKey: .halfLife)
-        if legacyContainer.contains(.transactionFilters) || legacyContainer.contains(.actionFilters) {
+        for key in [LegacyCodingKeys.transactionFilters, .actionFilters] where legacyContainer.contains(key) {
             throw DecodingError.dataCorruptedError(
-                forKey: legacyContainer.contains(.transactionFilters) ? .transactionFilters : .actionFilters,
+                forKey: key,
                 in: legacyContainer,
                 debugDescription: "Legacy JavaScript filters are not supported; migrate to wasmPolicies"
             )
         }
-        wasmPolicies = try container.decode([WasmPolicyRef].self, forKey: .wasmPolicies)
     }
 }
 

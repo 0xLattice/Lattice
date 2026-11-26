@@ -29,8 +29,8 @@ let BLOCK_PROPERTIES = Set([
     CHILDREN_PROPERTY,
 ])
 
-/// Its DAG-CBOR is read and written field by field (`@DagCBORCodable`): the
-/// bytes and verdicts of its `Codable` conformance, in one pass.
+/// Its DAG-CBOR and `Codable` conformances are written from its fields by
+/// `@DagCBORCodable`.
 @DagCBORCodable
 public struct Block: Hashable {
     public static let currentVersion: UInt16 = 1
@@ -90,40 +90,10 @@ public struct Block: Hashable {
         case nonce
     }
 
-    /// Decoding enforces well-formedness: a header any of whose links is not
-    /// the standard CID (`hasStandardLinks`) is not a Lattice header, so it
-    /// never becomes a `Block` — it is refused like any undecodable bytes,
-    /// never weighed, never stored.
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            version: try container.decode(UInt16.self, forKey: .version),
-            parent: try container.decodeIfPresent(VolumeImpl<Block>.self, forKey: .parent),
-            transactions: try container.decode(HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>.self, forKey: .transactions),
-            target: try container.decode(UInt256.self, forKey: .target),
-            nextTarget: try container.decode(UInt256.self, forKey: .nextTarget),
-            spec: try container.decode(VolumeImpl<ChainSpec>.self, forKey: .spec),
-            parentState: try container.decode(LatticeStateHeader.self, forKey: .parentState),
-            prevState: try container.decode(LatticeStateHeader.self, forKey: .prevState),
-            postState: try container.decode(LatticeStateHeader.self, forKey: .postState),
-            children: try container.decode(HeaderImpl<FlatDictionary<BlockHeader>>.self, forKey: .children),
-            height: try container.decode(UInt64.self, forKey: .height),
-            timestamp: try container.decode(Int64.self, forKey: .timestamp),
-            rewardRecipient: try container.decodeIfPresent(String.self, forKey: .rewardRecipient),
-            nonce: try container.decode(UInt64.self, forKey: .nonce)
-        )
-        guard hasStandardLinks else {
-            throw DecodingError.dataCorrupted(DecodingError.Context(
-                codingPath: decoder.codingPath,
-                debugDescription: "a header link is not a standard CID"
-            ))
-        }
-    }
-
     /// Structural rule: every CID link in the header — parent, transactions,
     /// spec, parent/prev/post state, children — is the standard CID
     /// (`CIDIdentity.isStandard`), plain: no encryption info. Enforced by
-    /// decoding (`init(from:)`); the child index's own links by
+    /// decoding (`checkDagCBORFields`); the child index's own links by
     /// `FlatDictionary.isWellFormed`.
     var hasStandardLinks: Bool {
         let links: [any cashew.Header] = [
@@ -214,8 +184,10 @@ extension Block: Node {
 }
 
 extension Block {
-    /// A header with a link that is not the standard CID is no block, as
-    /// `init(from:)` refuses it.
+    /// Decoding enforces well-formedness: a header any of whose links is not
+    /// the standard CID (`hasStandardLinks`) is not a Lattice header, so it
+    /// never becomes a `Block`. It is refused like any undecodable bytes,
+    /// never weighed, never stored.
     public func checkDagCBORFields() throws {
         guard hasStandardLinks else { throw DagCBORError.invalidCBOR }
     }
