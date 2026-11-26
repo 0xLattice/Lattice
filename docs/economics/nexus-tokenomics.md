@@ -1,14 +1,17 @@
 # Nexus Tokenomics
 
-This non-normative note summarizes the configured economics of Nexus, Lattice's
-single outermost chain. The concrete configuration lives in
-[`NexusGenesis.swift`](https://github.com/0xLattice/lattice-node/blob/a8fe2b8039e08c048f23da41329a2d791e64a627/Sources/LatticeNode/Architecture/NexusGenesis.swift).
+The configured economics of Nexus, Lattice's single outermost chain: its
+parameters, emission, premine and supply. This page is not normative.
+
+The configuration lives in `lattice-node`, in
+[`NexusGenesis.swift`](https://github.com/0xLattice/lattice-node/blob/main/Sources/LatticeNodeConfig/NexusGenesis.swift).
 Lattice interprets it using
 [`ChainSpec.swift`](../../Sources/LatticePrimitives/Block/ChainSpec.swift) and the generic
 [economic rules](../spec.md#10-economic-model).
 
-Do not copy a premine recipient, timestamp, or genesis CID from this page. Those
-identity-bearing values have one canonical home in `NexusGenesis.swift`.
+This page does not list the premine recipient, the genesis timestamp, or the
+genesis CID. Those identity-bearing values have one home, `NexusGenesis.swift`;
+read them there.
 
 ## Design Intent
 
@@ -34,6 +37,13 @@ not automatically inherit all Nexus hashpower or Nexus canonicity.
 | `maxBlockSize` | `1,000,000` bytes | Unique canonical block + transaction Volume bytes |
 | `maxStateGrowth` | `3,000,000` bytes | Per block |
 | `maxNumberOfTransactionsPerBlock` | `5,000` | Per block |
+
+Two parameters have similar names and unrelated jobs:
+
+| Parameter | Governs | Counts | Effect |
+|---|---|---|---|
+| `halvingInterval` | Issuance | Blocks between reward halvings | Every 876,600 blocks the block reward halves ([Emission](#emission)) |
+| `halfLife` | Difficulty | Blocks of drift per doubling of the target | When the chain runs 120 block times behind or ahead of schedule, the target doubles or halves ([Cadence](#cadence)) |
 
 There is no per-retarget clamp and no minimum-target floor: the schedule is
 absolute. A chain directory is positional path data, not a `ChainSpec` field.
@@ -96,7 +106,7 @@ The premine is exactly 10% of the closed-form limit and approximately 10% of the
 exact integer-terminated supply. The small difference is the finite tail removed
 by integer halving.
 
-## Cadence And Fees
+## Cadence
 
 Nexus retargets every block by an **absolute schedule (ASERT)** measured from
 the height-1 anchor of the block's own branch, not by a window over recent
@@ -105,24 +115,31 @@ never easier — there is no minimum-target floor and no recovery exception.
 
 The schedule holds difficulty steady at exactly one-hour spacing, and moves one
 doubling per half-life of accumulated drift, where the half-life is
-`halfLife × targetBlockTime` = 120 hours. Because the target depends only
-on the anchor and the present block, a stretch of unusual block times stops
-mattering the moment it stops happening — there is no window to drain and no
-clustered-window attractor to walk back out of. Moving a timestamp backwards
-hardens rather than eases, and moving it forwards is capped by the validating
-node's clock and eases only the single successor without compounding. See
-[specification §5.5](../spec.md#55-target-adjustment-retargeting).
+`halfLife × targetBlockTime` = 120 hours.
 
-The signed `fee` field does not automatically move value. Lattice enforces the
-block-wide non-creation bound over explicit actions. A node may require an
-explicit payer debit and construct an author credit as fee policy. See
+- Because the target depends only on the anchor and the present block, a
+  stretch of unusual block times stops mattering the moment it stops
+  happening. There is no window to drain.
+- Moving a timestamp backwards hardens the target.
+- Moving a timestamp forwards is capped by the validating node's clock and
+  eases only the single successor, without compounding.
+
+See [specification §5.5](../spec.md#55-target-adjustment-retargeting).
+
+## Fees
+
+A transaction has no fee field. Its fee is its surplus: what it debits and
+withdraws beyond what it credits and deposits. Lattice enforces the block-wide
+bound that transactions create no value, and credits the block's reward plus
+its fees to the header's `rewardRecipient`. See
 [Fee Policy And Majority-Reorg Cost](fee-market-and-51pct.md).
 
 ## Sources
 
 | Fact | Canonical home |
 |---|---|
-| Nexus parameters and genesis identity | `lattice-node/Sources/LatticeNode/Architecture/NexusGenesis.swift` |
+| Nexus parameters and genesis identity | `lattice-node/Sources/LatticeNodeConfig/NexusGenesis.swift` |
 | Reward and premine arithmetic | `Sources/LatticePrimitives/Block/ChainSpec.swift` |
 | Generic consensus rules | [Protocol specification](../spec.md) |
-| Adversarial fork-choice model | [Consensus simulator](../consensus-simulator.md#adversarial-model) |
+| Fee accounting | [Fee policy and majority-reorg cost](fee-market-and-51pct.md) |
+| Adversarial fork-choice model | [Adversarial security report](../consensus/adversarial-report.md) |

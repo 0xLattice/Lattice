@@ -1,8 +1,9 @@
 # Fee Policy And Majority-Reorg Cost
 
-This note separates consensus-enforced accounting from node fee policy, then
-gives a narrow cost model for a majority-work reorganization of Nexus. It is
-not a complete economic-security model.
+This note explains what consensus enforces about fees and what is left to
+node policy, then gives a narrow cost model for a majority-work reorganization
+of Nexus. It is not normative, and it is not a complete economic-security
+model.
 
 For issuance and supply, see [Nexus Tokenomics](nexus-tokenomics.md).
 
@@ -52,7 +53,7 @@ the hash spend; it does not net out the fees a reorganization could capture.
 | Parameter | Value |
 |---|---:|
 | Target block time `T` | `3,600` seconds |
-| Half-life | `120` blocks, about 5 days |
+| Half-life (`halfLife`, the difficulty schedule's; not the issuance `halvingInterval`) | `120` blocks, about 5 days |
 | Per-block target clamp | none (the schedule is absolute) |
 
 A block's target is `parent.nextTarget` or voluntarily harder, never easier.
@@ -103,7 +104,7 @@ secured by merged mining.
 ## Not A Complete Security Threshold
 
 Majority reorg safety is not the same as the earliest profitable deviation.
-The deterministic [adversarial model](../consensus-simulator.md#adversarial-model)
+The deterministic [adversarial security report](../consensus/adversarial-report.md)
 also models selfish mining and balancing attacks; in its assumptions, the
 selfish-mining profitability threshold is lower than the majority threshold.
 Security-budget analysis must state which attack and assumptions it prices.

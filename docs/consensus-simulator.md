@@ -1,15 +1,33 @@
 # Consensus Simulator
 
-`LatticeSim` is the deterministic simulator harness for the implemented
-Hierarchical-GHOST fork-choice path in `docs/consensus-fork-choice.md`.
+`LatticeSim` runs deterministic fork scenarios through the library's real
+fork choice. Use it to reproduce a trace, to try a fork topology of your own,
+or to regenerate the adversarial security report. The model it exercises is
+explained in [work and fork choice](consensus-fork-choice.md).
 
-Run it from a clean checkout:
+## Run It
+
+From a clean checkout:
 
 ```bash
 swift run LatticeSim --seed 42
 ```
 
-The output is sorted JSON. The same seed must produce the same trace byte-for-byte.
+This does two things:
+
+1. Prints the traces of the default scenarios to standard output as sorted
+   JSON. The same seed must produce the same trace byte-for-byte.
+2. Rewrites `docs/consensus/adversarial-report.md` and
+   `docs/consensus/adversarial-report.json`.
+
+| Option | Effect |
+|---|---|
+| `--seed <n>` | The seed, in decimal or `0x` hex. Without it the simulator's default seed is used. |
+| `--adversarial` | Runs only the adversarial report and prints it as Markdown to standard output, or writes both report files to the `--out` directory when one is given. |
+| `--out <dir>` | The directory the report files are written to. The default is `docs/consensus`. |
+
+## Default Scenarios
+
 The three default scenarios pin the chain-local edges in the current library:
 
 - equal subtree work chooses by canonical same-chain child block CID bytes only;
@@ -17,43 +35,43 @@ The three default scenarios pin the chain-local edges in the current library:
 - the 1h absolute schedule uses `ChainSpec.calculateAsertTarget` from a
   height-1 anchor, on time and running slow.
 
-For custom fixtures, `LatticeConsensusSimulator.runDiscreteEventScenario(_:)`
-accepts a `ConsensusSimScenarioSpec` with block topology, release times
-(`atMillis`), and per-block work weights. The harness turns those inputs into
-`BlockMeta` fixtures and still evaluates them through `ChainTree`.
+## Run Your Own Scenario
+
+`LatticeConsensusSimulator.runDiscreteEventScenario(_:)` accepts a
+`ConsensusSimScenarioSpec` with:
+
+- the block topology;
+- release times (`atMillis`);
+- per-block work weights.
+
+The harness turns those inputs into `BlockMeta` fixtures and evaluates them
+through `ChainTree`.
+
+## What It Does And Does Not Model
 
 The simulator does not implement a second fork-choice rule. It constructs
 `BlockMeta` fixtures and records `ChainTree.forkChoiceSnapshot(startingAt:)`,
-which wraps the library's real same-chain GHOST decision. Cross-chain proof and
-contribution derivation are tested at import rather than simulated by a live
-parent-weight provider.
+which wraps the library's real same-chain GHOST decision.
+
+Cross-chain proof and contribution derivation are tested at import. They are
+not simulated by a live parent-weight provider.
 
 ## Adversarial model
 
-The same run regenerates the checked-in adversarial report
-(`docs/consensus/adversarial-report.md` and its `.json`), and
-`ConsensusSimulatorTests` fails if the committed files differ from what the
-seed produces. Every scenario drives the real chain-local `ChainTree` fork
-choice: greatest true cumulative work first, then the smaller canonical CID of
-the competing child blocks. Parent canonicity and sibling state are not inputs.
-With seed 42 it establishes three results, as a function of the attacker's
-share `f` of this chain's root-grind contributions:
+The simulator also runs three adversarial scenarios against the real
+chain-local `ChainTree` fork choice, as a function of the attacker's share `f`
+of this chain's root-grind contributions:
 
-- **Deep reorganization.** Racing a 24-block honest segment over 200 seeded
-  trials, the attacker's reorganization probability is 0% up to `f` = 30%,
-  0.5% at 33%, 7% at 40%, 41.5% at 50%, and 89% at 60%. Deep reorganizations
-  become likely only as `f` approaches and exceeds a majority.
-- **Selfish mining.** Driving the matched-tie race through the real fork
-  choice measures a tie-break advantage of γ = 1/2: with equal targets and
-  independent hashes, either miner's block wins half the ties. At that γ the
-  Eyal–Sirer revenue share equals `f` at exactly `f` = 1/4. Above it selfish
-  mining is profitable.
-- **Balancing.** Sustaining two equal-work branches requires winning every
-  re-balancing race, so full-horizon survival scales as `f^horizon`. Over a
-  64-round horizon no tested `f` survives. This is a cost curve, not a
-  separate threshold.
+| Scenario | Question |
+|---|---|
+| Deep reorganization | How likely is an attacker to out-work a 24-block honest segment? |
+| Selfish mining | At what `f` does withholding blocks earn more than a fair share, given the tie-break advantage the fork choice measures? |
+| Balancing | How long can an attacker keep two equal-work branches alive? |
 
-The deterministic tie-break therefore costs no weight, since any strictly
-heavier branch still wins, but it sets the selfish-mining threshold at 1/4.
-Security-budget analysis must price the lower, economic threshold rather than
-the majority point, and must state which attack it prices.
+The results, and the thresholds a security budget must price, are in the
+[adversarial security report](consensus/adversarial-report.md). That report is
+generated: do not edit it by hand.
+
+To regenerate it, run `swift run LatticeSim --seed 42` and commit both files.
+`ConsensusSimulatorTests` fails if the committed files differ from what seed
+42 produces.
