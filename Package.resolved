@@ -1,5 +1,5 @@
 {
-  "originHash" : "276c6b96e2beca6dea8d3fe1b0d1fb5e374b056a329149ef52b80d26c0afcd1e",
+  "originHash" : "0d2919b9d7080f4e103e39f956b9d5c8f57ee7a98d6587a313c10827508901c0",
   "pins" : [
     {
       "identity" : "arraytrie",
@@ -15,7 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/0xLattice/cashew.git",
       "state" : {
-        "revision" : "338964500d201a8cf4e42c4f8bc5f0dfaa32e252"
+        "revision" : "926b57cc66b171b64116b7dd8a96ae8cb468378a",
+        "version" : "5.2.0"
       }
     },
     {
@@ -41,7 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/0xLattice/DagCBORKit.git",
       "state" : {
-        "revision" : "564bb49fad20c8a0c4fda0a55d5b44c467779419"
+        "revision" : "3514fbecdf4a55791fbfca950e22186199d81fcf",
+        "version" : "1.0.0"
       }
     },
     {
