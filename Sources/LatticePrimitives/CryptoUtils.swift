@@ -2,8 +2,6 @@ import Foundation
 import Crypto
 import Multikey
 import cashew
-import CID
-import Multicodec
 
 public struct CryptoUtils {
     public static let signatureDomain = "lattice-tx-v1:"
@@ -89,15 +87,11 @@ public struct CryptoUtils {
     /// sha2-256 (32-byte) CID — the shape `createAddress(from:)` produces. This
     /// is necessary but NOT sufficient: a structurally valid CID for any other
     /// content also passes. Callers that disburse value MUST additionally bind
-    /// the address to a public key via ``isAddress(_:of:)``. Decodes with the
-    /// same `CID` primitive used to *build* the address — no bespoke base32 —
-    /// and rejects non-canonical encodings (the re-encoded form must match the
-    /// input byte-for-byte).
+    /// the address to a public key via ``isAddress(_:of:)``. That shape,
+    /// spelled canonically, is exactly the standard CID
+    /// (`CIDIdentity.isStandard`).
     public static func isValidAddress(_ address: String) -> Bool {
-        guard let cid = try? CID(address) else { return false }
-        guard cid.version == .v1, cid.codec == .dag_cbor else { return false }
-        guard cid.multihash.algorithm == .sha2_256, cid.multihash.length == 32 else { return false }
-        return CIDIdentity.isCanonical(address)
+        CIDIdentity.isStandard(address)
     }
 
     /// Confirm `address` is the CID of the `PublicKey` for `publicKeyHex` — i.e.
