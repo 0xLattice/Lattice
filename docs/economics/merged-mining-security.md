@@ -28,7 +28,7 @@ dependence.
 
 One root CID is one grind with one quantity (§9.1). Along its proof the
 quantity is the target-derived work of the ROOT-MOST carrier whose target the
-hash beat, raised if greater by the terminal child's own target (§9.5). Since
+hash beat, raised if greater by the terminal child's own target (§9.1). Since
 a hit at difficulty `D` occurs with probability about `1/D` and is credited
 about `D`, every level a hash can beat adds at most one hash-equivalent in
 expectation. Let `kappa` be the expected credit per hash at the child:
@@ -271,7 +271,7 @@ model:
 - bribery, rented hashrate, or payments that change honest miners'
   subscription or template choices;
 - selfish mining or balancing attacks, whose thresholds are lower than the
-  majority one (see the [adversarial model](../consensus-simulator.md#adversarial-model));
+  majority one (see the [adversarial security report](../consensus/adversarial-report.md));
 - variance: commitments are rare, runs arrive in large discrete pieces, and
   every estimate here is an average;
 - timestamp games beyond the §5.5 bound, and their effect on block counts and

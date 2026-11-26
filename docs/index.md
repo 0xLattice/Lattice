@@ -1,57 +1,39 @@
-# Lattice Documentation
+# Lattice Library Documentation
 
-These documents are read at [lattice.build/docs](https://lattice.build/docs/), which
-publishes them at the version `lattice-node` pins. Edit them here.
-
-Lattice has two shapes that must not be confused:
-
-- one mined root commits a nested, content-addressed tree of chain candidates;
-- one Lattice process validates and chooses a tip for exactly one chain path.
-
-The node runs those processes, moves authenticated evidence between them, and
-decides what content to acquire and retain.
+The documents of the Lattice consensus library, by what each one is for. They
+are published at [lattice.build/docs](https://lattice.build/docs/) at the
+version `lattice-node` pins. Edit them here.
 
 ## Start Here
 
-1. [README](../README.md) - build the library and learn the model in one minute.
-2. [Architecture](foundational-architecture.md) - process boundaries, ownership,
-   import, recovery, and pruning.
-3. [Work and fork choice](consensus-fork-choice.md) - how verified grinds become
-   chain-local weight.
-4. [Cross-chain transfers](cross-chain.md) - a worked parent-child exchange.
-5. [Protocol specification](spec.md) - exact consensus rules.
+1. [README](../README.md): what the library is and how to build and use it.
+2. [Architecture](foundational-architecture.md): the mental model, what one
+   chain's validator owns, and what the node owns.
+3. [Work and fork choice](consensus-fork-choice.md): how verified grinds
+   become chain-local weight.
+4. [Cross-chain transfers](cross-chain.md): a worked parent-child exchange.
+5. [Protocol specification](spec.md): the exact consensus rules.
 
-Read [Philosophy](philosophy.md) for motivation and tradeoffs, not protocol
-definitions.
+Terms are defined in the
+[glossary](https://lattice.build/docs/learn/glossary/).
 
 ## Document Roles
 
-| Document | Role |
-|---|---|
-| [Protocol specification](spec.md) | Normative consensus definition |
-| [Architecture](foundational-architecture.md) | Runtime and component boundaries |
-| [Work and fork choice](consensus-fork-choice.md) | Intuitive consensus rationale |
-| [Cross-chain transfers](cross-chain.md) | Non-normative transfer walkthrough |
-| [Philosophy](philosophy.md) | Motivation, design choices, and limits |
-| `Sources/` and `Tests/` | Implementation and executable conformance evidence |
+| Document | Kind | Role |
+|---|---|---|
+| [Protocol specification](spec.md) | Reference | Normative consensus definition |
+| [Conformance vectors](../Vectors/README.md) | Reference | Test vectors for SDKs in other languages |
+| [Architecture](foundational-architecture.md) | Explanation | Validator and component boundaries |
+| [Work and fork choice](consensus-fork-choice.md) | Explanation | How work is counted and a tip is chosen |
+| [Cross-chain transfers](cross-chain.md) | Explanation | A transfer, step by step |
+| [Philosophy](philosophy.md) | Explanation | Motivation, design choices, and limits |
+| [Consensus simulator](consensus-simulator.md) | Guide | Running deterministic fork scenarios |
+| [Adversarial security report](consensus/adversarial-report.md) | Record | Generated results of the adversarial scenarios |
+| [Nexus tokenomics](economics/nexus-tokenomics.md) | Reference | Configured Nexus parameters, emission and supply |
+| [Fee policy and majority-reorg cost](economics/fee-market-and-51pct.md) | Explanation | What consensus enforces about fees; a reorg cost model |
+| [Merged-mining security of a child chain](economics/merged-mining-security.md) | Explanation | What it costs to attack a merged-mined child |
+| [Review contract](review-contract.md) | Reference | Properties a change to the library must keep |
+| `Sources/` and `Tests/` | | Implementation and executable conformance evidence |
 
-A disagreement between these layers is a defect to resolve, not wording to
-paper over.
-
-## Mental Model
-
-A recursive content DAG supplies sparse evidence to independent chain-local
-forests, each owned by one node-supervised process. The
-[architecture guide](foundational-architecture.md) develops those three
-structures and their ownership boundaries.
-
-## Vocabulary
-
-Terms are defined in the [glossary](https://lattice.build/docs/learn/glossary/).
-
-## Reference
-
-- [Consensus simulator](consensus-simulator.md)
-- [Nexus tokenomics](economics/nexus-tokenomics.md)
-- [Fee policy and majority-reorg model](economics/fee-market-and-51pct.md)
-- [Merged-mining security of a child chain](economics/merged-mining-security.md)
+Only the specification is normative. A disagreement between it, the other
+documents and the code is a defect to resolve, not wording to paper over.
