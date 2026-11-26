@@ -25,9 +25,9 @@ let package = Package(
         // decide validity.
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1"),
         .package(url: "https://github.com/0xLattice/Multikey.git", exact: "1.0.0"),
-        .package(url: "https://github.com/0xLattice/cashew.git", revision: "6942a87ab604079c8d4af9665609616d51a469d1"),
+        .package(url: "https://github.com/0xLattice/cashew.git", revision: "7f3f4d5e5b0a18f8c6e5ecf9613f7e04d64b3d16"),
         // `@DagCBORCodable` writes the bytes that name blocks and state.
-        .package(url: "https://github.com/0xLattice/DagCBORKit.git", revision: "bc231618f918d34d0f8d465a7e6b7444daf5701f"),
+        .package(url: "https://github.com/0xLattice/DagCBORKit.git", revision: "05dc3b39e3cbbd4f772bdbab2b3b36a4ca5db7f3"),
         // Exact: UInt256's hex encoding is in the proof-of-work preimage, and
         // swift-cid and swift-multicodec fix the CID bytes that identity and
         // tie-breaks compare.
