@@ -37,7 +37,7 @@ public struct ChainSpec: Scalar {
         case wasmPolicies
     }
 
-    enum LegacyCodingKeys: String, CodingKey {
+    enum LegacyCodingKeys: String, CaseIterable {
         case transactionFilters
         case actionFilters
     }
@@ -66,16 +66,7 @@ public struct ChainSpec: Scalar {
 
     /// A spec carrying the legacy JavaScript filters is refused rather than
     /// read without them.
-    public static func checkDecoding(from decoder: any Decoder) throws {
-        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
-        for key in [LegacyCodingKeys.transactionFilters, .actionFilters] where legacyContainer.contains(key) {
-            throw DecodingError.dataCorruptedError(
-                forKey: key,
-                in: legacyContainer,
-                debugDescription: "Legacy JavaScript filters are not supported; migrate to wasmPolicies"
-            )
-        }
-    }
+    public static var refusedKeys: [String] { LegacyCodingKeys.allCases.map(\.rawValue) }
 }
 
 // MARK: - Reward Calculations
