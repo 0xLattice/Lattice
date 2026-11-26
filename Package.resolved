@@ -1,5 +1,5 @@
 {
-  "originHash" : "f2070683d0c148c40dcbef820dcf857e4a9f8e0e162dc5e00f32b7991101e6a9",
+  "originHash" : "a408f73f55e4980b4cf94b82bc0c35ff650f56c883a8e0cb382180ba64324e0a",
   "pins" : [
     {
       "identity" : "arraytrie",
@@ -15,8 +15,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/0xLattice/cashew.git",
       "state" : {
-        "revision" : "6fd683690c44ae4875c201f6188d93290bec5b28",
-        "version" : "5.1.0"
+        "revision" : "10d3e16dadbe6b9ffcc95e7e1d95fa9dc31b41b2"
       }
     },
     {
@@ -35,6 +34,14 @@
       "state" : {
         "revision" : "f2a627b84c1ff96f21ac2fcb623ab36142dd5512",
         "version" : "1.10.0"
+      }
+    },
+    {
+      "identity" : "dagcborkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/0xLattice/DagCBORKit.git",
+      "state" : {
+        "revision" : "2dbe6190bd0087cb6fc445b084c8b5686670fbd4"
       }
     },
     {
@@ -152,6 +159,15 @@
       "state" : {
         "revision" : "77b84ac2cd2ac9e4ac67d19f045fd5b434f56967",
         "version" : "2.101.0"
+      }
+    },
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
+      "state" : {
+        "revision" : "050f1a346fbbac0ca2cfb15a95274f7bd1cf0ccf",
+        "version" : "604.0.0"
       }
     },
     {

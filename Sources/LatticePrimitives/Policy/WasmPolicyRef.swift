@@ -1,5 +1,6 @@
 import Foundation
 import cashew
+import DagCBORMacro
 
 public typealias WasmPolicyModuleHeader = VolumeImpl<WasmPolicyModule>
 
@@ -11,8 +12,9 @@ public struct WasmPolicyModule: Scalar {
     }
 }
 
+@DagCBORCodable
 public struct WasmPolicyRef: Codable, Hashable, Sendable {
-    public enum Scope: String, Codable, Hashable, Sendable {
+    public enum Scope: String, Codable, Hashable, Sendable, DagCBORCodable {
         case transaction
         case action
     }

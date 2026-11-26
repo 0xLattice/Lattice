@@ -1,4 +1,5 @@
 import cashew
+import DagCBORMacro
 import Foundation
 
 let ACCOUNT_STATE_PROPERTY = "accountState"
@@ -13,6 +14,7 @@ let LATTICE_STATE_PROPERTIES: Set<String> = Set([
     RECEIPT_STATE_PROPERTY
 ])
 
+@DagCBORCodable
 public struct LatticeState: Node {
     public let accountState: AccountStateHeader
     public let generalState: GeneralStateHeader

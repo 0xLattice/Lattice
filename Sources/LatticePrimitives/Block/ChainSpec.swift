@@ -1,4 +1,5 @@
 import cashew
+import DagCBORMacro
 import Foundation
 import UInt256
 
@@ -10,6 +11,7 @@ import UInt256
 /// which is the root case; the node always supplies its configured chainPath.
 public let DEFAULT_ROOT_DIRECTORY = "Nexus"
 
+@DagCBORCodable
 public struct ChainSpec: Scalar {
     public let maxNumberOfTransactionsPerBlock: UInt64
     public let maxStateGrowth: Int
