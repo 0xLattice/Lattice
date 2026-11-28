@@ -48,6 +48,23 @@ package actor BlockContentByteCounter: VolumeStorer, Storer {
     }
 
     func total() -> Int { byteCount }
+
+    /// The CIDs among `cids` not counted yet.
+    func uncounted(_ cids: some Sequence<String>) -> [String] {
+        cids.filter { dataByCID[$0] == nil }
+    }
+}
+
+/// A block's transaction index resolved through `counter`, which counted
+/// the bytes it fetched (`Block.resolveTransactionBodies`).
+package struct CountedTransactions: Sendable {
+    package let transactions: HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>
+    package let counter: BlockContentByteCounter
+
+    package init(transactions: HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>, counter: BlockContentByteCounter) {
+        self.transactions = transactions
+        self.counter = counter
+    }
 }
 
 public extension Block {
@@ -159,30 +176,51 @@ public extension Block {
     /// `logicalContentByteSize`, with the counter's own failure returned
     /// rather than thrown: whatever this throws came from the fetcher or the
     /// content and is not a size result.
+    ///
+    /// `counted` is the block's transaction index already resolved through a
+    /// counter with the same `limit`: the walk then goes on from that counter
+    /// and resolves only the child index.
     package func measureLogicalContent(
         fetcher: any Fetcher,
-        limit: Int
+        limit: Int,
+        counted: CountedTransactions? = nil
     ) async throws -> Result<Int, BlockContentSizeError> {
-        let counter = BlockContentByteCounter(limit: limit)
+        let counter = counted?.counter ?? BlockContentByteCounter(limit: limit)
         do {
-            let resolved = try await VolumeImpl<Block>(node: self).resolve(
-                paths: [
-                    [TRANSACTIONS_PROPERTY]: .recursive,
-                    [CHILDREN_PROPERTY]: .targeted,
-                ],
-                fetcher: fetcher,
-                cache: counter
-            )
+            // One walk of the closure: what it fetches is counted as it is
+            // fetched, and only what was already loaded is serialized.
+            var paths: [[String]: ResolutionStrategy] = [[CHILDREN_PROPERTY]: .targeted]
+            if counted == nil { paths[[TRANSACTIONS_PROPERTY]] = .recursive }
+            let resolved = try await VolumeImpl<Block>(node: self).resolve(paths: paths, fetcher: fetcher, cache: counter)
             guard let block = resolved.node else { throw DataErrors.nodeNotAvailable }
-            try await VolumeImpl<Block>(node: block).store(
-                paths: [[TRANSACTIONS_PROPERTY]: .recursive],
-                storer: counter
-            )
+            var closure: [String: any Header] = [:]
+            Self.collect(resolved, beneath: false, into: &closure)
+            Self.collect(block.children, beneath: false, into: &closure)
+            Self.collect(counted?.transactions ?? block.transactions, beneath: true, into: &closure)
+            var loaded: [String: Data] = [:]
+            for cid in await counter.uncounted(closure.keys) {
+                loaded[cid] = try closure[cid]!.mapToData()
+            }
+            try await counter.store(entries: loaded)
         } catch {
             if let failure = await counter.failure { return .failure(failure) }
             throw error
         }
         return .success(await counter.total())
+    }
+
+    /// `header`, and with `beneath` everything under it, by CID: the loaded
+    /// part of the closure `measureLogicalContent` counts.
+    private static func collect(_ header: any Header, beneath: Bool, into closure: inout [String: any Header]) {
+        guard let node = header.node else { return }
+        closure[header.rawCID] = header
+        guard beneath else { return }
+        for property in node.properties() {
+            if let child = node.get(property: property) { collect(child, beneath: true, into: &closure) }
+        }
+        if let radix = node as? any RadixNode, let value = radix.value as? any Header {
+            collect(value, beneath: true, into: &closure)
+        }
     }
 }
 

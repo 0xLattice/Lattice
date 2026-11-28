@@ -33,7 +33,6 @@ public extension AccountStateHeader {
             accountActions: allAccountActions,
             receiptActions: allReceiptActions
         )
-        let ownerOrder = netDeltas.keys.sorted()
 
         // Group transactions by their first signer and validate each such
         // signer's contiguous nonce sequence. Co-signers' nonces are not
@@ -60,27 +59,38 @@ public extension AccountStateHeader {
 
         if netDeltas.isEmpty && signerOrder.isEmpty { return (self, .empty, 0) }
 
-        // Resolve targeted paths to read current balances + current nonces
-        var resolvePaths = [[String]: ResolutionStrategy]()
-        for owner in ownerOrder {
+        // Read and write every balance and nonce in one walk of the trie.
+        var keys: [String] = []
+        for owner in netDeltas.keys {
             guard !Self.isReservedAccountKey(owner) else { throw StateErrors.conflictingActions }
-            resolvePaths[[owner]] = .targeted
+            keys.append(owner)
         }
+        var nonceSigners: [String: String] = [:]
         for signer in signerOrder {
-            resolvePaths[[Self.nonceTrackingKey(signer)]] = .targeted
+            let nonceKey = Self.nonceTrackingKey(signer)
+            nonceSigners[nonceKey] = signer
+            keys.append(nonceKey)
         }
-        let resolved = try await resolve(paths: resolvePaths, fetcher: fetcher)
 
-        var proofs = [[String]: SparseMerkleProof]()
-        var transforms = [[String]: Transform]()
         var growth = 0
-
-        for owner in ownerOrder {
-            let delta = netDeltas[owner]!
-            let current: UInt64 = resolved.node.flatMap({ try? $0.get(key: owner) }) ?? 0
-
+        let update = try await updating(keys: keys, fetcher: fetcher) { key, stored in
+            if let signer = nonceSigners[key] {
+                // groups[signer]! and sorted.first!/.last! are safe: signerOrder only
+                // gains a signer when `groups[signer] == nil` and at least one tx is
+                // appended in the same loop above, so every entry is present and non-empty.
+                let sorted = groups[signer]!
+                let expectedFirst = try Self.nextExpectedNonce(afterStored: stored)
+                guard sorted.first!.nonce == expectedFirst else {
+                    throw StateErrors.nonceGap
+                }
+                let newNonce = sorted.last!.nonce
+                if stored != nil { return .update(newNonce) }
+                growth += key.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
+                return .insert(newNonce)
+            }
+            let current = stored ?? 0
             let newBalance: UInt64
-            switch delta {
+            switch netDeltas[key]! {
             case .debit(let debit):
                 guard current >= debit else { throw StateErrors.insufficientBalance }
                 newBalance = current - debit
@@ -89,50 +99,18 @@ public extension AccountStateHeader {
                 guard !overflow else { throw StateErrors.balanceOverflow }
                 newBalance = result
             }
-
             if current == 0 && newBalance > 0 {
-                proofs[[owner]] = .insertion
-                transforms[[owner]] = .insert(String(newBalance))
-                growth += owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
+                growth += key.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
+                return .insert(newBalance)
             } else if current > 0 && newBalance == 0 {
-                proofs[[owner]] = .deletion
-                transforms[[owner]] = .delete
-                growth -= owner.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
+                growth -= key.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
+                return .delete
             } else if current > 0 && newBalance > 0 {
-                proofs[[owner]] = .mutation
-                transforms[[owner]] = .update(String(newBalance))
+                return .update(newBalance)
             }
             // current == 0 && newBalance == 0 → no-op
+            return .keep
         }
-
-        for signer in signerOrder {
-            // groups[signer]! and sorted.first!/.last! are safe: signerOrder only
-            // gains a signer when `groups[signer] == nil` and at least one tx is
-            // appended in the same loop above, so every entry is present and non-empty.
-            let sorted = groups[signer]!
-            let nonceKey = Self.nonceTrackingKey(signer)
-            let currentNonce: UInt64? = resolved.node.flatMap { try? $0.get(key: nonceKey) }
-            let expectedFirst = try Self.nextExpectedNonce(afterStored: currentNonce)
-            guard sorted.first!.nonce == expectedFirst else {
-                throw StateErrors.nonceGap
-            }
-            let newNonce = sorted.last!.nonce
-            if currentNonce != nil {
-                proofs[[nonceKey]] = .mutation
-                transforms[[nonceKey]] = .update(String(newNonce))
-            } else {
-                proofs[[nonceKey]] = .insertion
-                transforms[[nonceKey]] = .insert(String(newNonce))
-                growth += nonceKey.utf8.count + ACCOUNT_ENTRY_VALUE_BYTES
-            }
-        }
-
-        if proofs.isEmpty { return (resolved, .empty, growth) }
-
-        let proven = try await resolved.proof(paths: proofs, fetcher: fetcher)
-        guard let result = try proven.transform(transforms: transforms) else {
-            throw TransformErrors.transformFailed("account state transform returned nil")
-        }
-        return (result, diffCIDs(old: proven, new: result), growth)
+        return (update.header, StateDiff(cidChanges: update.cidChanges), growth)
     }
 }
