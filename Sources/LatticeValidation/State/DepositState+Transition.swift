@@ -16,50 +16,30 @@ public extension DepositStateHeader {
     /// nullifier and prevents an old receipt from consuming a recreated deposit.
     func proveAndSpendForWithdrawals(allWithdrawalActions: [WithdrawalAction], fetcher: Fetcher) async throws -> (DepositStateHeader, StateDiff) {
         if allWithdrawalActions.isEmpty { return (self, .empty) }
-        var seenKeys = Set<String>()
-        var resolvePaths = [[String]: ResolutionStrategy]()
+        var withdrawn: [String: UInt64] = [:]
         for wa in allWithdrawalActions {
             let key = DepositKey(withdrawalAction: wa).description
-            if !seenKeys.insert(key).inserted { throw StateErrors.conflictingActions }
-            resolvePaths[[key]] = .targeted
+            if withdrawn.updateValue(wa.amountWithdrawn, forKey: key) != nil { throw StateErrors.conflictingActions }
         }
-        let resolved = try await resolve(paths: resolvePaths, fetcher: fetcher)
-        var proofs = [[String]: SparseMerkleProof]()
-        var transforms = [[String]: Transform]()
-        for wa in allWithdrawalActions {
-            let key = DepositKey(withdrawalAction: wa).description
-            guard let node = resolved.node, let storedDeposited: UInt64 = try? node.get(key: key) else {
-                throw StateErrors.conflictingActions
-            }
-            if storedDeposited != wa.amountWithdrawn { throw StateErrors.conflictingActions }
-            proofs[[key]] = .mutation
-            transforms[[key]] = .update(String(SPENT_DEPOSIT_MARKER))
+        // Each deposit must hold exactly the amount withdrawn; it is marked spent.
+        let update = try await updating(keys: withdrawn.keys, fetcher: fetcher) { key, stored in
+            guard let stored, stored == withdrawn[key]! else { throw StateErrors.conflictingActions }
+            return .update(SPENT_DEPOSIT_MARKER)
         }
-        if proofs.isEmpty { return (self, .empty) }
-        let proven = try await proof(paths: proofs, fetcher: fetcher)
-        guard let result = try proven.transform(transforms: transforms) else {
-            throw TransformErrors.transformFailed("deposit spend transform returned nil")
-        }
-        return (result, diffCIDs(old: proven, new: result))
+        return (update.header, StateDiff(cidChanges: update.cidChanges))
     }
 
     func proveAndUpdateState(allDepositActions: [DepositAction], fetcher: Fetcher) async throws -> (DepositStateHeader, StateDiff) {
         if allDepositActions.isEmpty { return (self, .empty) }
-        var proofs = [[String]: SparseMerkleProof]()
+        var deposited: [String: UInt64] = [:]
         for depositAction in allDepositActions {
             if depositAction.amountDeposited == 0 { throw StateErrors.conflictingActions }
             if depositAction.amountDemanded == 0 { throw StateErrors.conflictingActions }
             let depositKey = DepositKey(depositAction: depositAction).description
-            if proofs[[depositKey]] != nil { throw StateErrors.conflictingActions }
-            proofs[[depositKey]] = .insertion
+            if deposited.updateValue(depositAction.amountDeposited, forKey: depositKey) != nil { throw StateErrors.conflictingActions }
         }
-        let proven = try await proof(paths: proofs, fetcher: fetcher)
-        var transforms = [[String]: Transform]()
-        for depositAction in allDepositActions {
-            let depositKey = DepositKey(depositAction: depositAction).description
-            transforms[[depositKey]] = .insert(String(depositAction.amountDeposited))
-        }
-        guard let transformResult = try proven.transform(transforms: transforms) else { throw TransformErrors.transformFailed("transform returned nil") }
-        return (transformResult, diffCIDs(old: proven, new: transformResult))
+        // A deposit's key must be new.
+        let update = try await updating(keys: deposited.keys, fetcher: fetcher) { key, _ in .insert(deposited[key]!) }
+        return (update.header, StateDiff(cidChanges: update.cidChanges))
     }
 }

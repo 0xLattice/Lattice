@@ -28,21 +28,15 @@ public extension ReceiptStateHeader {
 
     func proveAndUpdateState(allReceiptActions: [ReceiptAction], fetcher: Fetcher) async throws -> (ReceiptStateHeader, StateDiff) {
         if allReceiptActions.isEmpty { return (self, .empty) }
-        var proofs = [[String]: SparseMerkleProof]()
+        var withdrawers: [String: String] = [:]
         for receiptAction in allReceiptActions {
             let receiptKey = ReceiptKey(receiptAction: receiptAction)
-            if proofs[[receiptKey.storageKey]] != nil {
+            if withdrawers.updateValue(receiptAction.withdrawer, forKey: receiptKey.storageKey) != nil {
                 throw StateErrors.conflictingActions
             }
-            proofs[[receiptKey.storageKey]] = .insertion
         }
-        let proven = try await proof(paths: proofs, fetcher: fetcher)
-        var transforms = [[String]: Transform]()
-        for receiptAction in allReceiptActions {
-            let receiptKey = ReceiptKey(receiptAction: receiptAction)
-            transforms[[receiptKey.storageKey]] = .insert(receiptAction.withdrawer)
-        }
-        guard let transformResult = try proven.transform(transforms: transforms) else { throw TransformErrors.transformFailed("transform returned nil") }
-        return (transformResult, diffCIDs(old: proven, new: transformResult))
+        // A receipt's key must be new.
+        let update = try await updating(keys: withdrawers.keys, fetcher: fetcher) { key, _ in .insert(withdrawers[key]!) }
+        return (update.header, StateDiff(cidChanges: update.cidChanges))
     }
 }

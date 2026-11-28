@@ -137,7 +137,7 @@ public extension Block {
         // verdict whether or not the transactions can be had.
         guard let specNode = try await spec.resolve(fetcher: fetcher).node else { return (false, .empty, nil) }
         guard specNode.isValid else { return (false, .empty, nil) }
-        guard let transactionBodies = try await resolveTransactionBodies(fetcher: fetcher, maxBlockSize: specNode.maxBlockSize, validator: { tx in
+        guard let (transactionBodies, counted) = try await resolveCountedTransactionBodies(fetcher: fetcher, maxBlockSize: specNode.maxBlockSize, validator: { tx in
             try await tx.validateTransactionForGenesis(fetcher: fetcher)
         }) else { return (false, .empty, nil) }
         guard chainPath.first == DEFAULT_ROOT_DIRECTORY else {
@@ -158,7 +158,7 @@ public extension Block {
         if !(try await TransactionBody.batchVerifyPolicies(bodies: transactionBodies, spec: specNode, chainPath: chainPath, height: height, timestamp: timestamp, fetcher: fetcher)) { return (false, .empty, nil) }
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
-        if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
+        if try await !validateBlockSize(spec: specNode, fetcher: fetcher, counted: counted) {
             return (false, .empty, nil)
         }
         let allAccountActions = transactionBodies.flatMap { $0.accountActions }
@@ -387,11 +387,11 @@ public extension Block {
         // ancestor CAS walk are completely independent — overlapping them eliminates
         // one sequential wait from the block validation critical path.
         let txResolveFetcher = fetcher
-        async let txBodiesFuture: [TransactionBody]? = {
+        async let txBodiesFuture = {
             let validator: @Sendable (Transaction) async throws -> Bool = { tx in
                 try await tx.validateTransactionForNexus(fetcher: txResolveFetcher)
             }
-            return try await resolveTransactionBodies(fetcher: txResolveFetcher, maxBlockSize: specNode.maxBlockSize, validator: validator)
+            return try await resolveCountedTransactionBodies(fetcher: txResolveFetcher, maxBlockSize: specNode.maxBlockSize, validator: validator)
         }()
 
         if !(try await validateTimestampAndNextTarget(
@@ -403,13 +403,13 @@ public extension Block {
             validationContext: validationContext
         )) { return (false, .empty, nil) }
 
-        guard let transactionBodies = try await txBodiesFuture else { return (false, .empty, nil) }
+        guard let (transactionBodies, counted) = try await txBodiesFuture else { return (false, .empty, nil) }
 
         // Directory is positional (the anchor context / chainPath), not in the
         // spec; nil chainPath ⇒ root.
         if !validateMaxTransactionCount(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
         if try !validateStateGrowthFloor(spec: specNode, transactionBodies: transactionBodies) { return (false, .empty, nil) }
-        if try await !validateBlockSize(spec: specNode, fetcher: fetcher) {
+        if try await !validateBlockSize(spec: specNode, fetcher: fetcher, counted: counted) {
             return (false, .empty, nil)
         }
         if !validateChainPaths(transactionBodies: transactionBodies, expectedPath: expectedChainPath) { return (false, .empty, nil) }
@@ -665,9 +665,19 @@ public extension Block {
         spec: ChainSpec,
         fetcher: any Fetcher
     ) async throws -> Bool {
+        try await validateBlockSize(spec: spec, fetcher: fetcher, counted: nil)
+    }
+
+    /// `validateBlockSize`, going on from the transaction index
+    /// `resolveCountedTransactionBodies` already counted.
+    package func validateBlockSize(
+        spec: ChainSpec,
+        fetcher: any Fetcher,
+        counted: CountedTransactions?
+    ) async throws -> Bool {
         // Only the counter's own result is a verdict: an error a fetcher
         // throws, of whatever type, is thrown on and decides nothing.
-        if case .success = try await measureLogicalContent(fetcher: fetcher, limit: spec.maxBlockSize) {
+        if case .success = try await measureLogicalContent(fetcher: fetcher, limit: spec.maxBlockSize, counted: counted) {
             return true
         }
         return false
@@ -748,6 +758,12 @@ public extension Block {
     /// the block is invalid (nil) and nothing further is requested. The exact
     /// rule, over the whole counted content, is `validateBlockSize`.
     func resolveTransactionBodies(fetcher: Fetcher, maxBlockSize: Int = .max, validator: @escaping @Sendable (Transaction) async throws -> Bool) async throws -> [TransactionBody]? {
+        try await resolveCountedTransactionBodies(fetcher: fetcher, maxBlockSize: maxBlockSize, validator: validator)?.bodies
+    }
+
+    /// `resolveTransactionBodies`, and the transaction index it resolved with
+    /// the counter that counted it, for `validateBlockSize` to go on from.
+    package func resolveCountedTransactionBodies(fetcher: Fetcher, maxBlockSize: Int, validator: @escaping @Sendable (Transaction) async throws -> Bool) async throws -> (bodies: [TransactionBody], counted: CountedTransactions)? {
         let counter = BlockContentByteCounter(limit: maxBlockSize)
         let resolved: HeaderImpl<MerkleDictionaryImpl<VolumeImpl<Transaction>>>
         do {
@@ -763,7 +779,7 @@ public extension Block {
         if try await txs.concurrentMap({ try await validator($0) }).contains(false) { return nil }
         let transactionBodiesMaybe = txs.map { $0.body.node }
         if transactionBodiesMaybe.contains(where: { $0 == nil }) { throw ValidationErrors.transactionNotResolved }
-        return transactionBodiesMaybe.map { $0! }
+        return (transactionBodiesMaybe.map { $0! }, CountedTransactions(transactions: resolved, counter: counter))
     }
 
 

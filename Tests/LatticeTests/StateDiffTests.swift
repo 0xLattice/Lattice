@@ -13,20 +13,7 @@ private func makeFetcher() -> StorableFetcher { StorableFetcher() }
 @MainActor
 final class StateDiffTests: XCTestCase {
 
-    // MARK: - diffCIDs fundamentals
-
-    func testIdenticalHeadersProduceEmptyDiff() async throws {
-        let fetcher = makeFetcher()
-        var dict = AccountState()
-        dict = try dict.inserting(key: "alice", value: 100)
-        let header = try! AccountStateHeader(node: dict)
-        try await header.storeRecursively(storer: fetcher)
-
-        let diff = diffCIDs(old: header, new: header)
-        XCTAssertTrue(diff.isEmpty)
-        XCTAssertTrue(diff.replaced.isEmpty)
-        XCTAssertTrue(diff.created.isEmpty)
-    }
+    // MARK: - A transition's diff
 
     func testSingleInsertionIntoEmptyTrie() async throws {
         let fetcher = makeFetcher()
@@ -57,19 +44,16 @@ final class StateDiffTests: XCTestCase {
         let header = try! AccountStateHeader(node: dict)
         try await header.storeRecursively(storer: fetcher)
 
-        let resolved = try await header.resolve(fetcher: fetcher)
-        let proven = try await resolved.proof(paths: [["alice"]: .mutation], fetcher: fetcher)
-        guard let result = try proven.transform(transforms: [["alice"]: .update("200")]) else {
-            return XCTFail("transform returned nil")
-        }
-
-        let diff = diffCIDs(old: proven, new: result)
+        let (result, diff) = try await AccountStateHeader(rawCID: header.rawCID).proveAndUpdateState(
+            allAccountActions: [AccountAction(owner: "alice", delta: 150)],
+            fetcher: fetcher
+        )
         XCTAssertFalse(diff.replaced.isEmpty, "mutation should replace old path CIDs")
         XCTAssertFalse(diff.created.isEmpty, "mutation should create new path CIDs")
         XCTAssertEqual(diff.replaced.count, diff.created.count,
             "mutation modifies the same # of nodes on the path (old → new)")
 
-        XCTAssertTrue(diff.replaced.keys.contains(proven.rawCID))
+        XCTAssertTrue(diff.replaced.keys.contains(header.rawCID))
         XCTAssertTrue(diff.created.keys.contains(result.rawCID))
 
         let overlap = Set(diff.replaced.keys).intersection(diff.created.keys)
@@ -84,13 +68,10 @@ final class StateDiffTests: XCTestCase {
         let header = try! AccountStateHeader(node: dict)
         try await header.storeRecursively(storer: fetcher)
 
-        let resolved = try await header.resolve(paths: [["alice"]: .targeted], fetcher: fetcher)
-        let proven = try await resolved.proof(paths: [["alice"]: .deletion], fetcher: fetcher)
-        guard let result = try proven.transform(transforms: [["alice"]: .delete]) else {
-            return XCTFail("transform returned nil")
-        }
-
-        let diff = diffCIDs(old: proven, new: result)
+        let (_, diff) = try await AccountStateHeader(rawCID: header.rawCID).proveAndUpdateState(
+            allAccountActions: [AccountAction(owner: "alice", delta: -100)],
+            fetcher: fetcher
+        )
         XCTAssertFalse(diff.replaced.isEmpty, "deletion should have replaced CIDs")
         XCTAssertTrue(diff.replaced.count > diff.created.count,
             "deletion removes more nodes than it creates")
@@ -103,12 +84,10 @@ final class StateDiffTests: XCTestCase {
         let header = try! AccountStateHeader(node: dict)
         try await header.storeRecursively(storer: fetcher)
 
-        let proven = try await header.proof(paths: [["bob"]: .insertion], fetcher: fetcher)
-        guard let result = try proven.transform(transforms: [["bob"]: .insert("200")]) else {
-            return XCTFail("transform returned nil")
-        }
-
-        let diff = diffCIDs(old: proven, new: result)
+        let (_, diff) = try await AccountStateHeader(rawCID: header.rawCID).proveAndUpdateState(
+            allAccountActions: [AccountAction(owner: "bob", delta: 200)],
+            fetcher: fetcher
+        )
         XCTAssertTrue(diff.created.count > diff.replaced.count,
             "insertion creates more nodes than it replaces (new leaf + potentially new internal)")
     }
@@ -561,29 +540,6 @@ final class StateDiffTests: XCTestCase {
             )
             XCTFail("a spent deposit identity must not be withdrawn twice")
         } catch StateErrors.conflictingActions {}
-    }
-
-    // MARK: - Stub headers (node == nil)
-
-    func testDiffWithOneStubHeader() async {
-        let stub = AccountStateHeader(rawCID: "stubcid")
-        let materialized = try! AccountStateHeader(node: AccountState())
-
-        let diff1 = diffCIDs(old: stub, new: materialized)
-        XCTAssertTrue(diff1.replaced.isEmpty, "stub old has no node → nothing replaced")
-        XCTAssertFalse(diff1.created.isEmpty)
-
-        let diff2 = diffCIDs(old: materialized, new: stub)
-        XCTAssertFalse(diff2.replaced.isEmpty)
-        XCTAssertTrue(diff2.created.isEmpty, "stub new has no node → nothing created")
-    }
-
-    func testDiffBetweenTwoStubs() async {
-        let a = AccountStateHeader(rawCID: "cid_a")
-        let b = AccountStateHeader(rawCID: "cid_b")
-        let diff = diffCIDs(old: a, new: b)
-        XCTAssertTrue(diff.replaced.isEmpty)
-        XCTAssertTrue(diff.created.isEmpty)
     }
 
     // MARK: - Large trie single-key mutation (stress O(log n))

@@ -5,47 +5,33 @@ public extension GeneralStateHeader {
     func proveAndUpdateState(allActions: [Action], fetcher: Fetcher) async throws -> (GeneralStateHeader, StateDiff) {
         if allActions.isEmpty { return (self, .empty) }
 
-        // Determine proof types and build transforms from action semantics.
-        // An assert (`isAssert`) writes nothing, so it takes no proof or
-        // transform. Asserts never conflict with each other; a key written in
-        // the block may not also be asserted, so every assert still holds
-        // after the block (no write skew), and order is irrelevant.
-        var proofs = [[String]: SparseMerkleProof]()
-        var transforms = [[String]: Transform]()
+        // Each write from its action. An assert (`isAssert`) writes nothing.
+        // Asserts never conflict with each other; a key written in the block
+        // may not also be asserted, so every assert still holds after the
+        // block (no write skew), and order is irrelevant.
+        var writes: [String: KeyChange<String>] = [:]
         var asserted = Set<String>()
         for action in allActions {
             if action.isAssert { asserted.insert(action.key); continue }
-            if proofs[[action.key]] != nil { throw StateErrors.conflictingActions }
-            if action.newValue == nil {
-                proofs[[action.key]] = .deletion
-                transforms[[action.key]] = .delete
-            } else if action.oldValue == nil {
-                proofs[[action.key]] = .insertion
-                transforms[[action.key]] = .insert(action.newValue!)
+            let write: KeyChange<String> = if let newValue = action.newValue {
+                action.oldValue == nil ? .insert(newValue) : .update(newValue)
             } else {
-                proofs[[action.key]] = .mutation
-                transforms[[action.key]] = .update(action.newValue!)
+                .delete
             }
+            if writes.updateValue(write, forKey: action.key) != nil { throw StateErrors.conflictingActions }
         }
+        if asserted.contains(where: { writes[$0] != nil }) { throw StateErrors.conflictingActions }
 
-        if asserted.contains(where: { proofs[[$0]] != nil }) { throw StateErrors.conflictingActions }
-
-        // Resolve targeted paths to validate current values against declared oldValues
-        var resolvePaths = [[String]: ResolutionStrategy]()
-        for action in allActions {
-            resolvePaths[[action.key]] = .targeted
-        }
-        let resolved = try await resolve(paths: resolvePaths, fetcher: fetcher)
-
-        if let dictNode = resolved.node {
-            for action in allActions {
+        // Read every key in one walk, each action's declared oldValue checked
+        // against the value stored, and write the key the block writes.
+        var actionsByKey: [String: [Action]] = [:]
+        for action in allActions { actionsByKey[action.key, default: []].append(action) }
+        let update = try await updating(keys: actionsByKey.keys, fetcher: fetcher) { key, actual in
+            for action in actionsByKey[key]! {
                 if action.oldValue == nil {
-                    let existing: String? = try? dictNode.get(key: action.key)
-                    if existing != nil { throw StateErrors.conflictingActions }
+                    if actual != nil { throw StateErrors.conflictingActions }
                 } else {
-                    guard let actual: String = try? dictNode.get(key: action.key) else {
-                        throw StateErrors.conflictingActions
-                    }
+                    guard let actual else { throw StateErrors.conflictingActions }
                     // Bytes, not String ==: canonical equivalence depends on
                     // the runtime's Unicode tables, which differ across nodes.
                     guard actual.utf8.elementsEqual(action.oldValue!.utf8) else {
@@ -53,14 +39,8 @@ public extension GeneralStateHeader {
                     }
                 }
             }
+            return writes[key] ?? .keep
         }
-
-        if proofs.isEmpty { return (self, .empty) }
-
-        let proven = try await resolved.proof(paths: proofs, fetcher: fetcher)
-        guard let result = try proven.transform(transforms: transforms) else {
-            throw TransformErrors.transformFailed("general state transform returned nil")
-        }
-        return (result, diffCIDs(old: proven, new: result))
+        return (update.header, StateDiff(cidChanges: update.cidChanges))
     }
 }
